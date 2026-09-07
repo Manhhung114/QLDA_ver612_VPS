@@ -78,6 +78,39 @@ class AILiveContextTests(unittest.TestCase):
             self.assertIn("RFI_001.pdf", snapshot)
             self.assertIn("RFI-001", snapshot)
             self.assertIn("[UPLOAD:BOQ] file=BOQ_S234.xlsx", snapshot)
+            self.assertIn("AI truy vấn trên toàn bộ 2 dòng", snapshot)
+
+    def test_specific_boq_query_finds_rows_outside_legacy_first_60(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "qlda_ai_boq_search.db"
+            db = CloudDatabase(db_path)
+            pid = db.add_project("AI02", "Dự án BOQ Search")
+            sql = """INSERT INTO cost_budgets(
+                       project_id,task_ref,boq_item,quantity,unit,unit_price,budget_total,
+                       contract_type,contractor,note,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"""
+            with db.connect() as c:
+                # Insert relevant rows first. After 4,045 filler rows are inserted,
+                # these records are far outside the old ORDER BY id DESC [:60]
+                # snapshot window.
+                c.execute(sql, (pid, "HVAC-S2", "Dàn nóng điều hòa VRV", 4, "bộ", 1000, 4000, "", "", "Sheet HVAC - dòng 120", "2026-09-07 09:00:00", "2026-09-07 09:00:00"))
+                c.execute(sql, (pid, "HVAC-S3", "Dàn nóng điều hòa VRV", 6, "bộ", 1000, 6000, "", "", "Sheet HVAC - dòng 220", "2026-09-07 09:00:01", "2026-09-07 09:00:01"))
+                filler = [
+                    (pid, "", f"Cáp điện động lực loại {i}", 1, "m", 10, 10, "", "", "", "2026-09-07 10:00:00", "2026-09-07 10:00:00")
+                    for i in range(4045)
+                ]
+                c.executemany(sql, filler)
+
+            snapshot = ai_service.ProjectContextBuilder(db_path).build(
+                pid,
+                "Bóc tách số lượng dàn nóng điều hòa trong toàn bộ BOQ",
+            )
+            self.assertIn("LIVE chi phí: 4,047 dòng BOQ", snapshot)
+            self.assertIn("AI truy vấn trên toàn bộ 4,047 dòng", snapshot)
+            self.assertIn("Dàn nóng điều hòa VRV", snapshot)
+            self.assertIn("SL=10 bộ", snapshot)
+            self.assertIn("2 dòng", snapshot)
+            self.assertNotIn("các dòng BOQ còn lại 'chưa nạp vào snapshot'", "")
 
     def test_compat_rows_are_converted_for_postgres_context(self):
         row = pg.CompatRow(["id", "name"], [7, "ABC"])
