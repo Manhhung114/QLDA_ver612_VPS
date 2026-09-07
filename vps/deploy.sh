@@ -134,6 +134,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v622_auth_refresh_v4.py" \
   "$APP_DIR/v622_boq_multisheet_patch.py" \
   "$APP_DIR/boq_multisheet_v622.py" \
+  "$APP_DIR/boq_persistence_v622.py" \
   "$APP_DIR/postgres_backend_v622.py" \
   "$APP_DIR/vps_postgres_resilience.py" \
   "$APP_DIR/streamlit_secrets_v622.py"
