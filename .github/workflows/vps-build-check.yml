@@ -1,0 +1,52 @@
+name: VPS Build Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile QLDA source
+        run: |
+          python -m py_compile \
+            streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
+            postgres_backend_v622.py streamlit_secrets_v622.py \
+            v621_webopt_runtime.py cloud_db.py drive_gateway.py ai_service.py
+          python build_v621_webopt.py
+          python - <<'PY'
+          from pathlib import Path
+          from v622_auth_refresh_v4 import patch_auth_refresh_v4
+
+          p = Path('dist/streamlit_app.py')
+          source = patch_auth_refresh_v4(p.read_text(encoding='utf-8'))
+          compile(source, 'streamlit_app_vps.py', 'exec')
+          assert 'V6.22 AUTH REFRESH V5' in source
+          print('QLDA VPS generated source: OK')
+          PY
+
+      - name: Validate VPS scripts and proxy
+        run: |
+          bash -n vps/install.sh
+          bash -n vps/deploy.sh
+          bash -n vps/rollback.sh
+          bash -n vps/healthcheck.sh
+          grep -q '127.0.0.1:8501' vps/qlda.service
+          grep -q 'EnvironmentFile=/opt/qlda/shared/qlda.env' vps/qlda.service
+          grep -q 'proxy_set_header Upgrade' vps/nginx.conf.template
+          grep -q 'Connection "upgrade"' vps/nginx.conf.template
+          grep -q '/_stcore/health' vps/healthcheck.sh
+
+      - name: Verify secrets are not committed
+        run: |
+          test ! -f .env
+          test ! -f .streamlit/secrets.toml
+          grep -q 'REPLACE_ME' .env.example
+          echo 'VPS repository validation: OK'
