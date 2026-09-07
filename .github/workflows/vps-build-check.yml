@@ -39,7 +39,8 @@ jobs:
           bash -n vps/deploy.sh
           bash -n vps/rollback.sh
           bash -n vps/healthcheck.sh
-          grep -Fq '127.0.0.1:8501' vps/qlda.service
+          grep -Fq -- '--server.address=127.0.0.1' vps/qlda.service
+          grep -Fq -- '--server.port=8501' vps/qlda.service
           grep -Fq 'EnvironmentFile=/opt/qlda/shared/qlda.env' vps/qlda.service
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
           grep -Fq 'Connection "upgrade"' vps/nginx.conf.template
