@@ -7,7 +7,7 @@ SHARED_DIR="${QLDA_SHARED_DIR:-/opt/qlda/shared}"
 SERVICE="${QLDA_SERVICE:-qlda}"
 BRANCH="${QLDA_BRANCH:-main}"
 RUN_USER="${QLDA_RUN_USER:-qlda}"
-GIT_FETCH_RETRIES="${QLDA_GIT_FETCH_RETRIES:-4}"
+GIT_FETCH_RETRIES="${QLDA_GIT_FETCH_RETRIES:-3}"
 GIT_FETCH_TIMEOUT="${QLDA_GIT_FETCH_TIMEOUT:-45}"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -27,14 +27,15 @@ github_ipv4() {
   getent ahostsv4 github.com 2>/dev/null | awk '$2 == "STREAM" {print $1; exit}'
 }
 
-git_fetch_once() {
-  local ip="${1:-}"
-  local cmd=(runuser -u "$RUN_USER" -- git -C "$APP_DIR" -c http.version=HTTP/1.1)
-  if [[ -n "$ip" ]]; then
-    cmd+=( -c "http.curloptResolve=github.com:443:${ip}" )
-  fi
+# Run Git with proxy variables removed. Some minimal VPS images/providers inject
+# proxy settings for login shells while plain curl still works directly.
+git_fetch_command() {
+  local cmd=(
+    runuser -u "$RUN_USER" --
+    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy
+    git -C "$APP_DIR" -c http.version=HTTP/1.1 -c http.proxy=
+  )
   cmd+=(fetch --prune origin "$BRANCH")
-
   if command -v timeout >/dev/null 2>&1; then
     timeout "${GIT_FETCH_TIMEOUT}s" "${cmd[@]}"
   else
@@ -42,19 +43,43 @@ git_fetch_once() {
   fi
 }
 
+# Git/libcurl on some Ubuntu VPS builds may ignore curloptResolve even though
+# `curl --resolve` succeeds. As a last-resort bootstrap, pin github.com in
+# /etc/hosts only for the duration of the fetch, then restore the file exactly.
+fetch_with_temporary_hosts_pin() {
+  local ip="$1"
+  local backup tmp rc=1
+  backup="$(mktemp)"
+  tmp="$(mktemp)"
+  cp /etc/hosts "$backup"
+
+  awk '!($2 == "github.com" || $3 == "github.com") {print}' "$backup" > "$tmp"
+  printf '%s\tgithub.com\t# QLDA_TEMP_GITHUB_IPV4\n' "$ip" >> "$tmp"
+  cat "$tmp" > /etc/hosts
+
+  echo "Retrying GitHub fetch with temporary /etc/hosts pin: github.com -> $ip"
+  if git_fetch_command; then
+    rc=0
+  fi
+
+  cat "$backup" > /etc/hosts
+  rm -f "$backup" "$tmp"
+  return "$rc"
+}
+
 fetch_origin_resilient() {
   local attempt ip wait_s
+
   for attempt in $(seq 1 "$GIT_FETCH_RETRIES"); do
     ip="$(github_ipv4 || true)"
+    echo "GitHub fetch attempt ${attempt}/${GIT_FETCH_RETRIES} (HTTP/1.1, proxies disabled)..."
     if [[ -n "$ip" ]]; then
-      echo "GitHub fetch attempt ${attempt}/${GIT_FETCH_RETRIES} via IPv4 ${ip} (HTTP/1.1)..."
-      curl -4 -fsSI --connect-timeout 8 --max-time 15 https://github.com/ >/dev/null 2>&1 || \
-        echo "Warning: GitHub HTTPS preflight failed; fetch will still be attempted."
-    else
-      echo "GitHub fetch attempt ${attempt}/${GIT_FETCH_RETRIES} (IPv4 DNS not resolved; HTTP/1.1 fallback)..."
+      curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" \
+        https://github.com/ >/dev/null 2>&1 || \
+        echo "Warning: direct GitHub IPv4 HTTPS preflight failed."
     fi
 
-    if git_fetch_once "$ip"; then
+    if git_fetch_command; then
       return 0
     fi
 
@@ -63,9 +88,20 @@ fetch_origin_resilient() {
     sleep "$wait_s"
   done
 
-  echo "ERROR: VPS cannot fetch GitHub after ${GIT_FETCH_RETRIES} attempts." >&2
+  ip="$(github_ipv4 || true)"
+  if [[ -n "$ip" ]] && \
+     curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" \
+       https://github.com/ >/dev/null 2>&1; then
+    if fetch_with_temporary_hosts_pin "$ip"; then
+      return 0
+    fi
+  fi
+
+  echo "ERROR: VPS cannot fetch GitHub." >&2
   echo "Diagnostics (no secrets):" >&2
   getent ahostsv4 github.com >&2 || true
+  runuser -u "$RUN_USER" -- env | grep -iE '(^|_)(http|https|all)_proxy=' >&2 || true
+  git_app config --show-origin --get-regexp '^(http|https)\.' >&2 || true
   curl -4 -I --connect-timeout 8 --max-time 15 https://github.com/ >&2 || true
   ip route >&2 || true
   return 1
