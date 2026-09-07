@@ -19,8 +19,9 @@ jobs:
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
             v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_persistence_v622.py \
+            ai_live_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
-            v621_webopt_runtime.py cloud_db.py drive_gateway.py ai_service.py
+            v621_webopt_runtime.py cloud_db.py drive_gateway.py
           python build_v621_webopt.py
           python - <<'PY'
           from pathlib import Path
@@ -59,6 +60,17 @@ jobs:
           grep -Fq 'st.tabs(_book_names)' v622_boq_multisheet_patch.py
           grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
 
+      - name: Test AI live project snapshot
+        run: |
+          python -m unittest discover -s tests -p 'test_ai_live_context_v622.py' -v
+          grep -Fq 'V6.22 AI LIVE CONTEXT V1' ai_live_context_v622.py
+          grep -Fq 'PostgreSQL LIVE' ai_live_context_v622.py
+          grep -Fq 'SELECT COALESCE(SUM(budget_total),0)' ai_live_context_v622.py
+          grep -Fq 'boq_excel_workbooks' ai_live_context_v622.py
+          grep -Fq 'approval_workflows' ai_live_context_v622.py
+          grep -Fq 'document_attachments' ai_live_context_v622.py
+          grep -Fq 'install_ai_live_context()' streamlit_app.py
+
       - name: Build Docker image
         run: |
           set -euxo pipefail
@@ -89,6 +101,7 @@ jobs:
           grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
           grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
           grep -Fq 'boq_persistence_v622.py' vps/deploy.sh
+          grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
           grep -Fq 'refs/remotes/origin/${BRANCH}' vps/deploy.sh
           grep -Fq 'Local HEAD :' vps/deploy.sh
           grep -Fq 'Remote HEAD:' vps/deploy.sh
