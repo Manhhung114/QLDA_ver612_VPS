@@ -32,9 +32,11 @@ jobs:
           source = patch_auth_refresh_v4(source)
           compile(source, 'streamlit_app_vps.py', 'exec')
           assert 'V6.22 AUTH REFRESH V5' in source
-          assert 'V6.22 BOQ MULTISHEET V1' in source
+          assert 'V6.22 BOQ MULTISHEET V2' in source
+          assert 'Workbook BOQ' in source
+          assert 'Nhập toàn bộ BOQ chi tiết vào dự án' in source
           assert 'Phụ lục tổng hợp giá trị' in source
-          print('QLDA VPS generated source + BOQ patch: OK')
+          print('QLDA VPS generated source + BOQ patch V2: OK')
           PY
 
       - name: Test BOQ multi-sheet workflow
@@ -42,8 +44,12 @@ jobs:
           python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
           python -m unittest discover -s tests -p 'test_boq_multisheet_v622.py' -v
           grep -Fq 'AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"' boq_multisheet_v622.py
+          grep -Fq 'workbook_sheet_names' boq_multisheet_v622.py
+          grep -Fq 'detail_items' boq_multisheet_v622.py
+          grep -Fq 'c.executemany(sql, params)' boq_multisheet_v622.py
           grep -Fq 'DELETE FROM cost_budgets WHERE project_id=? AND note LIKE ?' boq_multisheet_v622.py
           grep -Fq 'save_boq_summary_to_project' v622_boq_multisheet_patch.py
+          grep -Fq 'st.tabs(_book_names)' v622_boq_multisheet_patch.py
           grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
 
       - name: Build Docker image
