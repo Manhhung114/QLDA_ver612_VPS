@@ -1,0 +1,42 @@
+name: Debug BOQ Source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/debug_boq_source.yml'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build source and print BOQ context
+        run: |
+          python build_v621_webopt.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('dist/streamlit_app.py')
+          text = p.read_text(encoding='utf-8')
+          needles = ['Chi phí dự toán', 'BOQ', 'cost_budgets', 'budget_total', 'Chi phí', 'Dự toán']
+          lines = text.splitlines()
+          seen = set()
+          for needle in needles:
+              for i, line in enumerate(lines):
+                  if needle.lower() in line.lower():
+                      a=max(0,i-35); b=min(len(lines),i+70)
+                      key=(a,b)
+                      if key in seen: continue
+                      seen.add(key)
+                      print(f'\n===== {needle!r} around line {i+1} =====')
+                      for j in range(a,b):
+                          print(f'{j+1:05d}: {lines[j]}')
+          print('\n===== Session state keys around project selection =====')
+          for i,line in enumerate(lines):
+              if 'session_state' in line and ('project' in line.lower() or 'cost' in line.lower() or 'budget' in line.lower()):
+                  print(f'{i+1:05d}: {line}')
+          PY
