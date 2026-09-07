@@ -5,10 +5,16 @@ __pycache__/
 *.sqlite
 *.sqlite3
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 .streamlit/secrets.toml
 outputs/
+backups/
+logs/
+*.log
+dist/
 CHANGELOG_V*.md
 DEPLOY_V*.md
 *.bak
