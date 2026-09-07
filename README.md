@@ -1,38 +1,65 @@
-# QLDA Xây dựng V6.22 PostgreSQL Cloud
+# QLDA Xây dựng V6.22 - VPS
 
-Bản hiện tại chạy trực tiếp trên **Streamlit Community Cloud**, giữ nguyên nghiệp vụ V6.21/WebOpt và sử dụng backend PostgreSQL khi `DATABASE_URL` được cấu hình.
+Đây là repository thử nghiệm VPS tách riêng từ `Manhhung114/QLDA_ver612` để chạy QLDA trên **Ubuntu 24.04 LTS** mà không ảnh hưởng bản Streamlit Community Cloud.
 
-## Deploy chính
-- Repository: `Manhhung114/QLDA_ver612`
-- Branch: `main`
-- Main file: `streamlit_app.py`
-- Python: **3.12**
+## Kiến trúc
 
-`streamlit_app.py` giải nén, finalize và compile source ứng dụng trực tiếp trong bộ nhớ. Community Cloud không cần bước build container hoặc thư mục `dist/` ghi lúc chạy.
+`Internet -> HTTPS/Nginx -> Streamlit 127.0.0.1:8501 -> PostgreSQL + Google Drive Gateway + AI`
 
-Streamlit Community Cloud tự dùng:
-- `requirements.txt` cho Python dependencies;
-- `packages.txt` cho `default-jre-headless` phục vụ MPXJ/JPype;
-- `.streamlit/config.toml` cho cấu hình giao diện/server.
+- Streamlit chỉ lắng nghe `127.0.0.1:8501`, không mở trực tiếp ra Internet.
+- Nginx phục vụ HTTP/HTTPS và WebSocket cho Streamlit.
+- `systemd` giữ app chạy liên tục và tự khởi động lại khi VPS reboot.
+- Secrets nằm tại `/opt/qlda/shared/qlda.env`, không commit lên GitHub.
+- PostgreSQL và Google Drive vẫn dùng theo cấu hình QLDA V6.22 hiện tại.
 
-## Tính năng/tối ưu vẫn giữ
-- lazy navigation + `st.fragment`, chỉ tải module/sheet đang dùng;
-- lazy import Plotly và Văn bản; Gantt tắt mặc định;
-- PostgreSQL Cloud, đồng thời giữ lớp tương thích SQLite khi cần;
-- HTTP connection pool + cache ngắn hạn Google Apps Script/Drive;
-- phân trang bảng lớn và chỉ tạo Excel khi người dùng yêu cầu;
-- persistent login qua Refresh/F5;
-- AI Gemini/OpenAI streaming và typewriter stream;
-- workflow Nhà thầu → Ban điều hành → TVGS → Ban QLDA;
-- tương thích dữ liệu/workflow legacy.
+## Cài nhanh trên Ubuntu 24.04
 
-## Secrets
-Khi tạo app trên Streamlit Community Cloud, vào **Advanced settings → Secrets** và nhập các khóa hệ thống đang dùng, đặc biệt:
-- `DATABASE_URL`;
-- `QLDA_DRIVE_WEBAPP_URL`;
-- `QLDA_DRIVE_API_TOKEN`;
-- `GEMINI_API_KEY` hoặc `OPENAI_API_KEY`.
+```bash
+sudo apt update && sudo apt install -y git
+git clone https://github.com/Manhhung114/QLDA_ver612_VPS.git
+cd QLDA_ver612_VPS
+sudo bash vps/install.sh _
+```
 
-Xem hướng dẫn chi tiết tại `DEPLOY_STREAMLIT_COMMUNITY_CLOUD.md`.
+Sau đó cấu hình secrets:
 
-> Lưu ý: filesystem cục bộ của Streamlit Community Cloud không phải nơi lưu dữ liệu nghiệp vụ lâu dài. Dữ liệu cần bền vững nên lưu trong PostgreSQL và Google Drive theo cấu hình hiện tại.
+```bash
+sudo nano /opt/qlda/shared/qlda.env
+sudo systemctl restart qlda
+sudo systemctl status qlda --no-pager
+sudo /opt/qlda/app/vps/healthcheck.sh
+```
+
+Nếu có domain, ví dụ `qlda.example.com`, cài bằng:
+
+```bash
+sudo bash vps/install.sh qlda.example.com
+sudo certbot --nginx -d qlda.example.com
+```
+
+## Cập nhật từ GitHub
+
+```bash
+sudo /opt/qlda/app/vps/deploy.sh
+```
+
+`deploy.sh` ghi lại commit cũ, kéo `main`, cập nhật dependency, kiểm tra code, restart service và health-check. Nếu bản mới không khởi động, script tự rollback về commit trước.
+
+Rollback thủ công:
+
+```bash
+sudo /opt/qlda/app/vps/rollback.sh
+```
+
+## Kiểm tra log
+
+```bash
+sudo journalctl -u qlda -f
+sudo nginx -t
+sudo systemctl status nginx --no-pager
+curl http://127.0.0.1:8501/_stcore/health
+```
+
+## F5 / Refresh
+
+Repo VPS giữ riêng cơ chế persistent authentication để thử nghiệm F5/Refresh trên domain/IP VPS. Các thay đổi ở repository này không ảnh hưởng `Manhhung114/QLDA_ver612` đang chạy trên Streamlit Community Cloud.
