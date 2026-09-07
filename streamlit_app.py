@@ -24,6 +24,13 @@ from vps_postgres_resilience import install_vps_postgres_resilience
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
 
+# The legacy AI context builder opened DB_PATH as local SQLite even while the
+# VPS UI was already writing PostgreSQL. Route every AI snapshot to the same
+# live backend before the generated Streamlit source imports ProjectContextBuilder.
+from ai_live_context_v622 import install_ai_live_context
+
+install_ai_live_context()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
