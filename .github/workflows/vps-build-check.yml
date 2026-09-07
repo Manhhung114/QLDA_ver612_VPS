@@ -63,8 +63,11 @@ jobs:
       - name: Test AI live project snapshot
         run: |
           python -m unittest discover -s tests -p 'test_ai_live_context_v622.py' -v
-          grep -Fq 'V6.22 AI LIVE CONTEXT V1' ai_live_context_v622.py
+          grep -Fq 'V6.22 AI LIVE CONTEXT V2' ai_live_context_v622.py
           grep -Fq 'PostgreSQL LIVE' ai_live_context_v622.py
+          grep -Fq 'AI truy vấn trên toàn bộ' ai_live_context_v622.py
+          grep -Fq 'BOQ-LIVE' ai_live_context_v622.py
+          grep -Fq 'BOQ-GROUP' ai_live_context_v622.py
           grep -Fq 'SELECT COALESCE(SUM(budget_total),0)' ai_live_context_v622.py
           grep -Fq 'boq_excel_workbooks' ai_live_context_v622.py
           grep -Fq 'approval_workflows' ai_live_context_v622.py
