@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.py[cod]
+*.sqlite
+*.sqlite3
+*.db
+.venv/
+venv/
+dist/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
