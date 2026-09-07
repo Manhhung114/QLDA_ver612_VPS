@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from v616_runtime_patch import install_db_patch as _db16, patch_streamlit_source as _ui16
+
+
+def install_db_patch():
+    _db16()
+
+
+def patch_streamlit_source(source: str) -> str:
+    s = _ui16(source)
+    s = s.replace('Approval UI / Workflow engine: V6.16', 'Approval UI / Workflow engine: V6.17')
+    s = s.replace('Workflow engine: **V6.16**', 'Workflow engine: **V6.17**')
+
+    anchor = '''    folder = data.get("folder") or {}\n    files = data.get("files") or []\n    total_file_count = len(files)\n'''
+    insert = '''    folder = data.get("folder") or {}\n    files = data.get("files") or []\n\n    # V6.17: fail-safe chung cho mọi sheet phê duyệt online.\n    # Nếu hồ sơ đang chờ Nhà thầu chỉnh sửa và Drive đã có file hiện hành\n    # được cập nhật SAU thời điểm cấp duyệt yêu cầu chỉnh sửa, coi đó là\n    # bằng chứng Nhà thầu đã nộp phiên bản mới và tự trình lại đúng cấp trả.\n    # Cơ chế này không phụ thuộc session/file_uploader/nút Lưu nên cả người\n    # duyệt mở hồ sơ sau đó cũng có thể tự phục hồi workflow bị kẹt.\n    eligible_online = (\n        (kind == "document" and subtype in APPROVAL_ELIGIBLE_DOCS)\n        or (kind == "drawing" and subtype in APPROVAL_ELIGIBLE_DRAWINGS)\n    )\n    if eligible_online and int(record_id or 0) > 0 and files:\n        try:\n            auto_wf = db.approval_workflow(pid, kind, subtype, int(record_id))\n            if auto_wf and str(auto_wf["current_stage"] or "").strip().upper() == "CONTRACTOR":\n                return_at = str(auto_wf["updated_at"] or "").strip()\n                for h in db.approval_history(int(auto_wf["id"])):\n                    if str(h["action"] or "").strip().upper() in {"REQUEST_REVISION", "REJECT", "RETURN"}:\n                        return_at = str(h["created_at"] or return_at).strip()\n                        break\n\n                def _v617_ts(value):\n                    raw = str(value or "").strip()\n                    if not raw:\n                        return None\n                    try:\n                        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))\n                        return dt.replace(tzinfo=None)\n                    except Exception:\n                        try:\n                            return datetime.strptime(raw[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")\n                        except Exception:\n                            return None\n\n                returned_dt = _v617_ts(return_at)\n                newest_dt = None\n                for item in files:\n                    if item.get("history"):\n                        continue\n                    dt = _v617_ts(item.get("modified_time"))\n                    if dt is not None and (newest_dt is None or dt > newest_dt):\n                        newest_dt = dt\n\n                if returned_dt is not None and newest_dt is not None and newest_dt > returned_dt:\n                    forced = db.force_revision_resubmit(\n                        pid, kind, int(record_id),\n                        submitted_by=str(auto_wf["submitted_by"] or ""),\n                        submitted_name="",\n                    )\n                    if forced.get("resubmitted"):\n                        st.session_state[panel_key + "_new_upload_detected"] = True\n                        st.session_state[panel_key + "_v617_auto_resubmitted"] = True\n                        st.success("✅ Đã phát hiện file cập nhật sau lần trả hồ sơ. Hệ thống đã tự trình lại đúng cấp duyệt.")\n                        st.rerun()\n        except Exception as exc:\n            st.warning(f"Chưa tự đồng bộ được trạng thái trình lại từ file mới: {exc}")\n\n    total_file_count = len(files)\n'''
+    if anchor not in s:
+        raise RuntimeError('V6.17 patch anchor missing: drive files')
+    return s.replace(anchor, insert, 1)

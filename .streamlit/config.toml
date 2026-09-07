@@ -1,0 +1,22 @@
+[server]
+headless = true
+maxUploadSize = 200
+enableXsrfProtection = true
+fileWatcherType = "none"
+runOnSave = false
+
+[runner]
+fastReruns = true
+
+[browser]
+gatherUsageStats = false
+
+[logger]
+level = "warning"
+
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6FA"
+textColor = "#0F172A"
