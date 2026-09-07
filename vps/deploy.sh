@@ -29,13 +29,14 @@ github_ipv4() {
 
 # Run Git with proxy variables removed. Some minimal VPS images/providers inject
 # proxy settings for login shells while plain curl still works directly.
+# IMPORTANT: fetch into refs/remotes/origin/<branch>, not FETCH_HEAD only.
 git_fetch_command() {
   local cmd=(
     runuser -u "$RUN_USER" --
     env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy
     git -C "$APP_DIR" -c http.version=HTTP/1.1 -c http.proxy=
   )
-  cmd+=(fetch --prune origin "$BRANCH")
+  cmd+=(fetch --prune origin "${BRANCH}:refs/remotes/origin/${BRANCH}")
   if command -v timeout >/dev/null 2>&1; then
     timeout "${GIT_FETCH_TIMEOUT}s" "${cmd[@]}"
   else
@@ -113,6 +114,9 @@ cd "$APP_DIR"
 fetch_origin_resilient
 OLD_COMMIT="$(git_app rev-parse HEAD)"
 NEW_COMMIT="$(git_app rev-parse "origin/$BRANCH")"
+
+echo "Local HEAD : $OLD_COMMIT"
+echo "Remote HEAD: $NEW_COMMIT"
 
 if [[ "$OLD_COMMIT" == "$NEW_COMMIT" ]]; then
   echo "Already up to date: $NEW_COMMIT"
