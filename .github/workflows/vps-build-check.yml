@@ -81,6 +81,9 @@ jobs:
           grep -Fq 'EnvironmentFile=/opt/qlda/shared/qlda.env' vps/qlda.service
           grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
           grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
+          grep -Fq 'refs/remotes/origin/${BRANCH}' vps/deploy.sh
+          grep -Fq 'Local HEAD :' vps/deploy.sh
+          grep -Fq 'Remote HEAD:' vps/deploy.sh
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
           grep -Fq 'Connection "upgrade"' vps/nginx.conf.template
           grep -Fq '/_stcore/health' vps/healthcheck.sh
