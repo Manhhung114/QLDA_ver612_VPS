@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+
+PATCH_MARKER = "V6.22 BOQ MULTISHEET V1"
+
+
+def patch_boq_multisheet(source: str) -> str:
+    """Inject multi-sheet BOQ import UI into the generated V6.22 cost module."""
+    if PATCH_MARKER in source:
+        return source
+
+    function_anchor = "\ndef render_cost_management(pid: int):\n"
+    if function_anchor not in source:
+        raise RuntimeError("V6.22 BOQ patch: render_cost_management anchor missing")
+
+    helper = '''\n# V6.22 BOQ MULTISHEET V1 START\nfrom boq_multisheet_v622 import (\n    BOQWorkbookError as _V622BOQWorkbookError,\n    build_summary_excel as _v622_build_boq_summary_excel,\n    parse_boq_workbook as _v622_parse_boq_workbook,\n    save_boq_summary_to_project as _v622_save_boq_summary_to_project,\n)\n\n@st.cache_data(show_spinner=False)\ndef _v622_parse_boq_cached(data: bytes, filename: str):\n    return _v622_parse_boq_workbook(data, filename)\n\n# V6.22 BOQ MULTISHEET V1 END\n'''
+    source = source.replace(function_anchor, helper + function_anchor, 1)
+
+    ui_anchor = '''        rows = db.cost_budgets(pid)\n        total_bac = sum(float(r["budget_total"] or 0) for r in rows)\n        st.metric("Tổng ngân sách kế hoạch (BAC)", f"{_vnd(total_bac)} VND")\n'''
+    if ui_anchor not in source:
+        raise RuntimeError("V6.22 BOQ patch: cost tab anchor missing")
+
+    ui_block = ui_anchor + '''\n        with st.expander("📥 Nhập BOQ Excel nhiều sheet", expanded=not bool(rows)):\n            st.caption(\n                "Tự nhận diện các sheet BOQ, SUM giá trị từng sheet và tạo "\n                "'Phụ lục tổng hợp giá trị'. Dữ liệu BOQ nhập thủ công vẫn được giữ."\n            )\n            _boq_file = st.file_uploader(\n                "Chọn workbook BOQ (.xlsx / .xlsm)",\n                type=["xlsx", "xlsm"],\n                key=f"cost_boq_excel_{pid}",\n            )\n            _boq_replace = st.checkbox(\n                "Thay BOQ đã nhập từ Excel trước đây của dự án (không xóa BOQ nhập thủ công)",\n                value=True,\n                key=f"cost_boq_excel_replace_{pid}",\n            )\n            if _boq_file is not None:\n                try:\n                    _boq_result = _v622_parse_boq_cached(_boq_file.getvalue(), _boq_file.name)\n                except _V622BOQWorkbookError as _boq_exc:\n                    st.warning(str(_boq_exc))\n                except Exception as _boq_exc:\n                    st.error(f"Không thể phân tích file BOQ: {_boq_exc}")\n                else:\n                    _boq_summary = pd.DataFrame(_boq_result.get("summary") or [])\n                    if _boq_summary.empty:\n                        st.warning("Không có sheet BOQ hợp lệ để tổng hợp.")\n                    else:\n                        _boq_show = _boq_summary.rename(columns={\n                            "sheet": "Hạng mục / Sheet BOQ",\n                            "line_count": "Số dòng BOQ",\n                            "budget_total": "Giá trị dự toán (VND)",\n                            "header_row": "Dòng tiêu đề",\n                        })\n                        st.success(\n                            f"Đã nhận diện {len(_boq_summary)} sheet BOQ: "\n                            + ", ".join(_boq_result.get("detected_sheets") or [])\n                        )\n                        for _boq_warning in _boq_result.get("warnings") or []:\n                            st.info(_boq_warning)\n                        st.dataframe(\n                            _boq_show[["Hạng mục / Sheet BOQ", "Số dòng BOQ", "Giá trị dự toán (VND)", "Dòng tiêu đề"]],\n                            hide_index=True,\n                            width="stretch",\n                        )\n                        _boq_c1, _boq_c2 = st.columns([1.1, 1.9])\n                        _boq_c1.metric(\n                            "Tổng giá trị workbook",\n                            f"{_vnd(_boq_result.get('grand_total', 0))} VND",\n                        )\n                        _boq_c2.download_button(\n                            "⬇️ Tải Phụ lục tổng hợp giá trị",\n                            data=_v622_build_boq_summary_excel(_boq_result),\n                            file_name=f"Phu_luc_tong_hop_gia_tri_DA_{pid}.xlsx",\n                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",\n                            key=f"cost_boq_excel_summary_download_{pid}",\n                            width="stretch",\n                        )\n                        if st.button(\n                            "💾 Lưu tổng hợp BOQ vào dự án",\n                            type="primary",\n                            disabled=not _can_update(),\n                            key=f"cost_boq_excel_save_{pid}",\n                            width="stretch",\n                        ):\n                            try:\n                                _boq_stats = _v622_save_boq_summary_to_project(\n                                    db, pid, _boq_result, replace_existing_excel=_boq_replace\n                                )\n                                st.success(\n                                    f"Đã lưu {_boq_stats['inserted']} dòng tổng hợp BOQ vào dự án; "\n                                    f"tổng giá trị {_vnd(_boq_stats['grand_total'])} VND."\n                                )\n                                st.rerun()\n                            except Exception as _boq_exc:\n                                st.error(f"Không thể lưu BOQ vào database: {_boq_exc}")\n'''
+    source = source.replace(ui_anchor, ui_block, 1)
+
+    if source.count(PATCH_MARKER) < 2:
+        raise RuntimeError("V6.22 BOQ patch marker missing after injection")
+    return source
