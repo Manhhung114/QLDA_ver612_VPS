@@ -46,6 +46,14 @@ jobs:
           grep -Fq 'save_boq_summary_to_project' v622_boq_multisheet_patch.py
           grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
 
+      - name: Build Docker image
+        run: |
+          set -euxo pipefail
+          docker build --pull -t qlda-v622-ci .
+          docker image inspect qlda-v622-ci >/dev/null
+          docker inspect --format='{{json .Config.Healthcheck.Test}}' qlda-v622-ci | grep -Fq '/_stcore/health'
+          docker inspect --format='{{json .Config.Cmd}}' qlda-v622-ci | grep -Fq 'streamlit_app.py'
+
       - name: Validate PostgreSQL VPS resilience hook
         run: |
           set -euxo pipefail
@@ -65,6 +73,8 @@ jobs:
           grep -Fq -- '--server.address=127.0.0.1' vps/qlda.service
           grep -Fq -- '--server.port=8501' vps/qlda.service
           grep -Fq 'EnvironmentFile=/opt/qlda/shared/qlda.env' vps/qlda.service
+          grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
+          grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
           grep -Fq 'Connection "upgrade"' vps/nginx.conf.template
           grep -Fq '/_stcore/health' vps/healthcheck.sh
