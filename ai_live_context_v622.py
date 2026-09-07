@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any, Iterable
 
 PATCH_MARKER = "V6.22 AI LIVE CONTEXT V1"
@@ -58,11 +59,7 @@ def _fmt_money(value: Any) -> str:
 
 
 def _live_project_appendix(builder, project_id: int) -> str:
-    """Build a small authoritative live section from the active project database.
-
-    This section is intentionally aggregate-heavy: it proves that AI sees the same
-    backend as the UI without sending thousands of BOQ rows into every prompt.
-    """
+    """Build an authoritative live section from the active project database."""
     try:
         import postgres_backend_v622 as pg
         backend = "PostgreSQL LIVE" if pg.resolve_database_url() else "SQLite LIVE"
@@ -174,6 +171,25 @@ def _live_project_appendix(builder, project_id: int) -> str:
             except Exception:
                 pass
 
+        if exists("approval_history") and exists("approval_workflows"):
+            try:
+                history = _rows_to_dicts_live(c.execute(
+                    """SELECT h.id,h.action,h.status,h.comment,h.actor_name,h.created_at,w.record_code,w.record_kind
+                       FROM approval_history h JOIN approval_workflows w ON w.id=h.workflow_id
+                       WHERE w.project_id=? ORDER BY h.id DESC LIMIT 12""",
+                    (project_id,),
+                ).fetchall())
+                if history:
+                    lines += ["", "### LỊCH SỬ PHÊ DUYỆT GẦN NHẤT"]
+                    for row in history:
+                        lines.append(
+                            f"[APPROVAL-HISTORY:{row.get('id','')}] {row.get('record_kind','')} {row.get('record_code','')} | "
+                            f"action={row.get('action','')} | status={row.get('status','')} | "
+                            f"ý kiến={row.get('comment','')} | người={row.get('actor_name','')} | lúc={row.get('created_at','')}"
+                        )
+            except Exception:
+                pass
+
         if recent_files:
             recent_files.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
             lines += ["", "### FILE ĐÍNH KÈM GẦN NHẤT"]
@@ -183,9 +199,6 @@ def _live_project_appendix(builder, project_id: int) -> str:
                     f"{row.get('file_name','')} | lưu={row.get('storage_backend','')} | tạo={row.get('created_at','')}"
                 )
 
-        # Compact recent-change feed from the major user-editable areas. These
-        # rows are metadata/text only; binary file bytes are read on demand in
-        # the dedicated AI file-analysis flow.
         recent_specs = (
             ("tasks", "id,name,actual_progress,actual_update_date,status", "COALESCE(actual_update_date,'') DESC,id DESC"),
             ("documents", "id,doc_type,code,subject,status,updated_at", "COALESCE(updated_at,'') DESC,id DESC"),
@@ -251,6 +264,23 @@ def install_ai_live_context() -> None:
                 return False
         return original_table_exists(self, connection, table)
 
+    def columns_live(connection, table: str) -> set[str]:
+        if connection.__class__.__name__ == "_CompatConnection":
+            try:
+                return set(pg._table_columns(connection, table))
+            except Exception:
+                return set()
+        try:
+            return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        except Exception:
+            return set()
+
+    def project_live(self, connection, project_id: int) -> dict:
+        row = connection.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not row:
+            raise ai_service.AIServiceError("Không tìm thấy dự án đang chọn trong database.")
+        return _row_to_dict(row)
+
     def cost_and_material_live(self, connection, project_id: int) -> dict:
         out = {
             "budgets": [], "payments": [], "variations": [],
@@ -273,6 +303,64 @@ def install_ai_live_context() -> None:
                 out[key] = _rows_to_dicts_live(rows)
         return out
 
+    def attachment_catalog_live(self, project_id: int) -> list[dict]:
+        out: list[dict] = []
+        with self.connect() as connection:
+            if not (self.table_exists(connection, "documents") and self.table_exists(connection, "document_attachments")):
+                return out
+            cols = columns_live(connection, "document_attachments")
+            has_blob = "file_content" in cols
+            select = "a.id,a.document_id,a.file_path,a.file_name"
+            for col in ("mime_type", "drive_file_id", "drive_web_url", "storage_backend", "created_at"):
+                if col in cols:
+                    select += f",a.{col}"
+            if has_blob:
+                select += ",length(a.file_content) AS blob_size"
+            sql = f"""
+                SELECT {select},d.doc_type,d.code,d.subject
+                FROM document_attachments a JOIN documents d ON d.id=a.document_id
+                WHERE d.project_id=? AND d.doc_type<>'VO' ORDER BY a.id DESC
+            """
+            for row in connection.execute(sql, (project_id,)).fetchall():
+                data = _row_to_dict(row)
+                data.setdefault("mime_type", "")
+                data.setdefault("drive_file_id", "")
+                data.setdefault("drive_web_url", "")
+                data.setdefault("storage_backend", "")
+                data.setdefault("blob_size", 0)
+                out.append(data)
+        return out
+
+    def load_attachment_live(self, attachment_id: int) -> tuple[str, str, bytes]:
+        with self.connect() as connection:
+            if not self.table_exists(connection, "document_attachments"):
+                raise ai_service.AIServiceError("Database chưa có bảng file đính kèm.")
+            cols = columns_live(connection, "document_attachments")
+            fields = ["file_path", "file_name"]
+            for col in ("mime_type", "file_content", "drive_file_id", "storage_backend"):
+                if col in cols:
+                    fields.append(col)
+            row = connection.execute(
+                f"SELECT {','.join(fields)} FROM document_attachments WHERE id=?",
+                (attachment_id,),
+            ).fetchone()
+            if not row:
+                raise ai_service.AIServiceError("Không tìm thấy file đính kèm.")
+            data = _row_to_dict(row)
+            name = data.get("file_name") or Path(data.get("file_path") or "attachment").name
+            mime = data.get("mime_type") or "application/octet-stream"
+            blob = data.get("file_content")
+            if blob:
+                return str(name), str(mime), bytes(blob)
+            path = str(data.get("file_path") or "")
+            if path and Path(path).exists():
+                return str(name), str(mime), Path(path).read_bytes()
+            if data.get("drive_file_id"):
+                raise ai_service.AIServiceError(
+                    "File đang lưu trên Google Drive. Hãy dùng nút phân tích file đã lưu trong giao diện AI để tải file qua Drive Gateway."
+                )
+            raise ai_service.AIServiceError("File đính kèm không còn ở đường dẫn lưu trên máy và database không có BLOB.")
+
     def build_live(self, project_id: int, question: str = "", status_date=None,
                    max_tasks: int = 80, max_docs: int = 70,
                    max_drawings: int = 60, max_legal: int = 40) -> str:
@@ -283,8 +371,6 @@ def install_ai_live_context() -> None:
         )
         appendix = _live_project_appendix(self, int(project_id))
 
-        # Replace the legacy aggregate summary with exact live totals if present,
-        # then keep the explicit LIVE appendix as auditable evidence.
         try:
             with self.connect() as c:
                 if self.table_exists(c, "cost_budgets"):
@@ -309,7 +395,10 @@ def install_ai_live_context() -> None:
     ai_service._rows_to_dicts = _rows_to_dicts_live
     cls.connect = connect_live
     cls.table_exists = table_exists_live
+    cls._project = project_live
     cls._cost_and_material = cost_and_material_live
+    cls.attachment_catalog = attachment_catalog_live
+    cls.load_attachment = load_attachment_live
     cls.build = build_live
     cls._qlda_ai_live_context_installed = True
     cls._qlda_ai_live_context_marker = PATCH_MARKER
