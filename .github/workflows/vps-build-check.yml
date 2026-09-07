@@ -18,7 +18,7 @@ jobs:
         run: |
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
-            postgres_backend_v622.py streamlit_secrets_v622.py \
+            postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py ai_service.py
           python build_v621_webopt.py
           python - <<'PY'
@@ -31,6 +31,15 @@ jobs:
           assert 'V6.22 AUTH REFRESH V5' in source
           print('QLDA VPS generated source: OK')
           PY
+
+      - name: Validate PostgreSQL VPS resilience hook
+        run: |
+          set -euxo pipefail
+          grep -Fq 'install_vps_postgres_resilience' streamlit_app.py
+          grep -Fq 'check=ConnectionPool.check_connection' vps_postgres_resilience.py
+          grep -Fq 'keepalives_idle' vps_postgres_resilience.py
+          grep -Fq 'resilient_backup' vps_postgres_resilience.py
+          grep -Fq 'drop_pool(database_url)' vps_postgres_resilience.py
 
       - name: Validate VPS scripts and proxy
         run: |
