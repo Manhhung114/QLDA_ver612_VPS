@@ -18,19 +18,33 @@ jobs:
         run: |
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
+            v622_boq_multisheet_patch.py boq_multisheet_v622.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py ai_service.py
           python build_v621_webopt.py
           python - <<'PY'
           from pathlib import Path
           from v622_auth_refresh_v4 import patch_auth_refresh_v4
+          from v622_boq_multisheet_patch import patch_boq_multisheet
 
           p = Path('dist/streamlit_app.py')
-          source = patch_auth_refresh_v4(p.read_text(encoding='utf-8'))
+          source = patch_boq_multisheet(p.read_text(encoding='utf-8'))
+          source = patch_auth_refresh_v4(source)
           compile(source, 'streamlit_app_vps.py', 'exec')
           assert 'V6.22 AUTH REFRESH V5' in source
-          print('QLDA VPS generated source: OK')
+          assert 'V6.22 BOQ MULTISHEET V1' in source
+          assert 'Phụ lục tổng hợp giá trị' in source
+          print('QLDA VPS generated source + BOQ patch: OK')
           PY
+
+      - name: Test BOQ multi-sheet workflow
+        run: |
+          python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
+          python -m unittest discover -s tests -p 'test_boq_multisheet_v622.py' -v
+          grep -Fq 'AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"' boq_multisheet_v622.py
+          grep -Fq 'DELETE FROM cost_budgets WHERE project_id=? AND note LIKE ?' boq_multisheet_v622.py
+          grep -Fq 'save_boq_summary_to_project' v622_boq_multisheet_patch.py
+          grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
 
       - name: Validate PostgreSQL VPS resilience hook
         run: |
