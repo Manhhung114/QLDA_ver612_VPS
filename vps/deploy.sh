@@ -119,6 +119,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v622_ipc_claim_patch.py" \
   "$APP_DIR/ipc_claim_v622.py" \
   "$APP_DIR/ipc_claim_fast_v622.py" \
+  "$APP_DIR/ipc_claim_summary_fix_v622.py" \
   "$APP_DIR/v622_report_cost_patch.py" \
   "$APP_DIR/report_cost_v622.py" \
   "$APP_DIR/ai_live_context_v622.py" \
