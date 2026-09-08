@@ -22,6 +22,6 @@ jobs:
       - name: Test Claim number detection
         run: |
           python -m unittest tests.test_ipc_claim_number_v622 -v
-          grep -Fq 'V6.22 IPC CLAIM NUMBER V1' ipc_claim_number_fix_v622.py
+          grep -Fq 'V6.22 IPC CLAIM NUMBER V4' ipc_claim_number_fix_v622.py
           grep -Fq 'install_ipc_claim_number_fix()' streamlit_app.py
           grep -Fq 'ipc_claim_number_fix_v622.py' vps/deploy.sh
