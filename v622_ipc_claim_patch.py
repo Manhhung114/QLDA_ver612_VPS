@@ -118,20 +118,22 @@ def patch_ipc_claims(source: str) -> str:
     replacement = (
         f"{indent}# {PATCH_MARKER}\n"
         f"{indent}_v622_render_ipc_claim_ui(db, pid, can_update=bool(_can_update()))\n"
+        f"{indent}_v622_render_ipc_claim_delete_ui(db, pid, can_update=bool(_can_update()))\n"
     )
     lines[start:end] = [replacement]
 
-    # Inject helper import immediately before the cost function. The payment body
+    # Inject helper imports immediately before the cost function. The payment body
     # replacement above does not change any lines before the function definition.
     insert_at = fn.lineno - 1
     helper = (
         f"# {PATCH_MARKER} HELPER\n"
-        "from ipc_claim_v622 import render_ipc_claim_ui as _v622_render_ipc_claim_ui\n\n"
+        "from ipc_claim_v622 import render_ipc_claim_ui as _v622_render_ipc_claim_ui\n"
+        "from ipc_claim_delete_v622 import render_ipc_claim_delete_ui as _v622_render_ipc_claim_delete_ui\n\n"
     )
     lines.insert(insert_at, helper)
     patched = "".join(lines)
 
-    if PATCH_MARKER not in patched or "_v622_render_ipc_claim_ui" not in patched:
+    if PATCH_MARKER not in patched or "_v622_render_ipc_claim_ui" not in patched or "_v622_render_ipc_claim_delete_ui" not in patched:
         raise RuntimeError("V6.22 IPC patch marker missing after injection")
     compile(patched, "streamlit_app_v622_ipc_claim.py", "exec")
     return patched
