@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1 \
-    MALLOC_ARENA_MAX=2
+    MALLOC_ARENA_MAX=2 \
+    QLDA_PARALLEL_EXCEL_MIN_MB=2 \
+    QLDA_PARALLEL_MIN_SHEETS=2 \
+    QLDA_MP_START_METHOD=forkserver
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       default-jre-headless \
@@ -29,6 +32,23 @@ RUN python -m py_compile \
       v622_auth_refresh_v4.py \
       v622_boq_multisheet_patch.py \
       boq_multisheet_v622.py \
+      boq_persistence_v622.py \
+      v622_ipc_claim_patch.py \
+      ipc_claim_v622.py \
+      ipc_claim_fast_v622.py \
+      ipc_claim_summary_fix_v622.py \
+      ipc_adaptive_parser_v622.py \
+      ipc_claim_number_fix_v622.py \
+      ipc_claim_period_v622.py \
+      ipc_claim_delete_v622.py \
+      multicore_excel_v622.py \
+      v622_vo_claim_patch.py \
+      vo_claim_v622.py \
+      v622_report_cost_patch.py \
+      report_cost_v622.py \
+      ai_live_context_v622.py \
+      ai_claim_context_v622.py \
+      ai_vo_context_v622.py \
       postgres_backend_v622.py \
       vps_postgres_resilience.py \
       streamlit_secrets_v622.py \
