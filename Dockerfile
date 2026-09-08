@@ -52,6 +52,11 @@ RUN python -m py_compile \
       postgres_backend_v622.py \
       vps_postgres_resilience.py \
       streamlit_secrets_v622.py \
+      drive_gateway.py \
+      local_vps_backend_v622.py \
+      local_file_server_v622.py \
+      local_vps_runtime_fix_v622.py \
+      v622_local_vps_patch.py \
     && python build_v621_webopt.py
 
 EXPOSE 8501
