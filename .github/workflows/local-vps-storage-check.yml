@@ -26,8 +26,8 @@ jobs:
     env:
       DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/qlda_test"
       QLDA_STORAGE_BACKEND: "local"
-      QLDA_LOCAL_STORAGE_ROOT: "${{ runner.temp }}/qlda-data"
-      QLDA_LOCAL_TRASH_ROOT: "${{ runner.temp }}/qlda-data/.trash"
+      QLDA_LOCAL_STORAGE_ROOT: "/tmp/qlda-ci-data"
+      QLDA_LOCAL_TRASH_ROOT: "/tmp/qlda-ci-data/.trash"
       QLDA_PUBLIC_BASE_URL: "https://qlda.example.test"
       QLDA_LOCAL_UPLOAD_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       QLDA_LOCAL_BOOTSTRAP_CODE: "local-ci-bootstrap-2026"
@@ -55,6 +55,7 @@ jobs:
           bash -n vps/deploy.sh
       - name: Test local auth, revisions and signed file access
         run: |
+          rm -rf "$QLDA_LOCAL_STORAGE_ROOT"
           python - <<'PY'
           import io
           import os
