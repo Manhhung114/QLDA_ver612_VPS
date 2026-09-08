@@ -6,18 +6,19 @@ from pathlib import Path
 from typing import Any
 
 
-PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V2"
+PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V3"
 
 # The base IPC parser validates Claim identity before outer parse wrappers can
-# post-process the result.  Keep a per-call filename hint so adaptive/legacy
-# metadata readers can supply a Claim number early without using process-global
-# mutable state (important when several Streamlit sessions parse concurrently).
+# post-process the result. Keep a per-call filename hint so adaptive/legacy
+# metadata readers can supply a Claim number early without process-global mutable
+# state (important when several Streamlit sessions parse concurrently).
 _FILENAME_CLAIM_HINT: contextvars.ContextVar[str] = contextvars.ContextVar(
     "qlda_ipc_filename_claim_hint", default=""
 )
 
 
 def _clean_claim_no(value: Any) -> str:
+    """Normalized number for comparisons only; display/storage may keep 01/02/etc."""
     text = str(value or "").strip()
     if not text:
         return ""
@@ -56,25 +57,38 @@ def claim_no_from_filename(filename: str) -> str:
 def _apply_filename_identity(result: dict[str, Any], filename: str) -> dict[str, Any]:
     parsed = dict(result or {})
     file_no = claim_no_from_filename(filename)
-    internal_no = _clean_claim_no(parsed.get("claim_no"))
     if not file_no:
         return parsed
 
     metadata = dict(parsed.get("metadata") or {})
-    metadata_no = _clean_claim_no(metadata.get("claim_no"))
-    source_no = internal_no or metadata_no
+    raw_internal = str(parsed.get("claim_no") or "").strip()
+    raw_metadata = str(metadata.get("claim_no") or "").strip()
+    source_raw = raw_internal or raw_metadata
+    source_no = _clean_claim_no(source_raw)
 
-    parsed["claim_no"] = file_no
-    parsed["claim_code"] = f"IPC-{file_no.zfill(2)}"
-    metadata["claim_no"] = file_no
+    # If the workbook and filename identify the same Claim, preserve the workbook
+    # formatting (e.g. 01, 04). This keeps existing DB keys/revision/period sync
+    # compatible. Only a true numeric mismatch is overridden by the filename.
+    if source_no and source_no == file_no:
+        target_raw = source_raw
+        target_no = source_no
+        source_kind = "filename_confirmed"
+    else:
+        target_raw = file_no
+        target_no = file_no
+        source_kind = "filename_override"
+
+    parsed["claim_no"] = target_raw
+    parsed["claim_code"] = f"IPC-{target_no.zfill(2)}"
+    metadata["claim_no"] = target_raw
     parsed["metadata"] = metadata
-    parsed["claim_number_source"] = "filename"
-    parsed["claim_number_internal"] = source_no
+    parsed["claim_number_source"] = source_kind
+    parsed["claim_number_internal"] = source_raw
 
     warnings = list(parsed.get("warnings") or [])
     if source_no and source_no != file_no:
         warning = (
-            f"CẢNH BÁO SỐ CLAIM: file Excel bên trong đang khai báo Claim {source_no}, "
+            f"CẢNH BÁO SỐ CLAIM: file Excel bên trong đang khai báo Claim {source_raw}, "
             f"nhưng tên file ghi IPC#{file_no}. Hệ thống ưu tiên tên file và sẽ lưu vào IPC-{file_no.zfill(2)}. "
             "Hãy kiểm tra số Claim trước khi bấm Lưu."
         )
@@ -91,10 +105,9 @@ def install_ipc_claim_number_fix() -> None:
     cell may still contain the old Claim number. An explicit filename such as
     'IPC#6 ...xlsx' is therefore used to prevent accidentally overwriting IPC-05.
 
-    V2 also supplies the filename number *during* base parsing when an adaptive
-    form has no semantic Claim label.  The old B12 declaration cell remains a
-    compatibility fallback.  This is required because the core parser validates
-    Claim identity before the outer filename guard receives the parsed result.
+    V3 also supplies the filename number *during* base parsing when an adaptive
+    form has no semantic Claim label, while preserving legacy zero-padded values
+    such as 01/04 whenever the workbook and filename agree numerically.
     """
     import ipc_claim_v622 as ipc
 
@@ -106,18 +119,20 @@ def install_ipc_claim_number_fix() -> None:
     def metadata_with_claim_identity(ws):
         raw = original_metadata(ws)
         metadata = dict(raw or {})
-        current = _clean_claim_no(metadata.get("claim_no"))
+        current_raw = str(metadata.get("claim_no") or "").strip()
+        current = _clean_claim_no(current_raw)
 
         # Rule: semantic content first, legacy fixed cell second, filename hint
-        # third.  The final outer guard still makes an explicit IPC#/Claim number
-        # in the filename authoritative and can warn on an internal mismatch.
+        # third. Fixed cells are compatibility fallback only.
         if not current and ws is not None:
             try:
-                legacy = _clean_claim_no(ipc._safe_cell(ws, "B12"))
+                legacy_raw = str(ipc._safe_cell(ws, "B12") or "").strip()
+                legacy = _clean_claim_no(legacy_raw)
             except Exception:
+                legacy_raw = ""
                 legacy = ""
             if legacy:
-                metadata["claim_no"] = legacy
+                metadata["claim_no"] = legacy_raw
                 adaptive = dict(metadata.get("_adaptive") or {})
                 sources = dict(adaptive.get("sources") or {})
                 fields = dict(adaptive.get("field_confidence") or {})
