@@ -129,7 +129,8 @@ jobs:
           grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
           grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
           grep -Fq 'ai_claim_context_v622.py' vps/deploy.sh
-          grep -Fq 'refs/remotes/origin/${BRANCH}' vps/deploy.sh
+          grep -Fq '+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}' vps/deploy.sh
+          grep -Fq 'show-ref --verify --quiet "$REMOTE_REF"' vps/deploy.sh
           grep -Fq 'Local HEAD :' vps/deploy.sh
           grep -Fq 'Remote HEAD:' vps/deploy.sh
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
