@@ -1,0 +1,27 @@
+name: IPC Claim Period Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4' pandas streamlit
+      - name: Compile Claim period modules
+        run: |
+          python -m py_compile ipc_claim_v622.py ipc_claim_period_v622.py v622_ipc_claim_patch.py
+      - name: Test Claim period parsing and persistence
+        run: |
+          python -m unittest tests.test_ipc_claim_period_v622 -v
+          grep -Fq 'V6.22 IPC CLAIM PERIOD V1' ipc_claim_period_v622.py
+          grep -Fq 'Đồng bộ ngày từ các file Excel Claim đã lưu' ipc_claim_period_v622.py
+          grep -Fq '_v622_render_ipc_claim_period_ui' v622_ipc_claim_patch.py
