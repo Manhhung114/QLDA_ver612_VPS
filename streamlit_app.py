@@ -37,8 +37,10 @@ install_ai_claim_context()
 # extremely slow. Install the sequential GTHT parser + Streamlit parse cache
 # before the generated UI imports render_ipc_claim_ui.
 from ipc_claim_fast_v622 import install_ipc_claim_fast_path
+from ipc_claim_summary_fix_v622 import install_ipc_claim_summary_fix
 
 install_ipc_claim_fast_path()
+install_ipc_claim_summary_fix()
 
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
