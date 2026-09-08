@@ -25,6 +25,22 @@ _TTLS = {
 _FILE_ACTIONS = {"list_record_files", "record_file_counts", "file_info"}
 _USER_ACTIONS = {"me", "approval_users", "list_users", "root_info"}
 
+# Google Apps Script occasionally closes an idle/reused HTTP connection without
+# sending a response. Retrying every POST would be unsafe because mutation calls
+# may already have reached Apps Script. Only read/idempotent actions are retried.
+_SAFE_DRIVE_RETRY_ACTIONS = {
+    "health",
+    "me",
+    "root_info",
+    "list_users",
+    "approval_users",
+    "list_record_files",
+    "record_file_counts",
+    "file_info",
+}
+_TRANSIENT_DRIVE_HTTP_STATUS = {429, 500, 502, 503, 504}
+_SAFE_DRIVE_ATTEMPTS = 3
+
 
 def _install_sqlite_fast_path() -> None:
     from cloud_db import CloudDatabase
@@ -144,13 +160,31 @@ def _install_drive_fast_path() -> None:
 
     original_init = DriveGateway.__init__
 
+    def _new_http_session():
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=0)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        session.headers.update(
+            {
+                "User-Agent": "QLDA-XayDung-V6.22-PostgreSQL/1.0",
+                "Accept": "application/json",
+            }
+        )
+        return session
+
+    def _reset_http_session(self) -> None:
+        old = getattr(self, "_v621_http", None)
+        self._v621_http = _new_http_session()
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                pass
+
     def fast_init(self, config):
         original_init(self, config)
-        self._v621_http = requests.Session()
-        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=0)
-        self._v621_http.mount("https://", adapter)
-        self._v621_http.mount("http://", adapter)
-        self._v621_http.headers.update({"User-Agent": "QLDA-XayDung-V6.22-PostgreSQL/1.0"})
+        self._v621_http = _new_http_session()
         self._v621_cache = {}
         self._v621_cache_lock = threading.RLock()
 
@@ -176,8 +210,9 @@ def _install_drive_fast_path() -> None:
             raise DriveGatewayError(
                 "Chưa cấu hình QLDA_DRIVE_WEBAPP_URL / QLDA_DRIVE_API_TOKEN."
             )
+        action = str(action or "")
         payload = dict(payload or {})
-        ttl = float(_TTLS.get(str(action), 0.0))
+        ttl = float(_TTLS.get(action, 0.0))
         cache_key = None
         now = time.monotonic()
         if ttl > 0:
@@ -185,7 +220,7 @@ def _install_drive_fast_path() -> None:
                 payload, ensure_ascii=False, sort_keys=True,
                 separators=(",", ":"), default=str,
             )
-            cache_key = (str(action), str(session_token or ""), payload_key)
+            cache_key = (action, str(session_token or ""), payload_key)
             with self._v621_cache_lock:
                 hit = self._v621_cache.get(cache_key)
                 if hit and hit[0] > now:
@@ -196,15 +231,44 @@ def _install_drive_fast_path() -> None:
             body.update(payload)
         if session_token:
             body["session_token"] = session_token
-        try:
-            resp = self._v621_http.post(
-                self.config.webapp_url,
-                json=body,
-                timeout=self.config.timeout,
-                allow_redirects=True,
+
+        safe_to_retry = action in _SAFE_DRIVE_RETRY_ACTIONS
+        attempts = _SAFE_DRIVE_ATTEMPTS if safe_to_retry else 1
+        resp = None
+        last_exc = None
+        for attempt in range(1, attempts + 1):
+            try:
+                # Separate connect timeout from the Apps Script processing timeout.
+                resp = self._v621_http.post(
+                    self.config.webapp_url,
+                    json=body,
+                    timeout=(12, self.config.timeout),
+                    allow_redirects=True,
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt < attempts:
+                    _reset_http_session(self)
+                    time.sleep(0.35 * attempt)
+                    continue
+                raise DriveGatewayError(
+                    f"Không kết nối được Google Drive Gateway sau {attempt} lần thử: {exc}"
+                ) from exc
+
+            if resp.status_code in _TRANSIENT_DRIVE_HTTP_STATUS and attempt < attempts:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+                _reset_http_session(self)
+                time.sleep(0.35 * attempt)
+                continue
+            break
+
+        if resp is None:
+            raise DriveGatewayError(
+                f"Không kết nối được Google Drive Gateway: {last_exc or 'không nhận được phản hồi'}"
             )
-        except requests.RequestException as exc:
-            raise DriveGatewayError(f"Không kết nối được Google Drive Gateway: {exc}") from exc
         if resp.status_code >= 400:
             raise DriveGatewayError(
                 f"Google Drive Gateway HTTP {resp.status_code}: {resp.text[:500]}"
