@@ -1,0 +1,154 @@
+name: Local VPS Storage Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  local-storage:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: qlda_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d qlda_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/qlda_test
+      QLDA_STORAGE_BACKEND: local
+      QLDA_LOCAL_STORAGE_ROOT: ${{ runner.temp }}/qlda-data
+      QLDA_LOCAL_TRASH_ROOT: ${{ runner.temp }}/qlda-data/.trash
+      QLDA_PUBLIC_BASE_URL: https://qlda.example.test
+      QLDA_LOCAL_UPLOAD_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      QLDA_LOCAL_BOOTSTRAP_CODE: local-ci-bootstrap-2026
+      QLDA_LOCAL_LEGACY_MAX_UPLOAD_MB: 200
+      QLDA_LOCAL_DIRECT_MAX_UPLOAD_MB: 2048
+      QLDA_LOCAL_SESSION_TTL_HOURS: 12
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install local backend dependencies
+        run: python -m pip install 'psycopg[binary]>=3.2,<4' 'psycopg-pool>=3.2,<4' requests
+      - name: Compile local VPS integration
+        run: |
+          python -m py_compile \
+            local_vps_backend_v622.py \
+            local_file_server_v622.py \
+            local_vps_runtime_fix_v622.py \
+            v622_local_vps_patch.py \
+            drive_gateway.py \
+            streamlit_app.py
+          bash -n vps/switch_to_local.sh
+          bash -n vps/deploy.sh
+      - name: Test local auth, revisions and signed file access
+        run: |
+          python - <<'PY'
+          import io
+          import os
+          from pathlib import Path
+
+          import local_vps_backend_v622 as local
+          from drive_gateway import DriveGateway, DriveGatewayConfig
+          from local_vps_runtime_fix_v622 import install_local_vps_runtime
+          from v621_webopt_runtime import install_runtime
+
+          h = local.health()
+          assert h['ok'] and not h['initialized']
+          local.bootstrap_admin('admin@example.com', 'Admin', 'Admin12345!', os.environ['QLDA_LOCAL_BOOTSTRAP_CODE'])
+          login = local.login('admin@example.com', 'Admin12345!')
+          token = login['session_token']
+          assert local.me(token)['user']['role'] == 'admin'
+
+          local.set_user(token, email='contractor@example.com', name='NT', role='update', password='Contractor123!', approval_role='CONTRACTOR')
+          users = local.list_users(token)['users']
+          assert {u['email'] for u in users} == {'admin@example.com', 'contractor@example.com'}
+          approvals = local.approval_users(token)['users']
+          assert any(u['approval_role'] == 'CONTRACTOR' for u in approvals)
+
+          first = local.save_bytes(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001', name='hoso.txt', content=b'v1', mime_type='text/plain')
+          second = local.save_bytes(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001', name='hoso.txt', content=b'v2', mime_type='text/plain')
+          current = local.list_record_files(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001', include_history=False)['files']
+          all_files = local.list_record_files(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001', include_history=True)['files']
+          assert len(current) == 1 and current[0]['id'] == second['id']
+          assert len(all_files) == 2 and sum(bool(x['history']) for x in all_files) == 1
+          name, mime, payload = local.download_bytes(token, second['id'])
+          assert (name, mime, payload) == ('hoso.txt', 'text/plain', b'v2')
+          assert '/qlda-files/file/' in second['url'] and '/qlda-files/file/' in second['download_url']
+
+          ticket = local.make_upload_ticket(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001')
+          meta = local.verify_upload_ticket(ticket['ticket'])
+          assert meta['record_code'] == 'RFI-001'
+          third = local.save_stream_from_ticket(ticket['ticket'], name='large.bin', mime_type='application/octet-stream', stream=io.BytesIO(b'abcdef'), content_length=6)
+          assert local.download_bytes(token, third['id'])[2] == b'abcdef'
+          counts = local.record_file_counts(token, project_code='P01', kind='document', subtype='RFI', record_codes=['RFI-001'])['counts']
+          assert counts['RFI-001']['count'] == 2
+
+          # The WebOpt runtime replaces DriveGateway._post; the local fix must
+          # restore local dispatch afterwards without affecting Drive mode.
+          install_runtime()
+          install_local_vps_runtime()
+          cfg = DriveGatewayConfig.from_values(
+              backend='local',
+              local_storage_root=os.environ['QLDA_LOCAL_STORAGE_ROOT'],
+              public_base_url=os.environ['QLDA_PUBLIC_BASE_URL'],
+              local_upload_secret=os.environ['QLDA_LOCAL_UPLOAD_SECRET'],
+              legacy_max_upload_mb=200,
+              direct_max_upload_mb=2048,
+          )
+          gw = DriveGateway(cfg)
+          assert gw.health()['initialized'] is True
+          assert gw.me(token)['user']['email'] == 'admin@example.com'
+
+          local.trash_file(token, third['id'])
+          assert len(local.list_record_files(token, project_code='P01', kind='document', subtype='RFI', record_code='RFI-001', include_history=True)['files']) == 2
+          assert Path(os.environ['QLDA_LOCAL_STORAGE_ROOT']).exists()
+          print('LOCAL_VPS_STORAGE_OK')
+          PY
+      - name: Test generated source local patch
+        run: |
+          python - <<'PY'
+          import base64, gzip, os
+          from pathlib import Path
+          from build_v621_webopt import _finalize_source
+          from v622_auth_refresh_v4 import patch_auth_refresh_v4
+          from v622_boq_multisheet_patch import patch_boq_multisheet
+          from v622_ipc_claim_patch import patch_ipc_claims
+          from v622_vo_claim_patch import patch_vo_claims
+          from v622_report_cost_patch import patch_report_cost
+          from v622_local_vps_patch import patch_local_vps
+
+          parts = sorted(Path('v621_webopt_source').glob('part_*.b64'))
+          source = gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          source = _finalize_source(source)
+          source = patch_boq_multisheet(source)
+          source = patch_ipc_claims(source)
+          source = patch_vo_claims(source)
+          source = patch_report_cost(source)
+          source = patch_auth_refresh_v4(source)
+          source = patch_local_vps(source)
+          assert 'V6.22 LOCAL VPS UI V1' in source
+          assert 'V6.22 LOCAL VPS RUNTIME INSTALL V1' in source
+          compile(source, 'generated_local_vps.py', 'exec')
+          print('LOCAL_VPS_SOURCE_PATCH_OK')
+          PY
+      - name: Validate local service and nginx policy
+        run: |
+          grep -q 'User=qlda' vps/qlda-upload.service
+          grep -q '127.0.0.1.*8502' vps/qlda-upload.service
+          grep -q 'location /qlda-files/' vps/nginx.conf.template
+          grep -q 'proxy_request_buffering off' vps/nginx.conf.template
+          grep -q 'postgresql:///qlda?host=/var/run/postgresql' .env.example
+          grep -q 'QLDA_STORAGE_BACKEND=local' .env.example
+          grep -q 'switch_to_local.sh' vps/install.sh
