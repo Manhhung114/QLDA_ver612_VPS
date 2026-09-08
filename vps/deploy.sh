@@ -120,6 +120,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ipc_claim_v622.py" \
   "$APP_DIR/ipc_claim_fast_v622.py" \
   "$APP_DIR/ipc_claim_summary_fix_v622.py" \
+  "$APP_DIR/ipc_adaptive_parser_v622.py" \
   "$APP_DIR/ipc_claim_number_fix_v622.py" \
   "$APP_DIR/ipc_claim_period_v622.py" \
   "$APP_DIR/ipc_claim_delete_v622.py" \
