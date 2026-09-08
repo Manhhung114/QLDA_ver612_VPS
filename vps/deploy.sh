@@ -27,11 +27,6 @@ github_ipv4() {
   getent ahostsv4 github.com 2>/dev/null | awk '$2 == "STREAM" {print $1; exit}'
 }
 
-# Run Git with proxy variables removed. Some minimal VPS images/providers inject
-# proxy settings for login shells while plain curl still works directly.
-# IMPORTANT: source ref must be the exact remote refs/heads/<branch>. Using only
-# "main:refs/remotes/origin/main" can be resolved as a missing/ambiguous source
-# on some Git builds and may delete origin/main instead of updating it.
 git_fetch_command() {
   local cmd=(
     runuser -u "$RUN_USER" --
@@ -46,25 +41,17 @@ git_fetch_command() {
   fi
 }
 
-# Git/libcurl on some Ubuntu VPS builds may ignore curloptResolve even though
-# `curl --resolve` succeeds. As a last-resort bootstrap, pin github.com in
-# /etc/hosts only for the duration of the fetch, then restore the file exactly.
 fetch_with_temporary_hosts_pin() {
   local ip="$1"
   local backup tmp rc=1
   backup="$(mktemp)"
   tmp="$(mktemp)"
   cp /etc/hosts "$backup"
-
   awk '!($2 == "github.com" || $3 == "github.com") {print}' "$backup" > "$tmp"
   printf '%s\tgithub.com\t# QLDA_TEMP_GITHUB_IPV4\n' "$ip" >> "$tmp"
   cat "$tmp" > /etc/hosts
-
   echo "Retrying GitHub fetch with temporary /etc/hosts pin: github.com -> $ip"
-  if git_fetch_command; then
-    rc=0
-  fi
-
+  if git_fetch_command; then rc=0; fi
   cat "$backup" > /etc/hosts
   rm -f "$backup" "$tmp"
   return "$rc"
@@ -72,34 +59,21 @@ fetch_with_temporary_hosts_pin() {
 
 fetch_origin_resilient() {
   local attempt ip wait_s
-
   for attempt in $(seq 1 "$GIT_FETCH_RETRIES"); do
     ip="$(github_ipv4 || true)"
     echo "GitHub fetch attempt ${attempt}/${GIT_FETCH_RETRIES} (HTTP/1.1, proxies disabled)..."
     if [[ -n "$ip" ]]; then
-      curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" \
-        https://github.com/ >/dev/null 2>&1 || \
-        echo "Warning: direct GitHub IPv4 HTTPS preflight failed."
+      curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" https://github.com/ >/dev/null 2>&1 || echo "Warning: direct GitHub IPv4 HTTPS preflight failed."
     fi
-
-    if git_fetch_command; then
-      return 0
-    fi
-
+    if git_fetch_command; then return 0; fi
     wait_s=$((attempt * 3))
     echo "GitHub fetch attempt ${attempt} failed; retrying in ${wait_s}s..." >&2
     sleep "$wait_s"
   done
-
   ip="$(github_ipv4 || true)"
-  if [[ -n "$ip" ]] && \
-     curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" \
-       https://github.com/ >/dev/null 2>&1; then
-    if fetch_with_temporary_hosts_pin "$ip"; then
-      return 0
-    fi
+  if [[ -n "$ip" ]] && curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" https://github.com/ >/dev/null 2>&1; then
+    if fetch_with_temporary_hosts_pin "$ip"; then return 0; fi
   fi
-
   echo "ERROR: VPS cannot fetch GitHub." >&2
   echo "Diagnostics (no secrets):" >&2
   getent ahostsv4 github.com >&2 || true
@@ -144,6 +118,9 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/boq_persistence_v622.py" \
   "$APP_DIR/v622_ipc_claim_patch.py" \
   "$APP_DIR/ipc_claim_v622.py" \
+  "$APP_DIR/ipc_claim_fast_v622.py" \
+  "$APP_DIR/v622_report_cost_patch.py" \
+  "$APP_DIR/report_cost_v622.py" \
   "$APP_DIR/ai_live_context_v622.py" \
   "$APP_DIR/ai_claim_context_v622.py" \
   "$APP_DIR/postgres_backend_v622.py" \
