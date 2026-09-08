@@ -1,0 +1,57 @@
+name: Multicore Excel Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  multicore:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install parser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4' 'streamlit>=1.32'
+
+      - name: Compile multicore integration
+        run: |
+          python -m py_compile multicore_excel_v622.py streamlit_app.py \
+            boq_multisheet_v622.py ipc_claim_v622.py ipc_claim_fast_v622.py \
+            ipc_claim_summary_fix_v622.py ipc_adaptive_parser_v622.py ipc_claim_number_fix_v622.py \
+            vo_claim_v622.py v622_vo_claim_patch.py
+          grep -Fq 'V6.22 MULTICORE EXCEL V1' multicore_excel_v622.py
+          grep -Fq 'ProcessPoolExecutor' multicore_excel_v622.py
+          grep -Fq 'install_multicore_excel()' streamlit_app.py
+          grep -Fq 'multicore_excel_v622.py' vps/deploy.sh
+          grep -Fq 'QLDA_PARALLEL_EXCEL_MIN_MB=2' Dockerfile
+
+      - name: Test multicore BOQ IPC VO parsers
+        env:
+          QLDA_CPU_WORKERS: '2'
+          QLDA_PARALLEL_EXCEL_MIN_MB: '0'
+          QLDA_PARALLEL_MIN_SHEETS: '2'
+          QLDA_MP_START_METHOD: forkserver
+        run: |
+          python -m unittest tests.test_multicore_excel_v622 -v
+
+      - name: Validate four-vCPU policy
+        run: |
+          python - <<'PY'
+          import os
+          os.environ['QLDA_CPU_WORKERS'] = '3'
+          from multicore_excel_v622 import configured_child_workers, cpu_count
+          workers = configured_child_workers()
+          print({'ci_cpu_count': cpu_count(), 'configured_child_workers': workers})
+          assert workers >= 1
+          PY
+
+      - name: Validate deploy script
+        run: |
+          bash -n vps/deploy.sh
+          grep -Fq 'from multicore_excel_v622 import runtime_config' vps/deploy.sh
+          grep -Fq 'QLDA multicore:' vps/deploy.sh
