@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import contextvars
 import re
 from pathlib import Path
 from typing import Any
 
 
-PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V1"
+PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V2"
+
+# The base IPC parser validates Claim identity before outer parse wrappers can
+# post-process the result.  Keep a per-call filename hint so adaptive/legacy
+# metadata readers can supply a Claim number early without using process-global
+# mutable state (important when several Streamlit sessions parse concurrently).
+_FILENAME_CLAIM_HINT: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "qlda_ipc_filename_claim_hint", default=""
+)
 
 
 def _clean_claim_no(value: Any) -> str:
@@ -27,6 +36,7 @@ def claim_no_from_filename(filename: str) -> str:
     Examples:
       (SME213) IPC#6 (11102025).xlsx -> 6
       IPC 03 Final.xlsx             -> 3
+      IPC03.xlsx                    -> 3
       Claim-12 Rev1.xlsm            -> 12
 
     Revision/date numbers elsewhere in the filename are deliberately ignored.
@@ -80,16 +90,69 @@ def install_ipc_claim_number_fix() -> None:
     IPC workbooks are commonly copied from the previous period and the declaration
     cell may still contain the old Claim number. An explicit filename such as
     'IPC#6 ...xlsx' is therefore used to prevent accidentally overwriting IPC-05.
+
+    V2 also supplies the filename number *during* base parsing when an adaptive
+    form has no semantic Claim label.  The old B12 declaration cell remains a
+    compatibility fallback.  This is required because the core parser validates
+    Claim identity before the outer filename guard receives the parsed result.
     """
     import ipc_claim_v622 as ipc
 
     if getattr(ipc, "_qlda_ipc_claim_number_fix_installed", False):
         return
 
+    original_metadata = ipc._metadata_from_declaration
+
+    def metadata_with_claim_identity(ws):
+        raw = original_metadata(ws)
+        metadata = dict(raw or {})
+        current = _clean_claim_no(metadata.get("claim_no"))
+
+        # Rule: semantic content first, legacy fixed cell second, filename hint
+        # third.  The final outer guard still makes an explicit IPC#/Claim number
+        # in the filename authoritative and can warn on an internal mismatch.
+        if not current and ws is not None:
+            try:
+                legacy = _clean_claim_no(ipc._safe_cell(ws, "B12"))
+            except Exception:
+                legacy = ""
+            if legacy:
+                metadata["claim_no"] = legacy
+                adaptive = dict(metadata.get("_adaptive") or {})
+                sources = dict(adaptive.get("sources") or {})
+                fields = dict(adaptive.get("field_confidence") or {})
+                sources["claim_no"] = "B12 (legacy fallback)"
+                fields["claim_no"] = max(float(fields.get("claim_no") or 0), 0.55)
+                adaptive["sources"] = sources
+                adaptive["field_confidence"] = fields
+                metadata["_adaptive"] = adaptive
+                current = legacy
+
+        if not current:
+            hint = _clean_claim_no(_FILENAME_CLAIM_HINT.get(""))
+            if hint:
+                metadata["claim_no"] = hint
+                adaptive = dict(metadata.get("_adaptive") or {})
+                sources = dict(adaptive.get("sources") or {})
+                fields = dict(adaptive.get("field_confidence") or {})
+                sources["claim_no"] = "filename hint"
+                fields["claim_no"] = max(float(fields.get("claim_no") or 0), 0.80)
+                adaptive["sources"] = sources
+                adaptive["field_confidence"] = fields
+                metadata["_adaptive"] = adaptive
+        return metadata
+
+    ipc._metadata_from_declaration = metadata_with_claim_identity
+
     original_parse = ipc.parse_ipc_workbook
 
     def parse_ipc_workbook_number_safe(data: bytes, filename: str = "IPC.xlsx"):
-        result = original_parse(data, filename)
+        file_no = claim_no_from_filename(filename)
+        token = _FILENAME_CLAIM_HINT.set(file_no)
+        try:
+            result = original_parse(data, filename)
+        finally:
+            _FILENAME_CLAIM_HINT.reset(token)
         return _apply_filename_identity(result, filename)
 
     ipc.parse_ipc_workbook = parse_ipc_workbook_number_safe
