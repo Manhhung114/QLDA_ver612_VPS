@@ -19,7 +19,7 @@ jobs:
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
             v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_persistence_v622.py \
-            v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py \
+            v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py ipc_claim_summary_fix_v622.py \
             v622_report_cost_patch.py report_cost_v622.py \
             ai_live_context_v622.py ai_claim_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
@@ -72,8 +72,11 @@ jobs:
 
       - name: Test IPC Claim payment workflow
         run: |
-          python -m unittest discover -s tests -p 'test_ipc_claim_v622.py' -v
+          python -m unittest discover -s tests -p 'test_ipc_claim*_v622.py' -v
           grep -Fq 'V6.22 IPC CLAIM V1' ipc_claim_v622.py
+          grep -Fq 'V6.22 IPC CLAIM PAYMENT SUMMARY FIX V2' ipc_claim_summary_fix_v622.py
+          grep -Fq 'K30 is only the 1% utility deduction' ipc_claim_summary_fix_v622.py
+          grep -Fq 'install_ipc_claim_summary_fix()' streamlit_app.py
           grep -Fq 'payment_claims' ipc_claim_v622.py
           grep -Fq 'payment_claim_items' ipc_claim_v622.py
           grep -Fq 'payment_claim_workbooks' ipc_claim_v622.py
@@ -145,6 +148,7 @@ jobs:
           grep -Fq 'v622_ipc_claim_patch.py' vps/deploy.sh
           grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
           grep -Fq 'ipc_claim_fast_v622.py' vps/deploy.sh
+          grep -Fq 'ipc_claim_summary_fix_v622.py' vps/deploy.sh
           grep -Fq 'v622_report_cost_patch.py' vps/deploy.sh
           grep -Fq 'report_cost_v622.py' vps/deploy.sh
           grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
