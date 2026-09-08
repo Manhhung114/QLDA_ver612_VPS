@@ -60,6 +60,7 @@ from v622_boq_multisheet_patch import patch_boq_multisheet
 from v622_ipc_claim_patch import patch_ipc_claims
 from v622_vo_claim_patch import patch_vo_claims
 from v622_report_cost_patch import patch_report_cost
+from v622_local_vps_patch import patch_local_vps
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -91,6 +92,7 @@ def _compiled_vps_app(signature):
     source = patch_vo_claims(source)
     source = patch_report_cost(source)
     source = patch_auth_refresh_v4(source)
+    source = patch_local_vps(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
