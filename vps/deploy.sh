@@ -124,10 +124,13 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ipc_claim_number_fix_v622.py" \
   "$APP_DIR/ipc_claim_period_v622.py" \
   "$APP_DIR/ipc_claim_delete_v622.py" \
+  "$APP_DIR/v622_vo_claim_patch.py" \
+  "$APP_DIR/vo_claim_v622.py" \
   "$APP_DIR/v622_report_cost_patch.py" \
   "$APP_DIR/report_cost_v622.py" \
   "$APP_DIR/ai_live_context_v622.py" \
   "$APP_DIR/ai_claim_context_v622.py" \
+  "$APP_DIR/ai_vo_context_v622.py" \
   "$APP_DIR/postgres_backend_v622.py" \
   "$APP_DIR/vps_postgres_resilience.py" \
   "$APP_DIR/streamlit_secrets_v622.py"
