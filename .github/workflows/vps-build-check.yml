@@ -21,8 +21,9 @@ jobs:
             v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_persistence_v622.py \
             v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py ipc_claim_summary_fix_v622.py \
             ipc_adaptive_parser_v622.py ipc_claim_number_fix_v622.py ipc_claim_period_v622.py ipc_claim_delete_v622.py \
+            v622_vo_claim_patch.py vo_claim_v622.py \
             v622_report_cost_patch.py report_cost_v622.py \
-            ai_live_context_v622.py ai_claim_context_v622.py ai_service.py \
+            ai_live_context_v622.py ai_claim_context_v622.py ai_vo_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py
           python build_v621_webopt.py
@@ -31,25 +32,29 @@ jobs:
           from v622_auth_refresh_v4 import patch_auth_refresh_v4
           from v622_boq_multisheet_patch import patch_boq_multisheet
           from v622_ipc_claim_patch import patch_ipc_claims
+          from v622_vo_claim_patch import patch_vo_claims
           from v622_report_cost_patch import patch_report_cost
 
           p = Path('dist/streamlit_app.py')
           source = patch_boq_multisheet(p.read_text(encoding='utf-8'))
           source = patch_ipc_claims(source)
+          source = patch_vo_claims(source)
           source = patch_report_cost(source)
           source = patch_auth_refresh_v4(source)
           compile(source, 'streamlit_app_vps.py', 'exec')
           assert 'V6.22 AUTH REFRESH V5' in source
           assert 'V6.22 BOQ MULTISHEET V3' in source
           assert 'V6.22 IPC CLAIM PAYMENT V1' in source
+          assert 'V6.22 VO EXCEL V1' in source
           assert 'V6.22 REPORT COST V1' in source
           assert '_v622_render_ipc_claim_ui(db, pid' in source
+          assert '_v622_render_vo_ui(db, pid' in source
           assert '_v622_render_cost_report(db, pid)' in source
           assert 'Workbook BOQ' in source
           assert 'Lưu BOQ + workbook nhiều sheet vào dự án' in source
           assert 'Mở bằng tài khoản khác vẫn xem được dữ liệu này' in source
           assert 'Phụ lục tổng hợp giá trị' in source
-          print('QLDA VPS generated source + BOQ + IPC Claim + Cost Report patches: OK')
+          print('QLDA VPS generated source + BOQ + IPC Claim + signed VO + Cost Report patches: OK')
           PY
 
       - name: Test BOQ multi-sheet workflow
@@ -94,6 +99,31 @@ jobs:
           grep -Fq 'Đối chiếu BOQ' ipc_claim_v622.py
           grep -Fq 'patch_ipc_claims(source)' streamlit_app.py
 
+      - name: Test signed VO Excel workflow
+        run: |
+          python -m unittest discover -s tests -p 'test_vo*_v622.py' -v
+          grep -Fq 'V6.22 VO EXCEL V2 SIGNED' vo_claim_v622.py
+          grep -Fq 'variation_orders' vo_claim_v622.py
+          grep -Fq 'variation_order_items' vo_claim_v622.py
+          grep -Fq 'variation_order_workbooks' vo_claim_v622.py
+          grep -Fq 'variation_order_revisions' vo_claim_v622.py
+          grep -Fq 'VO giảm phải nhập giá trị duyệt âm' vo_claim_v622.py
+          grep -Fq 'Giảm giá trị hợp đồng' vo_claim_v622.py
+          grep -Fq 'V6.22 VO EXCEL V1' v622_vo_claim_patch.py
+          grep -Fq 'patch_vo_claims(source)' streamlit_app.py
+          grep -Fq 'install_ai_vo_context()' streamlit_app.py
+          python - <<'PY'
+          from tests.test_vo_claim_v622 import _workbook_bytes
+          from vo_claim_v622 import parse_vo_workbook
+          r = parse_vo_workbook(_workbook_bytes(), '2025.09.29 VO-03.xlsx')
+          assert r['summary']['increase_amount'] == 200
+          assert r['summary']['decrease_amount'] == -300
+          assert r['summary']['subtotal_before_vat'] == -100
+          assert r['summary']['total_after_vat'] == -110
+          assert r['summary']['detail_discrepancy'] == 0
+          print('Signed VO arithmetic: OK')
+          PY
+
       - name: Test live cost report
         run: |
           grep -Fq 'V6.22 REPORT COST V1' v622_report_cost_patch.py
@@ -104,6 +134,7 @@ jobs:
           grep -Fq 'Đã giải ngân' report_cost_v622.py
           grep -Fq 'payment_claims' report_cost_v622.py
           grep -Fq 'cost_variations' report_cost_v622.py
+          grep -Fq 'revised_budget = bac + vo_approved' report_cost_v622.py
           grep -Fq 'patch_report_cost(source)' streamlit_app.py
 
       - name: Test AI live project snapshot
@@ -122,6 +153,8 @@ jobs:
           grep -Fq 'V6.22 AI IPC CLAIM CONTEXT V1' ai_claim_context_v622.py
           grep -Fq 'IPC / CLAIM THANH TOÁN LIVE' ai_claim_context_v622.py
           grep -Fq 'install_ai_claim_context()' streamlit_app.py
+          grep -Fq 'VO / PHÁT SINH LIVE' ai_vo_context_v622.py
+          grep -Fq 'install_ai_vo_context()' streamlit_app.py
 
       - name: Build Docker image
         run: |
@@ -158,6 +191,9 @@ jobs:
           grep -Fq 'ipc_claim_fast_v622.py' vps/deploy.sh
           grep -Fq 'ipc_claim_summary_fix_v622.py' vps/deploy.sh
           grep -Fq 'ipc_adaptive_parser_v622.py' vps/deploy.sh
+          grep -Fq 'v622_vo_claim_patch.py' vps/deploy.sh
+          grep -Fq 'vo_claim_v622.py' vps/deploy.sh
+          grep -Fq 'ai_vo_context_v622.py' vps/deploy.sh
           grep -Fq 'v622_report_cost_patch.py' vps/deploy.sh
           grep -Fq 'report_cost_v622.py' vps/deploy.sh
           grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
