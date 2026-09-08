@@ -1,0 +1,54 @@
+name: IPC Fast Parser Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ipc-fast:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install parser dependency
+        run: python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
+      - name: Compile fast path
+        run: |
+          python -m py_compile ipc_claim_fast_v622.py ipc_claim_v622.py streamlit_app.py
+          grep -Fq 'install_ipc_claim_fast_path()' streamlit_app.py
+          grep -Fq 'ws.iter_rows' ipc_claim_fast_v622.py
+      - name: Benchmark sequential GTHT parser
+        run: |
+          python - <<'PY'
+          import tempfile
+          import time
+          from openpyxl import Workbook, load_workbook
+          from ipc_claim_fast_v622 import _fast_parse_gtht
+
+          wb = Workbook()
+          ws = wb.active
+          ws.title = 'GTHT'
+          ws['B11'] = 'Tên công tác'
+          for row in range(15, 5015):
+              ws.cell(row, 1, row - 14)
+              ws.cell(row, 2, f'Hạng mục {row - 14}')
+              ws.cell(row, 3, 1)
+              ws.cell(row, 4, 'cái')
+              ws.cell(row, 13, 1)
+              ws.cell(row, 14, 1)
+              ws.cell(row, 19, 1000)
+              ws.cell(row, 20, 1000)
+          with tempfile.NamedTemporaryFile(suffix='.xlsx') as tmp:
+              wb.save(tmp.name)
+              rwb = load_workbook(tmp.name, data_only=True, read_only=True)
+              start = time.perf_counter()
+              rows = _fast_parse_gtht(rwb['GTHT'])
+              elapsed = time.perf_counter() - start
+              rwb.close()
+          assert len(rows) == 5000, len(rows)
+          assert elapsed < 15, elapsed
+          print(f'Fast IPC GTHT parser: {len(rows)} rows in {elapsed:.3f}s')
+          PY
