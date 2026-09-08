@@ -84,6 +84,19 @@ fetch_origin_resilient() {
   return 1
 }
 
+local_storage_enabled() {
+  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^QLDA_STORAGE_BACKEND[[:space:]]*=[[:space:]]*local[[:space:]]*$' "$SHARED_DIR/qlda.env"
+}
+
+restart_local_file_service_if_enabled() {
+  if local_storage_enabled; then
+    install -m 0644 "$APP_DIR/vps/qlda-upload.service" /etc/systemd/system/qlda-upload.service
+    systemctl daemon-reload
+    systemctl enable qlda-upload.service >/dev/null 2>&1 || true
+    systemctl restart qlda-upload.service
+  fi
+}
+
 mkdir -p "$SHARED_DIR"
 cd "$APP_DIR"
 
@@ -134,10 +147,13 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ai_vo_context_v622.py" \
   "$APP_DIR/postgres_backend_v622.py" \
   "$APP_DIR/vps_postgres_resilience.py" \
-  "$APP_DIR/streamlit_secrets_v622.py"
+  "$APP_DIR/streamlit_secrets_v622.py" \
+  "$APP_DIR/drive_gateway.py" \
+  "$APP_DIR/local_vps_backend_v622.py" \
+  "$APP_DIR/local_file_server_v622.py" \
+  "$APP_DIR/local_vps_runtime_fix_v622.py" \
+  "$APP_DIR/v622_local_vps_patch.py"
 
-# Validate that this host exposes the expected multicore configuration before
-# restarting production. This does not print secrets.
 run_as_app "$VENV_DIR/bin/python" - <<'PY'
 from multicore_excel_v622 import runtime_config
 cfg = runtime_config()
@@ -146,6 +162,7 @@ assert cfg["cpu_count"] >= 1
 assert cfg["child_workers"] >= 1
 PY
 
+restart_local_file_service_if_enabled
 systemctl restart "$SERVICE"
 
 ok=0
@@ -157,6 +174,13 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
+if [[ "$ok" -eq 1 ]] && local_storage_enabled; then
+  if ! curl -fsS http://127.0.0.1:8502/health >/dev/null 2>&1; then
+    echo "Local file service health check failed." >&2
+    ok=0
+  fi
+fi
+
 if [[ "$ok" -eq 1 ]]; then
   echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
   exit 0
@@ -165,6 +189,7 @@ fi
 echo "Health check failed. Rolling back to $OLD_COMMIT" >&2
 git_app reset --hard "$OLD_COMMIT"
 run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
+restart_local_file_service_if_enabled || true
 systemctl restart "$SERVICE"
 sleep 3
 "$APP_DIR/vps/healthcheck.sh"
