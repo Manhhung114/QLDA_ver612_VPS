@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 
 # Keep the WebOpt resource limits before pandas/numpy/BLAS are imported.
+# Heavy Excel parsing uses separate Python processes; numerical libraries stay
+# at one thread per process so 4 vCPU are used without nested oversubscription.
 for _name, _value in {
     "OPENBLAS_NUM_THREADS": "1",
     "OMP_NUM_THREADS": "1",
@@ -36,18 +38,20 @@ install_ai_vo_context()
 
 # IPC workbooks are large and openpyxl ReadOnlyWorksheet random cell access is
 # extremely slow. Install the sequential parser/cache first, then label-based
-# legacy fixes, then the adaptive semantic parser. The adaptive parser selects
-# sheet roles/fields from workbook content and supports changed forms such as
-# IPC#10. Claim-number guard remains last so the explicit filename controls the
-# final save target.
+# legacy fixes, then the adaptive semantic parser. Multicore Excel is installed
+# after those parser semantics so child processes can build previews while the
+# parent parses metadata/payment/GTHT. Claim-number guard remains last so the
+# explicit filename controls the final save target.
 from ipc_claim_fast_v622 import install_ipc_claim_fast_path
 from ipc_claim_summary_fix_v622 import install_ipc_claim_summary_fix
 from ipc_adaptive_parser_v622 import install_ipc_adaptive_parser
+from multicore_excel_v622 import install_multicore_excel
 from ipc_claim_number_fix_v622 import install_ipc_claim_number_fix
 
 install_ipc_claim_fast_path()
 install_ipc_claim_summary_fix()
 install_ipc_adaptive_parser()
+install_multicore_excel()
 install_ipc_claim_number_fix()
 
 from build_v621_webopt import _finalize_source
