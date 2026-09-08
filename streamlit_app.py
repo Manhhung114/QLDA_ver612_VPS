@@ -28,8 +28,10 @@ _postgres_backend.install_postgres_backend()
 # VPS UI was already writing PostgreSQL. Route every AI snapshot to the same
 # live backend before the generated Streamlit source imports ProjectContextBuilder.
 from ai_live_context_v622 import install_ai_live_context
+from ai_claim_context_v622 import install_ai_claim_context
 
 install_ai_live_context()
+install_ai_claim_context()
 
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
