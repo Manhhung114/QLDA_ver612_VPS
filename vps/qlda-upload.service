@@ -10,6 +10,7 @@ Group=qlda
 WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_v622.py --host 127.0.0.1 --port 8502
 Restart=always
 RestartSec=3
