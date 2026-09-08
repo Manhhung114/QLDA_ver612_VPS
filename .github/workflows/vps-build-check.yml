@@ -19,7 +19,8 @@ jobs:
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
             v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_persistence_v622.py \
-            ai_live_context_v622.py ai_service.py \
+            v622_ipc_claim_patch.py ipc_claim_v622.py \
+            ai_live_context_v622.py ai_claim_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py
           python build_v621_webopt.py
@@ -27,18 +28,22 @@ jobs:
           from pathlib import Path
           from v622_auth_refresh_v4 import patch_auth_refresh_v4
           from v622_boq_multisheet_patch import patch_boq_multisheet
+          from v622_ipc_claim_patch import patch_ipc_claims
 
           p = Path('dist/streamlit_app.py')
           source = patch_boq_multisheet(p.read_text(encoding='utf-8'))
+          source = patch_ipc_claims(source)
           source = patch_auth_refresh_v4(source)
           compile(source, 'streamlit_app_vps.py', 'exec')
           assert 'V6.22 AUTH REFRESH V5' in source
           assert 'V6.22 BOQ MULTISHEET V3' in source
+          assert 'V6.22 IPC CLAIM PAYMENT V1' in source
+          assert '_v622_render_ipc_claim_ui(db, pid' in source
           assert 'Workbook BOQ' in source
           assert 'Lưu BOQ + workbook nhiều sheet vào dự án' in source
           assert 'Mở bằng tài khoản khác vẫn xem được dữ liệu này' in source
           assert 'Phụ lục tổng hợp giá trị' in source
-          print('QLDA VPS generated source + BOQ patch V3: OK')
+          print('QLDA VPS generated source + BOQ + IPC Claim patches: OK')
           PY
 
       - name: Test BOQ multi-sheet workflow
@@ -60,6 +65,19 @@ jobs:
           grep -Fq 'st.tabs(_book_names)' v622_boq_multisheet_patch.py
           grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
 
+      - name: Test IPC Claim payment workflow
+        run: |
+          python -m unittest discover -s tests -p 'test_ipc_claim_v622.py' -v
+          grep -Fq 'V6.22 IPC CLAIM V1' ipc_claim_v622.py
+          grep -Fq 'payment_claims' ipc_claim_v622.py
+          grep -Fq 'payment_claim_items' ipc_claim_v622.py
+          grep -Fq 'payment_claim_workbooks' ipc_claim_v622.py
+          grep -Fq 'payment_claim_revisions' ipc_claim_v622.py
+          grep -Fq 'Claim cũ không bị ghi đè' ipc_claim_v622.py
+          grep -Fq 'st.tabs(labels)' ipc_claim_v622.py
+          grep -Fq 'Đối chiếu BOQ' ipc_claim_v622.py
+          grep -Fq 'patch_ipc_claims(source)' streamlit_app.py
+
       - name: Test AI live project snapshot
         run: |
           python -m unittest discover -s tests -p 'test_ai_live_context_v622.py' -v
@@ -73,6 +91,9 @@ jobs:
           grep -Fq 'approval_workflows' ai_live_context_v622.py
           grep -Fq 'document_attachments' ai_live_context_v622.py
           grep -Fq 'install_ai_live_context()' streamlit_app.py
+          grep -Fq 'V6.22 AI IPC CLAIM CONTEXT V1' ai_claim_context_v622.py
+          grep -Fq 'IPC / CLAIM THANH TOÁN LIVE' ai_claim_context_v622.py
+          grep -Fq 'install_ai_claim_context()' streamlit_app.py
 
       - name: Build Docker image
         run: |
@@ -104,7 +125,10 @@ jobs:
           grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
           grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
           grep -Fq 'boq_persistence_v622.py' vps/deploy.sh
+          grep -Fq 'v622_ipc_claim_patch.py' vps/deploy.sh
+          grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
           grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
+          grep -Fq 'ai_claim_context_v622.py' vps/deploy.sh
           grep -Fq 'refs/remotes/origin/${BRANCH}' vps/deploy.sh
           grep -Fq 'Local HEAD :' vps/deploy.sh
           grep -Fq 'Remote HEAD:' vps/deploy.sh
