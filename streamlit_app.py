@@ -24,14 +24,15 @@ from vps_postgres_resilience import install_vps_postgres_resilience
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
 
-# The legacy AI context builder opened DB_PATH as local SQLite even while the
-# VPS UI was already writing PostgreSQL. Route every AI snapshot to the same
-# live backend before the generated Streamlit source imports ProjectContextBuilder.
+# Route every AI snapshot to the same PostgreSQL LIVE backend and append
+# project-level IPC/Claim + signed VO detail context.
 from ai_live_context_v622 import install_ai_live_context
 from ai_claim_context_v622 import install_ai_claim_context
+from ai_vo_context_v622 import install_ai_vo_context
 
 install_ai_live_context()
 install_ai_claim_context()
+install_ai_vo_context()
 
 # IPC workbooks are large and openpyxl ReadOnlyWorksheet random cell access is
 # extremely slow. Install the sequential parser/cache first, then label-based
@@ -53,6 +54,7 @@ from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
 from v622_ipc_claim_patch import patch_ipc_claims
+from v622_vo_claim_patch import patch_vo_claims
 from v622_report_cost_patch import patch_report_cost
 
 
@@ -82,6 +84,7 @@ def _compiled_vps_app(signature):
     source = _finalize_source(source)
     source = patch_boq_multisheet(source)
     source = patch_ipc_claims(source)
+    source = patch_vo_claims(source)
     source = patch_report_cost(source)
     source = patch_auth_refresh_v4(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
