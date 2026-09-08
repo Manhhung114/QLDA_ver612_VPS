@@ -6,12 +6,8 @@ from pathlib import Path
 from typing import Any
 
 
-PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V3"
+PATCH_VERSION = "V6.22 IPC CLAIM NUMBER V4"
 
-# The base IPC parser validates Claim identity before outer parse wrappers can
-# post-process the result. Keep a per-call filename hint so adaptive/legacy
-# metadata readers can supply a Claim number early without process-global mutable
-# state (important when several Streamlit sessions parse concurrently).
 _FILENAME_CLAIM_HINT: contextvars.ContextVar[str] = contextvars.ContextVar(
     "qlda_ipc_filename_claim_hint", default=""
 )
@@ -32,16 +28,7 @@ def _clean_claim_no(value: Any) -> str:
 
 
 def claim_no_from_filename(filename: str) -> str:
-    """Extract the explicit IPC/Claim number from a filename.
-
-    Examples:
-      (SME213) IPC#6 (11102025).xlsx -> 6
-      IPC 03 Final.xlsx             -> 3
-      IPC03.xlsx                    -> 3
-      Claim-12 Rev1.xlsm            -> 12
-
-    Revision/date numbers elsewhere in the filename are deliberately ignored.
-    """
+    """Extract explicit IPC/Claim number and ignore revision/date numbers."""
     name = Path(str(filename or "")).stem
     patterns = (
         r"(?i)(?:^|[^A-Z0-9])IPC\s*(?:#|NO\.?|NUMBER|[-_])?\s*0*(\d{1,4})(?:\D|$)",
@@ -66,9 +53,6 @@ def _apply_filename_identity(result: dict[str, Any], filename: str) -> dict[str,
     source_raw = raw_internal or raw_metadata
     source_no = _clean_claim_no(source_raw)
 
-    # If the workbook and filename identify the same Claim, preserve the workbook
-    # formatting (e.g. 01, 04). This keeps existing DB keys/revision/period sync
-    # compatible. Only a true numeric mismatch is overridden by the filename.
     if source_no and source_no == file_no:
         target_raw = source_raw
         target_no = source_no
@@ -99,15 +83,14 @@ def _apply_filename_identity(result: dict[str, Any], filename: str) -> dict[str,
 
 
 def install_ipc_claim_number_fix() -> None:
-    """Use explicit IPC/Claim number in filename as the final save target.
+    """Protect Claim identity and keep legacy metadata compatible with adaptive parsing.
 
-    IPC workbooks are commonly copied from the previous period and the declaration
-    cell may still contain the old Claim number. An explicit filename such as
-    'IPC#6 ...xlsx' is therefore used to prevent accidentally overwriting IPC-05.
-
-    V3 also supplies the filename number *during* base parsing when an adaptive
-    form has no semantic Claim label, while preserving legacy zero-padded values
-    such as 01/04 whenever the workbook and filename agree numerically.
+    Rules:
+      - semantic labels from the adaptive parser have highest priority;
+      - old fixed cells are compatibility fallback only;
+      - filename IPC#/Claim number is used early if the workbook has no identity;
+      - filename overrides only a true Claim-number mismatch;
+      - zero-padded legacy values such as 01/04 are preserved when equivalent.
     """
     import ipc_claim_v622 as ipc
 
@@ -119,29 +102,76 @@ def install_ipc_claim_number_fix() -> None:
     def metadata_with_claim_identity(ws):
         raw = original_metadata(ws)
         metadata = dict(raw or {})
-        current_raw = str(metadata.get("claim_no") or "").strip()
-        current = _clean_claim_no(current_raw)
 
-        # Rule: semantic content first, legacy fixed cell second, filename hint
-        # third. Fixed cells are compatibility fallback only.
-        if not current and ws is not None:
-            try:
-                legacy_raw = str(ipc._safe_cell(ws, "B12") or "").strip()
-                legacy = _clean_claim_no(legacy_raw)
-            except Exception:
-                legacy_raw = ""
-                legacy = ""
-            if legacy:
-                metadata["claim_no"] = legacy_raw
-                adaptive = dict(metadata.get("_adaptive") or {})
-                sources = dict(adaptive.get("sources") or {})
-                fields = dict(adaptive.get("field_confidence") or {})
-                sources["claim_no"] = "B12 (legacy fallback)"
-                fields["claim_no"] = max(float(fields.get("claim_no") or 0), 0.55)
-                adaptive["sources"] = sources
-                adaptive["field_confidence"] = fields
-                metadata["_adaptive"] = adaptive
-                current = legacy
+        # Adaptive semantic parsing may encounter older workbooks that have values
+        # in the historical cells but no text labels. Fill only missing fields so
+        # semantic matches always win.
+        legacy_refs = {
+            "project": "B4",
+            "location": "B5",
+            "package": "B6",
+            "contractor": "B7",
+            "account_name": "B8",
+            "account_no": "B9",
+            "bank": "B10",
+            "bank_branch": "B11",
+            "currency": "B14",
+            "contract_no": "B15",
+        }
+        if ws is not None:
+            adaptive = dict(metadata.get("_adaptive") or {})
+            sources = dict(adaptive.get("sources") or {})
+            fields = dict(adaptive.get("field_confidence") or {})
+            for key, ref in legacy_refs.items():
+                if str(metadata.get(key) or "").strip():
+                    continue
+                try:
+                    value = ipc._safe_cell(ws, ref)
+                except Exception:
+                    value = ""
+                if value not in (None, "", 0, 0.0):
+                    metadata[key] = str(value).strip()
+                    sources[key] = f"{ref} (legacy fallback)"
+                    fields[key] = max(float(fields.get(key) or 0), 0.55)
+
+            # Legacy dates: keep blank for literal zero; otherwise normalize.
+            for key, ref in (("from_date", "B13"), ("to_date", "E13")):
+                if str(metadata.get(key) or "").strip():
+                    continue
+                try:
+                    value = ipc._safe_cell(ws, ref)
+                except Exception:
+                    value = ""
+                text = str(value or "").strip()
+                if value not in (None, "", 0, 0.0) and text not in {"0", "0.0"}:
+                    try:
+                        normalized = str(ipc._date_text(value) or "").strip()
+                    except Exception:
+                        normalized = text
+                    if normalized not in {"", "0", "0.0"}:
+                        metadata[key] = normalized
+                        sources[key] = f"{ref} (legacy fallback)"
+                        fields[key] = max(float(fields.get(key) or 0), 0.55)
+
+            current_raw = str(metadata.get("claim_no") or "").strip()
+            current = _clean_claim_no(current_raw)
+            if not current:
+                try:
+                    legacy_raw = str(ipc._safe_cell(ws, "B12") or "").strip()
+                    legacy = _clean_claim_no(legacy_raw)
+                except Exception:
+                    legacy_raw = ""
+                    legacy = ""
+                if legacy:
+                    metadata["claim_no"] = legacy_raw
+                    sources["claim_no"] = "B12 (legacy fallback)"
+                    fields["claim_no"] = max(float(fields.get("claim_no") or 0), 0.55)
+                    current = legacy
+            adaptive["sources"] = sources
+            adaptive["field_confidence"] = fields
+            metadata["_adaptive"] = adaptive
+        else:
+            current = _clean_claim_no(metadata.get("claim_no"))
 
         if not current:
             hint = _clean_claim_no(_FILENAME_CLAIM_HINT.get(""))
