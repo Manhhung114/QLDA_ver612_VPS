@@ -2,7 +2,8 @@ name: Local VPS Storage Check
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -12,33 +13,33 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: qlda_test
+          POSTGRES_PASSWORD: "postgres"
+          POSTGRES_USER: "postgres"
+          POSTGRES_DB: "qlda_test"
         ports:
-          - 5432:5432
+          - "5432:5432"
         options: >-
           --health-cmd="pg_isready -U postgres -d qlda_test"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/qlda_test
-      QLDA_STORAGE_BACKEND: local
-      QLDA_LOCAL_STORAGE_ROOT: ${{ runner.temp }}/qlda-data
-      QLDA_LOCAL_TRASH_ROOT: ${{ runner.temp }}/qlda-data/.trash
-      QLDA_PUBLIC_BASE_URL: https://qlda.example.test
-      QLDA_LOCAL_UPLOAD_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      QLDA_LOCAL_BOOTSTRAP_CODE: local-ci-bootstrap-2026
-      QLDA_LOCAL_LEGACY_MAX_UPLOAD_MB: 200
-      QLDA_LOCAL_DIRECT_MAX_UPLOAD_MB: 2048
-      QLDA_LOCAL_SESSION_TTL_HOURS: 12
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/qlda_test"
+      QLDA_STORAGE_BACKEND: "local"
+      QLDA_LOCAL_STORAGE_ROOT: "${{ runner.temp }}/qlda-data"
+      QLDA_LOCAL_TRASH_ROOT: "${{ runner.temp }}/qlda-data/.trash"
+      QLDA_PUBLIC_BASE_URL: "https://qlda.example.test"
+      QLDA_LOCAL_UPLOAD_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      QLDA_LOCAL_BOOTSTRAP_CODE: "local-ci-bootstrap-2026"
+      QLDA_LOCAL_LEGACY_MAX_UPLOAD_MB: "200"
+      QLDA_LOCAL_DIRECT_MAX_UPLOAD_MB: "2048"
+      QLDA_LOCAL_SESSION_TTL_HOURS: "12"
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Install local backend dependencies
         run: python -m pip install 'psycopg[binary]>=3.2,<4' 'psycopg-pool>=3.2,<4' requests
       - name: Compile local VPS integration
@@ -95,8 +96,6 @@ jobs:
           counts = local.record_file_counts(token, project_code='P01', kind='document', subtype='RFI', record_codes=['RFI-001'])['counts']
           assert counts['RFI-001']['count'] == 2
 
-          # The WebOpt runtime replaces DriveGateway._post; the local fix must
-          # restore local dispatch afterwards without affecting Drive mode.
           install_runtime()
           install_local_vps_runtime()
           cfg = DriveGatewayConfig.from_values(
@@ -119,7 +118,7 @@ jobs:
       - name: Test generated source local patch
         run: |
           python - <<'PY'
-          import base64, gzip, os
+          import base64, gzip
           from pathlib import Path
           from build_v621_webopt import _finalize_source
           from v622_auth_refresh_v4 import patch_auth_refresh_v4
