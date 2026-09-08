@@ -34,6 +34,7 @@ install_ai_live_context()
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
+from v622_ipc_claim_patch import patch_ipc_claims
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -61,6 +62,7 @@ def _compiled_vps_app(signature):
 
     source = _finalize_source(source)
     source = patch_boq_multisheet(source)
+    source = patch_ipc_claims(source)
     source = patch_auth_refresh_v4(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
