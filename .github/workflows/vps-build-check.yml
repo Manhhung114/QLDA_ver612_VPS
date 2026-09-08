@@ -19,7 +19,8 @@ jobs:
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
             v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_persistence_v622.py \
-            v622_ipc_claim_patch.py ipc_claim_v622.py \
+            v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py \
+            v622_report_cost_patch.py report_cost_v622.py \
             ai_live_context_v622.py ai_claim_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py
@@ -29,21 +30,25 @@ jobs:
           from v622_auth_refresh_v4 import patch_auth_refresh_v4
           from v622_boq_multisheet_patch import patch_boq_multisheet
           from v622_ipc_claim_patch import patch_ipc_claims
+          from v622_report_cost_patch import patch_report_cost
 
           p = Path('dist/streamlit_app.py')
           source = patch_boq_multisheet(p.read_text(encoding='utf-8'))
           source = patch_ipc_claims(source)
+          source = patch_report_cost(source)
           source = patch_auth_refresh_v4(source)
           compile(source, 'streamlit_app_vps.py', 'exec')
           assert 'V6.22 AUTH REFRESH V5' in source
           assert 'V6.22 BOQ MULTISHEET V3' in source
           assert 'V6.22 IPC CLAIM PAYMENT V1' in source
+          assert 'V6.22 REPORT COST V1' in source
           assert '_v622_render_ipc_claim_ui(db, pid' in source
+          assert '_v622_render_cost_report(db, pid)' in source
           assert 'Workbook BOQ' in source
           assert 'Lưu BOQ + workbook nhiều sheet vào dự án' in source
           assert 'Mở bằng tài khoản khác vẫn xem được dữ liệu này' in source
           assert 'Phụ lục tổng hợp giá trị' in source
-          print('QLDA VPS generated source + BOQ + IPC Claim patches: OK')
+          print('QLDA VPS generated source + BOQ + IPC Claim + Cost Report patches: OK')
           PY
 
       - name: Test BOQ multi-sheet workflow
@@ -77,6 +82,18 @@ jobs:
           grep -Fq 'st.tabs(labels)' ipc_claim_v622.py
           grep -Fq 'Đối chiếu BOQ' ipc_claim_v622.py
           grep -Fq 'patch_ipc_claims(source)' streamlit_app.py
+
+      - name: Test live cost report
+        run: |
+          grep -Fq 'V6.22 REPORT COST V1' v622_report_cost_patch.py
+          grep -Fq 'Báo cáo chi phí' report_cost_v622.py
+          grep -Fq 'BAC / BOQ' report_cost_v622.py
+          grep -Fq 'VO được duyệt' report_cost_v622.py
+          grep -Fq 'Claim được duyệt' report_cost_v622.py
+          grep -Fq 'Đã giải ngân' report_cost_v622.py
+          grep -Fq 'payment_claims' report_cost_v622.py
+          grep -Fq 'cost_variations' report_cost_v622.py
+          grep -Fq 'patch_report_cost(source)' streamlit_app.py
 
       - name: Test AI live project snapshot
         run: |
@@ -127,6 +144,9 @@ jobs:
           grep -Fq 'boq_persistence_v622.py' vps/deploy.sh
           grep -Fq 'v622_ipc_claim_patch.py' vps/deploy.sh
           grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
+          grep -Fq 'ipc_claim_fast_v622.py' vps/deploy.sh
+          grep -Fq 'v622_report_cost_patch.py' vps/deploy.sh
+          grep -Fq 'report_cost_v622.py' vps/deploy.sh
           grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
           grep -Fq 'ai_claim_context_v622.py' vps/deploy.sh
           grep -Fq '+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}' vps/deploy.sh
