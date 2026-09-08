@@ -124,6 +124,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ipc_claim_number_fix_v622.py" \
   "$APP_DIR/ipc_claim_period_v622.py" \
   "$APP_DIR/ipc_claim_delete_v622.py" \
+  "$APP_DIR/multicore_excel_v622.py" \
   "$APP_DIR/v622_vo_claim_patch.py" \
   "$APP_DIR/vo_claim_v622.py" \
   "$APP_DIR/v622_report_cost_patch.py" \
@@ -134,6 +135,16 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/postgres_backend_v622.py" \
   "$APP_DIR/vps_postgres_resilience.py" \
   "$APP_DIR/streamlit_secrets_v622.py"
+
+# Validate that this host exposes the expected multicore configuration before
+# restarting production. This does not print secrets.
+run_as_app "$VENV_DIR/bin/python" - <<'PY'
+from multicore_excel_v622 import runtime_config
+cfg = runtime_config()
+print("QLDA multicore:", cfg)
+assert cfg["cpu_count"] >= 1
+assert cfg["child_workers"] >= 1
+PY
 
 systemctl restart "$SERVICE"
 
