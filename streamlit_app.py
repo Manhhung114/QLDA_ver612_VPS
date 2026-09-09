@@ -26,6 +26,13 @@ from vps_postgres_resilience import install_vps_postgres_resilience
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
 
+# Harden Gemini routing before the generated Streamlit source imports/uses the
+# AI assistant. 503/429 failures are retried briefly, then routed across stable
+# Flash / Flash-Lite families with per-model cooldown.
+from gemini_resilience_v622 import install_gemini_resilience
+
+install_gemini_resilience()
+
 # Route every AI snapshot to the same PostgreSQL LIVE backend and append
 # project-level IPC/Claim + signed VO detail context.
 from ai_live_context_v622 import install_ai_live_context
