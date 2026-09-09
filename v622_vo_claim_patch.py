@@ -83,7 +83,7 @@ def _find_vo_with(fn: ast.FunctionDef) -> ast.With | None:
 
 
 def patch_vo_claims(source: str) -> str:
-    """Replace the legacy manual VO body with persistent Excel-driven VO UI."""
+    """Replace the legacy VO body with the independent signed increase/decrease UI."""
     if PATCH_MARKER in source:
         return source
     tree = ast.parse(source)
@@ -107,7 +107,7 @@ def patch_vo_claims(source: str) -> str:
     insert_at = fn.lineno - 1
     helper = (
         f"# {PATCH_MARKER} HELPER\n"
-        "from vo_claim_v622 import render_vo_ui as _v622_render_vo_ui\n\n"
+        "from vo_independent_v622 import render_vo_ui as _v622_render_vo_ui\n\n"
     )
     lines.insert(insert_at, helper)
     patched = "".join(lines)
