@@ -1,0 +1,70 @@
+name: VO Independent Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  vo-independent:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install parser dependency
+        run: python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
+
+      - name: Compile independent VO modules
+        run: |
+          python -m py_compile vo_independent_v622.py v622_vo_claim_patch.py ai_vo_context_v622.py
+          grep -Fq 'V6.22 VO INDEPENDENT V1' vo_independent_v622.py
+          grep -Fq 'VO là sheet độc lập' vo_independent_v622.py
+          grep -Fq 'Phát sinh tăng' vo_independent_v622.py
+          grep -Fq 'Phát sinh giảm' vo_independent_v622.py
+          grep -Fq 'không tự cộng vào hợp đồng chính' vo_independent_v622.py
+          grep -Fq 'from vo_independent_v622 import render_vo_ui as _v622_render_vo_ui' v622_vo_claim_patch.py
+          grep -Fq 'VO không tự điều chỉnh ngân sách/hợp đồng trong hệ thống' ai_vo_context_v622.py
+
+      - name: Verify VO is detached from contract cost rows
+        run: |
+          python - <<'PY'
+          import sqlite3
+          import vo_claim_v622 as core
+          import vo_independent_v622 as independent
+
+          assert getattr(core, '_qlda_vo_independent_installed', False)
+          inc, dec, net = independent._summary_values({'increase_amount': 200, 'decrease_amount': -300})
+          assert (inc, dec, net) == (200.0, -300.0, -100.0)
+
+          conn = sqlite3.connect(':memory:')
+          conn.execute('CREATE TABLE cost_variations(project_id INTEGER, description TEXT)')
+          conn.execute('INSERT INTO cost_variations VALUES(1, ?)', ('[VO_EXCEL] old auto row',))
+          conn.execute('INSERT INTO cost_variations VALUES(1, ?)', ('Manual contract adjustment',))
+          conn.commit()
+
+          class DB:
+              def connect(self):
+                  return conn
+
+          independent._detach_legacy_excel_vo_rows(DB(), 1)
+          rows = [r[0] for r in conn.execute('SELECT description FROM cost_variations ORDER BY description').fetchall()]
+          assert rows == ['Manual contract adjustment'], rows
+          print('VO_INDEPENDENT_CONTRACT_DETACH_OK')
+          PY
+
+      - name: Verify generated source uses independent renderer
+        run: |
+          python build_v621_webopt.py
+          python - <<'PY'
+          from pathlib import Path
+          from v622_vo_claim_patch import patch_vo_claims
+
+          source = patch_vo_claims(Path('dist/streamlit_app.py').read_text(encoding='utf-8'))
+          assert 'from vo_independent_v622 import render_vo_ui as _v622_render_vo_ui' in source
+          assert '_v622_render_vo_ui(db, pid' in source
+          compile(source, 'generated_vo_independent.py', 'exec')
+          print('VO_INDEPENDENT_GENERATED_SOURCE_OK')
+          PY
