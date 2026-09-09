@@ -9,6 +9,7 @@ from openpyxl import Workbook
 
 import ai_service
 import boq_multisheet_v622 as boq
+from ai_live_context_v622 import install_ai_live_context
 from boq_cost_components_v622 import install_boq_cost_components
 from cloud_db import CloudDatabase
 
@@ -16,6 +17,9 @@ from cloud_db import CloudDatabase
 class BOQCostComponentsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Match the real VPS startup order: install the live snapshot wrapper
+        # first, then extend its BOQ appendix with material/labor components.
+        install_ai_live_context()
         install_boq_cost_components()
 
     @staticmethod
