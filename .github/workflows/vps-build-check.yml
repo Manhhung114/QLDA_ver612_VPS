@@ -23,7 +23,7 @@ jobs:
             ipc_adaptive_parser_v622.py ipc_claim_number_fix_v622.py ipc_claim_period_v622.py ipc_claim_delete_v622.py \
             v622_vo_claim_patch.py vo_claim_v622.py \
             v622_report_cost_patch.py report_cost_v622.py \
-            ai_live_context_v622.py ai_claim_context_v622.py ai_vo_context_v622.py ai_service.py \
+            gemini_resilience_v622.py ai_live_context_v622.py ai_claim_context_v622.py ai_vo_context_v622.py ai_service.py \
             postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
             v621_webopt_runtime.py cloud_db.py drive_gateway.py
           python build_v621_webopt.py
@@ -156,6 +156,16 @@ jobs:
           grep -Fq 'VO / PHÁT SINH LIVE' ai_vo_context_v622.py
           grep -Fq 'install_ai_vo_context()' streamlit_app.py
 
+      - name: Test Gemini overload resilience
+        run: |
+          python -m unittest discover -s tests -p 'test_gemini_resilience_v622.py' -v
+          grep -Fq 'V6.22 GEMINI RESILIENCE V2' gemini_resilience_v622.py
+          grep -Fq 'gemini-3.6-flash' gemini_resilience_v622.py
+          grep -Fq 'gemini-2.5-flash' gemini_resilience_v622.py
+          grep -Fq 'gemini-2.5-flash-lite' gemini_resilience_v622.py
+          grep -Fq 'GEMINI_MODEL_COOLDOWN_SECONDS' gemini_resilience_v622.py
+          grep -Fq 'install_gemini_resilience()' streamlit_app.py
+
       - name: Build Docker image
         run: |
           set -euxo pipefail
@@ -193,6 +203,7 @@ jobs:
           grep -Fq 'ipc_adaptive_parser_v622.py' vps/deploy.sh
           grep -Fq 'v622_vo_claim_patch.py' vps/deploy.sh
           grep -Fq 'vo_claim_v622.py' vps/deploy.sh
+          grep -Fq 'gemini_resilience_v622.py' vps/deploy.sh
           grep -Fq 'ai_vo_context_v622.py' vps/deploy.sh
           grep -Fq 'v622_report_cost_patch.py' vps/deploy.sh
           grep -Fq 'report_cost_v622.py' vps/deploy.sh
