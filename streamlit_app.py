@@ -43,6 +43,12 @@ install_ai_live_context()
 install_ai_claim_context()
 install_ai_vo_context()
 
+# Keep legacy all-in BOQ values unchanged while adding nullable material/labor
+# unit prices and calculated component costs for Excel import and AI context.
+from boq_cost_components_v622 import install_boq_cost_components
+
+install_boq_cost_components()
+
 # IPC workbooks are large and openpyxl ReadOnlyWorksheet random cell access is
 # extremely slow. Install the sequential parser/cache first, then label-based
 # legacy fixes, then the adaptive semantic parser. Multicore Excel is installed
