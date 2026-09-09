@@ -67,6 +67,13 @@ install_ipc_adaptive_parser()
 install_multicore_excel()
 install_ipc_claim_number_fix()
 
+# One business vocabulary for BOQ + Claim:
+# Khối lượng; Đơn giá -> Vật tư / Nhân công. Legacy DB column names remain
+# untouched for backward compatibility.
+from boq_claim_terms_v622 import install_boq_claim_terms
+
+install_boq_claim_terms()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
