@@ -6,13 +6,24 @@ from pathlib import Path
 
 from cloud_db import CloudDatabase
 import ipc_claim_v622 as ipc
-from v622_ipc_claim_patch import DUE_DATE_PATCH_MARKER, install_ipc_claim_due_date, patch_ipc_claims
+from v622_ipc_claim_patch import (
+    DUE_DATE_PATCH_MARKER,
+    _claim_payment_delay_days,
+    install_ipc_claim_due_date,
+    patch_ipc_claims,
+)
 
 
 class IPCClaimDueDateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         install_ipc_claim_due_date()
+
+    def test_payment_delay_is_calculated_separately_for_each_claim(self):
+        self.assertEqual(_claim_payment_delay_days("2025-04-11", "2025-04-20"), 9)
+        self.assertEqual(_claim_payment_delay_days("2025-05-15", "2025-05-15"), 0)
+        self.assertEqual(_claim_payment_delay_days("2025-06-10", "2025-06-05"), 0)
+        self.assertIsNone(_claim_payment_delay_days("2025-07-01", ""))
 
     def test_due_date_column_is_added_and_persisted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +55,10 @@ class IPCClaimDueDateTests(unittest.TestCase):
             claim = ipc.list_ipc_claims(db, pid)[0]
             self.assertEqual(claim["payment_due_date"], "2026-09-30")
             self.assertEqual(claim["disbursement_date"], "2026-10-02")
+            self.assertEqual(
+                _claim_payment_delay_days(claim["payment_due_date"], claim["disbursement_date"]),
+                2,
+            )
 
     def test_due_date_survives_claim_revision_save(self):
         with tempfile.TemporaryDirectory() as tmp:
