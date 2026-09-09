@@ -20,8 +20,11 @@ jobs:
       - name: Compile independent VO modules
         run: |
           python -m py_compile vo_independent_v622.py v622_vo_claim_patch.py ai_vo_context_v622.py
-          grep -Fq 'V6.22 VO INDEPENDENT V1' vo_independent_v622.py
+          grep -Fq 'V6.22 VO INDEPENDENT TABS V2' vo_independent_v622.py
           grep -Fq 'VO là sheet độc lập' vo_independent_v622.py
+          grep -Fq 'Mỗi VO được lưu thành một sheet riêng tương tự từng Claim' vo_independent_v622.py
+          grep -Fq 'labels = ["📊 Tổng hợp"]' vo_independent_v622.py
+          grep -Fq 'st.tabs(["Tổng quan", "Excel", "Chi tiết tăng/giảm", "Lịch sử"])' vo_independent_v622.py
           grep -Fq 'Phát sinh tăng' vo_independent_v622.py
           grep -Fq 'Phát sinh giảm' vo_independent_v622.py
           grep -Fq 'không tự cộng vào hợp đồng chính' vo_independent_v622.py
