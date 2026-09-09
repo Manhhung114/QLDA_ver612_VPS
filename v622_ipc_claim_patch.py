@@ -4,10 +4,11 @@ import ast
 import inspect
 import threading
 import unicodedata
+from datetime import datetime
 
 
 PATCH_MARKER = "V6.22 IPC CLAIM PAYMENT V1"
-DUE_DATE_PATCH_MARKER = "V6.22 IPC CLAIM DUE DATE V1"
+DUE_DATE_PATCH_MARKER = "V6.22 IPC CLAIM DUE DATE V2"
 _DUE_DATE_LOCK = threading.RLock()
 
 
@@ -15,6 +16,26 @@ def _norm(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return text.lower().replace("đ", "d")
+
+
+def _claim_payment_delay_days(payment_due_date, disbursement_date):
+    """Return late-payment days for one Claim; None until both dates are available."""
+    def parse(value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(text, fmt).date()
+            except Exception:
+                pass
+        return None
+
+    due = parse(payment_due_date)
+    paid = parse(disbursement_date)
+    if due is None or paid is None:
+        return None
+    return max(0, (paid - due).days)
 
 
 def _is_tabs_call(node: ast.AST) -> bool:
@@ -130,7 +151,7 @@ def _column_names(connection, table: str) -> set[str]:
 
 
 def install_ipc_claim_due_date() -> None:
-    """Add a persistent payment due date to every IPC Claim without replacing old Claim data."""
+    """Add due date and calculated late-payment days to every IPC Claim."""
     import ipc_claim_v622 as ipc
 
     if getattr(ipc, "_qlda_ipc_claim_due_date_installed", False):
@@ -140,6 +161,7 @@ def install_ipc_claim_due_date() -> None:
         if getattr(ipc, "_qlda_ipc_claim_due_date_installed", False):
             return
 
+        ipc._claim_payment_delay_days = _claim_payment_delay_days
         original_ensure_tables = ipc._ensure_tables
 
         def ensure_tables_with_due_date(connection) -> None:
@@ -199,6 +221,8 @@ def install_ipc_claim_due_date() -> None:
                 '                        "Revision": int(c.get("latest_revision") or 0),\n',
                 '                        "Giải ngân (VND)": float(c.get("disbursed_amount") or 0),\n'
                 '                        "Tới hạn thanh toán": c.get("payment_due_date") or "",\n'
+                '                        "Ngày giải ngân": c.get("disbursement_date") or "",\n'
+                '                        "Trễ thanh toán (ngày)": _claim_payment_delay_days(c.get("payment_due_date"), c.get("disbursement_date")),\n'
                 '                        "Revision": int(c.get("latest_revision") or 0),\n',
                 "render.summary",
             )
@@ -208,8 +232,23 @@ def install_ipc_claim_due_date() -> None:
                 '                    f"**File:** {claim.get(\'filename\',\'\')} · Revision {int(claim.get(\'latest_revision\') or 0)}  \\n"\n',
                 '                    f"**Kỳ:** {claim.get(\'from_date\',\'\')} → {claim.get(\'to_date\',\'\')}  \\n"\n'
                 '                    f"**Tới hạn thanh toán:** {claim.get(\'payment_due_date\',\'\')}  \\n"\n'
+                '                    f"**Ngày giải ngân:** {claim.get(\'disbursement_date\',\'\')}  \\n"\n'
+                '                    f"**Trễ hạn thanh toán:** {_claim_payment_delay_days(claim.get(\'payment_due_date\'), claim.get(\'disbursement_date\')) if _claim_payment_delay_days(claim.get(\'payment_due_date\'), claim.get(\'disbursement_date\')) is not None else \'Chưa xác định\'}{\' ngày\' if _claim_payment_delay_days(claim.get(\'payment_due_date\'), claim.get(\'disbursement_date\')) is not None else \'\'}  \\n"\n'
                 '                    f"**File:** {claim.get(\'filename\',\'\')} · Revision {int(claim.get(\'latest_revision\') or 0)}  \\n"\n',
                 "render.overview",
+            )
+            render_source = _replace_once(
+                render_source,
+                '                status_index = statuses.index(current_status) if current_status in statuses else 0\n'
+                '                with st.form(f"ipc_finance_{claim_id}"):\n',
+                '                status_index = statuses.index(current_status) if current_status in statuses else 0\n'
+                '                _delay_days = _claim_payment_delay_days(claim.get("payment_due_date"), claim.get("disbursement_date"))\n'
+                '                if _delay_days is None:\n'
+                '                    st.metric("Trễ hạn thanh toán", "Chưa xác định")\n'
+                '                else:\n'
+                '                    st.metric("Trễ hạn thanh toán", f"{_delay_days} ngày")\n'
+                '                with st.form(f"ipc_finance_{claim_id}"):\n',
+                "render.delay_metric",
             )
             render_source = _replace_once(
                 render_source,
@@ -269,8 +308,6 @@ def patch_ipc_claims(source: str) -> str:
     )
     lines[start:end] = [replacement]
 
-    # Inject helper imports immediately before the cost function. The payment body
-    # replacement above does not change any lines before the function definition.
     insert_at = fn.lineno - 1
     helper = (
         f"# {PATCH_MARKER} HELPER\n"
