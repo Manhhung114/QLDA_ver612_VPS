@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import ast
+import inspect
+import threading
 import unicodedata
 
 
 PATCH_MARKER = "V6.22 IPC CLAIM PAYMENT V1"
+DUE_DATE_PATCH_MARKER = "V6.22 IPC CLAIM DUE DATE V1"
+_DUE_DATE_LOCK = threading.RLock()
 
 
 def _norm(value: str) -> str:
@@ -97,6 +101,148 @@ def _find_payment_with(fn: ast.FunctionDef) -> ast.With | None:
     return sorted(candidates, key=lambda n: n.lineno)[0]
 
 
+def _replace_once(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise RuntimeError(f"{DUE_DATE_PATCH_MARKER}: không tìm thấy đúng 1 vị trí {label} (found={count})")
+    return source.replace(old, new, 1)
+
+
+def _redefine(ipc, function_name: str, source: str) -> None:
+    compile(source, f"ipc_claim_v622_{function_name}_due_date.py", "exec")
+    exec(source, ipc.__dict__, ipc.__dict__)
+
+
+def _column_names(connection, table: str) -> set[str]:
+    cursor = connection.execute(f"SELECT * FROM {table} LIMIT 0")
+    description = getattr(cursor, "description", None) or []
+    names: set[str] = set()
+    for item in description:
+        name = getattr(item, "name", None)
+        if name is None:
+            try:
+                name = item[0]
+            except Exception:
+                name = None
+        if name:
+            names.add(str(name))
+    return names
+
+
+def install_ipc_claim_due_date() -> None:
+    """Add a persistent payment due date to every IPC Claim without replacing old Claim data."""
+    import ipc_claim_v622 as ipc
+
+    if getattr(ipc, "_qlda_ipc_claim_due_date_installed", False):
+        return
+
+    with _DUE_DATE_LOCK:
+        if getattr(ipc, "_qlda_ipc_claim_due_date_installed", False):
+            return
+
+        original_ensure_tables = ipc._ensure_tables
+
+        def ensure_tables_with_due_date(connection) -> None:
+            original_ensure_tables(connection)
+            columns = _column_names(connection, ipc.CLAIMS_TABLE)
+            if "payment_due_date" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {ipc.CLAIMS_TABLE} ADD COLUMN payment_due_date TEXT DEFAULT ''"
+                )
+
+        ensure_tables_with_due_date.__name__ = "_ensure_tables"
+        ensure_tables_with_due_date.__module__ = ipc.__name__
+        ipc._ensure_tables = ensure_tables_with_due_date
+
+        save_source = inspect.getsource(ipc.save_ipc_claim)
+        if '"payment_due_date"' not in save_source:
+            save_source = _replace_once(
+                save_source,
+                '            "payment_status": str(old.get("payment_status") or "Nháp"),\n'
+                '            "disbursement_date": str(old.get("disbursement_date") or ""),\n',
+                '            "payment_status": str(old.get("payment_status") or "Nháp"),\n'
+                '            "payment_due_date": str(old.get("payment_due_date") or ""),\n'
+                '            "disbursement_date": str(old.get("disbursement_date") or ""),\n',
+                "save_ipc_claim.payment_due_date",
+            )
+            _redefine(ipc, "save_ipc_claim", save_source)
+
+        update_source = inspect.getsource(ipc.update_ipc_claim_finance)
+        if "payment_due_date: str" not in update_source:
+            update_source = _replace_once(
+                update_source,
+                '    payment_status: str,\n    disbursement_date: str = "",\n',
+                '    payment_status: str,\n    payment_due_date: str = "",\n    disbursement_date: str = "",\n',
+                "update_ipc_claim_finance.signature",
+            )
+            update_source = _replace_once(
+                update_source,
+                '                   SET approved_amount=?,disbursed_amount=?,payment_status=?,disbursement_date=?,note=?,updated_at=?\n',
+                '                   SET approved_amount=?,disbursed_amount=?,payment_status=?,payment_due_date=?,disbursement_date=?,note=?,updated_at=?\n',
+                "update_ipc_claim_finance.sql",
+            )
+            update_source = _replace_once(
+                update_source,
+                '                float(approved_amount or 0), float(disbursed_amount or 0), str(payment_status or ""),\n'
+                '                str(disbursement_date or ""), str(note or ""), now, str(claim_id),\n',
+                '                float(approved_amount or 0), float(disbursed_amount or 0), str(payment_status or ""),\n'
+                '                str(payment_due_date or ""), str(disbursement_date or ""), str(note or ""), now, str(claim_id),\n',
+                "update_ipc_claim_finance.params",
+            )
+            _redefine(ipc, "update_ipc_claim_finance", update_source)
+
+        render_source = inspect.getsource(ipc.render_ipc_claim_ui)
+        if "Ngày tới hạn thanh toán" not in render_source:
+            render_source = _replace_once(
+                render_source,
+                '                        "Giải ngân (VND)": float(c.get("disbursed_amount") or 0),\n'
+                '                        "Revision": int(c.get("latest_revision") or 0),\n',
+                '                        "Giải ngân (VND)": float(c.get("disbursed_amount") or 0),\n'
+                '                        "Tới hạn thanh toán": c.get("payment_due_date") or "",\n'
+                '                        "Revision": int(c.get("latest_revision") or 0),\n',
+                "render.summary",
+            )
+            render_source = _replace_once(
+                render_source,
+                '                    f"**Kỳ:** {claim.get(\'from_date\',\'\')} → {claim.get(\'to_date\',\'\')}  \\n"\n'
+                '                    f"**File:** {claim.get(\'filename\',\'\')} · Revision {int(claim.get(\'latest_revision\') or 0)}  \\n"\n',
+                '                    f"**Kỳ:** {claim.get(\'from_date\',\'\')} → {claim.get(\'to_date\',\'\')}  \\n"\n'
+                '                    f"**Tới hạn thanh toán:** {claim.get(\'payment_due_date\',\'\')}  \\n"\n'
+                '                    f"**File:** {claim.get(\'filename\',\'\')} · Revision {int(claim.get(\'latest_revision\') or 0)}  \\n"\n',
+                "render.overview",
+            )
+            render_source = _replace_once(
+                render_source,
+                '                    status = st.selectbox("Trạng thái Claim", statuses, index=status_index)\n'
+                '                    disbursement_date = st.date_input(\n',
+                '                    status = st.selectbox("Trạng thái Claim", statuses, index=status_index)\n'
+                '                    payment_due_date = st.date_input(\n'
+                '                        "Ngày tới hạn thanh toán", value=_parse_ui_date(claim.get("payment_due_date")),\n'
+                '                    )\n'
+                '                    disbursement_date = st.date_input(\n',
+                "render.form_due_date",
+            )
+            render_source = _replace_once(
+                render_source,
+                '                            payment_status=status,\n'
+                '                            disbursement_date=disbursement_date.strftime("%Y-%m-%d"),\n',
+                '                            payment_status=status,\n'
+                '                            payment_due_date=payment_due_date.strftime("%Y-%m-%d"),\n'
+                '                            disbursement_date=disbursement_date.strftime("%Y-%m-%d"),\n',
+                "render.save_due_date",
+            )
+            render_source = _replace_once(
+                render_source,
+                '                    submitted = st.form_submit_button("💾 Cập nhật duyệt / giải ngân", disabled=not bool(can_update), use_container_width=True)\n',
+                '                    submitted = st.form_submit_button("💾 Cập nhật duyệt / tới hạn / giải ngân", disabled=not bool(can_update), use_container_width=True)\n',
+                "render.submit_label",
+            )
+            _redefine(ipc, "render_ipc_claim_ui", render_source)
+
+        ipc._qlda_ipc_claim_due_date_installed = True
+        ipc._qlda_ipc_claim_due_date_marker = DUE_DATE_PATCH_MARKER
+
+
 def patch_ipc_claims(source: str) -> str:
     """Replace legacy manual payment body with persistent IPC Claim UI."""
     if PATCH_MARKER in source:
@@ -128,6 +274,8 @@ def patch_ipc_claims(source: str) -> str:
     insert_at = fn.lineno - 1
     helper = (
         f"# {PATCH_MARKER} HELPER\n"
+        "from v622_ipc_claim_patch import install_ipc_claim_due_date as _v622_install_ipc_claim_due_date\n"
+        "_v622_install_ipc_claim_due_date()\n"
         "from ipc_claim_v622 import render_ipc_claim_ui as _v622_render_ipc_claim_ui\n"
         "from ipc_claim_period_v622 import render_ipc_claim_period_ui as _v622_render_ipc_claim_period_ui\n"
         "from ipc_claim_delete_v622 import render_ipc_claim_delete_ui as _v622_render_ipc_claim_delete_ui\n\n"
@@ -140,6 +288,7 @@ def patch_ipc_claims(source: str) -> str:
         or "_v622_render_ipc_claim_ui" not in patched
         or "_v622_render_ipc_claim_period_ui" not in patched
         or "_v622_render_ipc_claim_delete_ui" not in patched
+        or "_v622_install_ipc_claim_due_date()" not in patched
     ):
         raise RuntimeError("V6.22 IPC patch marker missing after injection")
     compile(patched, "streamlit_app_v622_ipc_claim.py", "exec")
