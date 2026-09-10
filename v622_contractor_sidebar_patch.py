@@ -1,32 +1,40 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "V6.22 CONTRACTOR SIDEBAR FINAL UI V2 ADMIN CONTROLS"
-ADMIN_UI_MARKER = "V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V1"
-
-
-def _replace_once(source: str, old: str, new: str, label: str) -> str:
-    count = source.count(old)
-    if count != 1:
-        raise RuntimeError(f"{PATCH_MARKER}: expected one {label}, found {count}")
-    return source.replace(old, new, 1)
+PATCH_MARKER = "V6.22 CONTRACTOR SIDEBAR FINAL UI V3 ADMIN CONTROLS"
+ADMIN_UI_MARKER = "V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V2"
 
 
 def patch_contractor_sidebar_ui(source: str) -> str:
-    """Finalize the contractor sidebar after access rules are patched.
+    """Finalize the contractor sidebar and keep Admin controls visible.
 
-    v622_contractor_access_patch replaces the basic contractor selector with the
-    authorization-aware selector. That selector intentionally restricts rows for
-    CONTRACTOR accounts, but it does not render the Admin Add/Update/Delete block.
-    Inject the Admin tools immediately after the authorized selector, then remove
-    the legacy Contractor main-tab.
+    The finalizer is intentionally compatible with both supported call orders:
+    directly after the basic contractor-workspace patch, and after the stricter
+    contractor-access patch used in production. In either case the destructive
+    Add/Update/Delete tools are rendered only when the authenticated app role is
+    Admin (`_is_admin()`). Contractor accounts are forced to update/read roles by
+    the access layer, so they can never satisfy this condition.
     """
     if PATCH_MARKER in source:
         return source
 
-    selector = '''if _master_pid:\n    pid, _contractor_ctx = _v622_render_contractor_selector(\n        db, _master_pid, can_admin=bool(_is_admin()), current_user=_streamlit_user_email(),\n        approval_role=_v622_approval_role,\n    )\n'''
-    selector_with_admin = selector + '''# V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V1\n# The authorization-aware selector filters which contractor can be seen. Admin\n# management controls are rendered separately because that selector deliberately\n# does not own destructive management actions.\nif (\n    _master_pid\n    and _contractor_ctx\n    and bool(_is_admin())\n    and str(_v622_approval_role or "").strip().upper() != "CONTRACTOR"\n):\n    from contractor_sidebar_admin_v622 import _render_admin_tools as _v622_render_contractor_admin_tools\n    _v622_render_contractor_admin_tools(st, db, int(_master_pid), dict(_contractor_ctx))\n'''
-    source = _replace_once(source, selector, selector_with_admin, "authorized contractor selector")
+    authorized_selector = '''if _master_pid:\n    pid, _contractor_ctx = _v622_render_contractor_selector(\n        db, _master_pid, can_admin=bool(_is_admin()), current_user=_streamlit_user_email(),\n        approval_role=_v622_approval_role,\n    )\n'''
+    basic_selector = '''if _master_pid:\n    pid, _contractor_ctx = _v622_render_contractor_selector(\n        db, _master_pid, can_admin=bool(_is_admin()), current_user=_streamlit_user_email()\n    )\n'''
+
+    matches = []
+    for selector in (authorized_selector, basic_selector):
+        count = source.count(selector)
+        if count:
+            matches.append((selector, count))
+    if len(matches) != 1 or matches[0][1] != 1:
+        found = sum(count for _, count in matches)
+        raise RuntimeError(
+            f"{PATCH_MARKER}: expected exactly one contractor selector, found {found}"
+        )
+
+    selector = matches[0][0]
+    admin_block = '''# V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V2\n# Access-aware selection controls visibility of contractor data; management is a\n# separate Admin-only capability rendered immediately below that selector.\nif _master_pid and _contractor_ctx and bool(_is_admin()):\n    from contractor_sidebar_admin_v622 import _render_admin_tools as _v622_render_contractor_admin_tools\n    _v622_render_contractor_admin_tools(st, db, int(_master_pid), dict(_contractor_ctx))\n'''
+    source = source.replace(selector, selector + admin_block, 1)
 
     candidates = (
         '    *([("🏢 Nhà thầu", lambda: _v622_render_contractor_management(db, _master_pid, can_admin=bool(_is_admin())))] if _v622_can_view_all_contractors else []),\n',
