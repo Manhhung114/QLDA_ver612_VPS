@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 
-PATCH_MARKER = "V6.22 CLAIM COMPONENT FULLSCAN V1"
+PATCH_MARKER = "V6.22 CLAIM COMPONENT FULLSCAN V2"
 MAX_CLAIMS = 80
 
 
@@ -67,8 +67,8 @@ def _claim_headers(connection, project_id: int, question: str = "") -> list[dict
     try:
         rows = connection.execute(
             "SELECT claim_id,claim_no,claim_code,filename,updated_at "
-            "FROM payment_claims WHERE project_id=? ORDER BY claim_no LIMIT ?",
-            (int(project_id), MAX_CLAIMS),
+            "FROM payment_claims WHERE project_id=? ORDER BY claim_no LIMIT 80",
+            (int(project_id),),
         ).fetchall()
     except Exception:
         return []
@@ -78,7 +78,22 @@ def _claim_headers(connection, project_id: int, question: str = "") -> list[dict
     return out
 
 
-def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
+def _scan_one_claim(connection, claim: dict[str, Any]) -> dict[str, Any]:
+    """Read every GTHT row and derive material/labor components without changing Claim totals.
+
+    In the real Claim template:
+      R/S/T = material quantity * material unit price
+      U/V/W = installation quantity * (material unit price + labor unit price)
+      X/Y/Z = installation quantity * material unit price (material deduction)
+
+    Therefore pure labor is:
+      installation quantity * labor unit price
+    and can be cross-checked as:
+      gross installation value - material deduction.
+
+    The existing U/V/W fields are gross installation values and MUST NOT be
+    overwritten with pure labor values.
+    """
     claim_id = str(claim.get("claim_id") or "")
     if not claim_id:
         return {"ok": False, "claim_code": str(claim.get("claim_code") or ""), "reason": "missing_claim_id"}
@@ -90,7 +105,8 @@ def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) 
                       material_previous_qty,material_current_qty,material_cumulative_qty,
                       installation_previous_pct,installation_current_pct,installation_cumulative_pct,
                       material_previous_value,material_current_value,material_cumulative_value,
-                      installation_previous_value,installation_current_value,installation_cumulative_value
+                      installation_previous_value,installation_current_value,installation_cumulative_value,
+                      deduction_previous,deduction_current,deduction_cumulative
                FROM payment_claim_items WHERE claim_id=? ORDER BY row_no""",
             (claim_id,),
         ).fetchall()
@@ -110,18 +126,20 @@ def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) 
         "labor_previous_total": 0.0,
         "labor_current_total": 0.0,
         "labor_cumulative_total": 0.0,
+        "gross_installation_previous_total": 0.0,
+        "gross_installation_current_total": 0.0,
+        "gross_installation_cumulative_total": 0.0,
+        "deduction_previous_total": 0.0,
+        "deduction_current_total": 0.0,
+        "deduction_cumulative_total": 0.0,
     }
-    stored = {
-        "material_current_total": 0.0,
-        "material_cumulative_total": 0.0,
-        "labor_current_total": 0.0,
-        "labor_cumulative_total": 0.0,
-    }
-    updates: list[tuple[float, float, float, float, float, float, str, int]] = []
     rows_with_labor_qty = 0
     rows_with_material_qty = 0
     rows_with_labor_price = 0
     rows_with_material_price = 0
+    labor_crosscheck_rows = 0
+    labor_crosscheck_mismatch_rows = 0
+    labor_crosscheck_delta = 0.0
 
     for item in items:
         material_price = _num(item.get("material_unit_price"))
@@ -129,6 +147,9 @@ def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) 
         material_previous_qty = _num(item.get("material_previous_qty"))
         material_current_qty = _num(item.get("material_current_qty"))
         material_cumulative_qty = _num(item.get("material_cumulative_qty"))
+
+        # Legacy DB column names end in _pct, but in the current Claim workbook
+        # these columns are Khối lượng lắp đặt: kỳ trước / kỳ này / lũy kế.
         labor_previous_qty = _num(item.get("installation_previous_pct"))
         labor_current_qty = _num(item.get("installation_current_pct"))
         labor_cumulative_qty = _num(item.get("installation_cumulative_pct"))
@@ -142,54 +163,36 @@ def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) 
         if labor_previous_qty != 0 or labor_current_qty != 0 or labor_cumulative_qty != 0:
             rows_with_labor_qty += 1
 
-        material_previous_value = material_previous_qty * material_price
-        material_current_value = material_current_qty * material_price
-        material_cumulative_value = material_cumulative_qty * material_price
-        labor_previous_value = labor_previous_qty * labor_price
-        labor_current_value = labor_current_qty * labor_price
-        labor_cumulative_value = labor_cumulative_qty * labor_price
+        totals["material_previous_total"] += material_previous_qty * material_price
+        totals["material_current_total"] += material_current_qty * material_price
+        totals["material_cumulative_total"] += material_cumulative_qty * material_price
+        totals["labor_previous_total"] += labor_previous_qty * labor_price
+        totals["labor_current_total"] += labor_current_qty * labor_price
+        totals["labor_cumulative_total"] += labor_cumulative_qty * labor_price
 
-        totals["material_previous_total"] += material_previous_value
-        totals["material_current_total"] += material_current_value
-        totals["material_cumulative_total"] += material_cumulative_value
-        totals["labor_previous_total"] += labor_previous_value
-        totals["labor_current_total"] += labor_current_value
-        totals["labor_cumulative_total"] += labor_cumulative_value
+        gross_previous = _num(item.get("installation_previous_value"))
+        gross_current = _num(item.get("installation_current_value"))
+        gross_cumulative = _num(item.get("installation_cumulative_value"))
+        deduction_previous = _num(item.get("deduction_previous"))
+        deduction_current = _num(item.get("deduction_current"))
+        deduction_cumulative = _num(item.get("deduction_cumulative"))
+        totals["gross_installation_previous_total"] += gross_previous
+        totals["gross_installation_current_total"] += gross_current
+        totals["gross_installation_cumulative_total"] += gross_cumulative
+        totals["deduction_previous_total"] += deduction_previous
+        totals["deduction_current_total"] += deduction_current
+        totals["deduction_cumulative_total"] += deduction_cumulative
 
-        stored["material_current_total"] += _num(item.get("material_current_value"))
-        stored["material_cumulative_total"] += _num(item.get("material_cumulative_value"))
-        stored["labor_current_total"] += _num(item.get("installation_current_value"))
-        stored["labor_cumulative_total"] += _num(item.get("installation_cumulative_value"))
-
-        try:
-            row_no = int(item.get("row_no") or 0)
-        except Exception:
-            row_no = 0
-        if row_no > 0:
-            updates.append((
-                float(material_previous_value),
-                float(material_current_value),
-                float(material_cumulative_value),
-                float(labor_previous_value),
-                float(labor_current_value),
-                float(labor_cumulative_value),
-                claim_id,
-                row_no,
-            ))
-
-    if persist and updates:
-        try:
-            connection.executemany(
-                """UPDATE payment_claim_items
-                   SET material_previous_value=?,material_current_value=?,material_cumulative_value=?,
-                       installation_previous_value=?,installation_current_value=?,installation_cumulative_value=?
-                   WHERE claim_id=? AND row_no=?""",
-                updates,
-            )
-        except Exception:
-            # The totals are still valid for AI context even if a read-only connection
-            # prevents the self-heal write.
-            pass
+        # Cross-check only rows where at least one side carries meaningful data.
+        derived_labor = labor_cumulative_qty * labor_price
+        net_stored_labor = gross_cumulative - deduction_cumulative
+        if any(abs(v) > 1e-9 for v in (labor_cumulative_qty, labor_price, gross_cumulative, deduction_cumulative)):
+            labor_crosscheck_rows += 1
+            delta = derived_labor - net_stored_labor
+            labor_crosscheck_delta += delta
+            tolerance = max(1.0, abs(derived_labor) * 1e-8)
+            if abs(delta) > tolerance:
+                labor_crosscheck_mismatch_rows += 1
 
     result = {
         "ok": bool(items),
@@ -204,32 +207,34 @@ def _scan_one_claim(connection, claim: dict[str, Any], *, persist: bool = True) 
         "rows_with_labor_qty": rows_with_labor_qty,
         "rows_with_material_price": rows_with_material_price,
         "rows_with_labor_price": rows_with_labor_price,
+        "labor_crosscheck_rows": labor_crosscheck_rows,
+        "labor_crosscheck_mismatch_rows": labor_crosscheck_mismatch_rows,
+        "labor_crosscheck_delta": labor_crosscheck_delta,
         **totals,
-        "stored_material_current_total_before_recalc": stored["material_current_total"],
-        "stored_material_cumulative_total_before_recalc": stored["material_cumulative_total"],
-        "stored_labor_current_total_before_recalc": stored["labor_current_total"],
-        "stored_labor_cumulative_total_before_recalc": stored["labor_cumulative_total"],
     }
-    result["material_current_delta"] = totals["material_current_total"] - stored["material_current_total"]
-    result["material_cumulative_delta"] = totals["material_cumulative_total"] - stored["material_cumulative_total"]
-    result["labor_current_delta"] = totals["labor_current_total"] - stored["labor_current_total"]
-    result["labor_cumulative_delta"] = totals["labor_cumulative_total"] - stored["labor_cumulative_total"]
+    result["net_installation_labor_previous_total"] = (
+        totals["gross_installation_previous_total"] - totals["deduction_previous_total"]
+    )
+    result["net_installation_labor_current_total"] = (
+        totals["gross_installation_current_total"] - totals["deduction_current_total"]
+    )
+    result["net_installation_labor_cumulative_total"] = (
+        totals["gross_installation_cumulative_total"] - totals["deduction_cumulative_total"]
+    )
     return result
 
 
-def fullscan_claim_components(connection, project_id: int, question: str = "", *, persist: bool = True) -> list[dict[str, Any]]:
-    """Calculate material/labor values for every row of each selected Claim.
+def fullscan_claim_components(connection, project_id: int, question: str = "", *, persist: bool = False) -> list[dict[str, Any]]:
+    """Calculate pure material/labor totals for each selected Claim on all rows.
 
-    Business formulas:
-      material value = material quantity * material unit price
-      labor value    = installation quantity * labor unit price
-
-    Legacy DB columns named installation_*_pct are quantities in the current
-    Claim template and are intentionally treated as quantities here.
+    `persist` is retained only for backward call compatibility. The full-scan is
+    intentionally read-only with respect to Claim value fields because the
+    stored installation values are gross values required by the payment logic.
     """
+    del persist
     _recover_prices(connection, int(project_id), str(question or ""))
     claims = _claim_headers(connection, int(project_id), str(question or ""))
-    return [_scan_one_claim(connection, claim, persist=persist) for claim in claims]
+    return [_scan_one_claim(connection, claim) for claim in claims]
 
 
 def _fmt_money(value: Any) -> str:
@@ -256,12 +261,10 @@ def install_claim_component_fullscan() -> None:
         if needs_components:
             try:
                 with builder.connect() as connection:
-                    stats = fullscan_claim_components(connection, int(project_id), q, persist=True)
+                    stats = fullscan_claim_components(connection, int(project_id), q, persist=False)
             except Exception:
                 stats = []
 
-        # Run the existing appendix after recalculation so its detail evidence uses
-        # the repaired component values too.
         base = original(builder, int(project_id), q)
         if not needs_components:
             return base
@@ -271,6 +274,10 @@ def install_claim_component_fullscan() -> None:
             "QUY TẮC BẮT BUỘC: Chi phí vật tư = Khối lượng vật tư × Đơn giá vật tư; "
             "Chi phí nhân công = Khối lượng lắp đặt × Đơn giá nhân công. "
             "Các cột legacy installation_*_pct được hiểu là KHỐI LƯỢNG lắp đặt, không phải phần trăm."
+        )
+        lines.append(
+            "Cột Giá trị lắp đặt gốc của Claim là giá trị GỘP trước khấu trừ vật tư; không được coi trực tiếp là chi phí nhân công "
+            "và FULL-SCAN không ghi đè các giá trị nghiệm thu gốc."
         )
         lines.append(
             "Tổng lũy kế của một Claim được tính trên TOÀN BỘ dòng payment_claim_items của chính Claim đó; "
@@ -292,11 +299,14 @@ def install_claim_component_fullscan() -> None:
                 f"Chi phí nhân công LŨY KẾ: {_fmt_money(item['labor_cumulative_total'])} VND.",
                 f"Căn cứ nhân công: {item['rows_with_labor_qty']:,} dòng có khối lượng lắp đặt; "
                 f"{item['rows_with_labor_price']:,} dòng có đơn giá nhân công khác 0.",
+                f"Kiểm tra chéo: Giá trị lắp đặt lũy kế - Khấu trừ vật tư lũy kế = "
+                f"{_fmt_money(item['net_installation_labor_cumulative_total'])} VND; "
+                f"chênh với Khối lượng lắp đặt lũy kế × Đơn giá nhân công = {_fmt_money(item['labor_crosscheck_delta'])} VND.",
             ])
-            if abs(float(item.get("labor_cumulative_delta") or 0)) > 0.5:
+            if item.get("labor_crosscheck_mismatch_rows"):
                 lines.append(
-                    f"Đã tự hiệu chỉnh trường chi phí nhân công lũy kế của các dòng Claim; "
-                    f"chênh so với dữ liệu lưu trước khi tính lại = {_fmt_money(item['labor_cumulative_delta'])} VND."
+                    f"CẢNH BÁO: {item['labor_crosscheck_mismatch_rows']:,}/{item['labor_crosscheck_rows']:,} dòng không khớp kiểm tra chéo. "
+                    "AI phải nêu cảnh báo thay vì tự sửa dữ liệu gốc."
                 )
 
         if len(stats) > 1:
