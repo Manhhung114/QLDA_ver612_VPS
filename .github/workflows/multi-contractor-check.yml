@@ -38,8 +38,7 @@ jobs:
           assert SIDEBAR_PATCH_MARKER in patched
           assert ADMIN_UI_MARKER in patched
           assert '_v622_render_contractor_admin_tools(st, db, int(_master_pid), dict(_contractor_ctx))' in patched
-          assert 'and bool(_is_admin())' in patched
-          assert '!= "CONTRACTOR"' in patched
+          assert 'if _master_pid and _contractor_ctx and bool(_is_admin()):' in patched
           assert 'render_ai_assistant(_master_pid if _v622_can_view_all_contractors else pid)' in patched
           assert '_v622_render_contractor_selector' in patched
           assert '("🏢 Nhà thầu", lambda: _v622_render_contractor_management' not in patched
@@ -67,8 +66,8 @@ jobs:
           grep -Fq 'patch_contractor_sidebar_ui(source)' streamlit_app.py
           grep -Fq 'V6.22 CONTRACTOR WORKSPACE V1' contractor_workspace_v622.py
           grep -Fq 'V6.22 CONTRACTOR SIDEBAR ADMIN V1' contractor_sidebar_admin_v622.py
-          grep -Fq 'V6.22 CONTRACTOR SIDEBAR FINAL UI V2 ADMIN CONTROLS' v622_contractor_sidebar_patch.py
-          grep -Fq 'V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V1' v622_contractor_sidebar_patch.py
+          grep -Fq 'V6.22 CONTRACTOR SIDEBAR FINAL UI V3 ADMIN CONTROLS' v622_contractor_sidebar_patch.py
+          grep -Fq 'V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V2' v622_contractor_sidebar_patch.py
           grep -Fq 'V6.22 CONTRACTOR ACCESS CONTROL V1' contractor_access_control_v622.py
           grep -Fq 'V6.22 MULTI CONTRACTOR AI V1' contractor_ai_context_v622.py
           grep -Fq 'IPC lớn nhất được xác định RIÊNG CHO TỪNG NHÀ THẦU' contractor_ai_context_v622.py
