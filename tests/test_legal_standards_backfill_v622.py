@@ -105,8 +105,9 @@ class LegalStandardsBackfillV622Test(unittest.TestCase):
         compile(patched, "streamlit_app_legal_standards.py", "exec")
         self.assertIn("from legal_standards_backfill_v622 import install_legal_standard_backfill", patched)
         self.assertIn("install_legal_standard_backfill()", patched)
-        self.assertIn("📐 TCVN xây dựng - VSQI", patched)
-        self.assertIn("📚 QCVN / QLXD - TVPL", patched)
+        # Giữ nguyên nhãn nút V6.22 để không thay đổi thói quen người dùng.
+        self.assertIn("📐 QCVN / TCVN - VSQI", patched)
+        self.assertIn("📚 QLXD mở rộng - TVPL", patched)
 
 
 if __name__ == "__main__":
