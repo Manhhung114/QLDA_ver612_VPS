@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+import time as _time
 from datetime import date, datetime
 from html import escape
 from typing import Any, Callable
 
+from vn_datetime_v622 import format_tabular_vn
 
-PATCH_MARKER = "V7 COMPACT UI RUNTIME V2 CAPTION CONTROL"
+
+PATCH_MARKER = "V7 COMPACT UI RUNTIME V3 VN TIME GLOBE"
 _CAPTION_STATE_KEY = "qlda_v7_show_captions"
 _CAPTION_ADMIN_KEY = "qlda_v7_caption_admin_authorized"
 
@@ -67,6 +71,63 @@ def install_caption_policy_v7(st) -> None:
     st._qlda_v7_original_caption = original_caption
     st.caption = _caption_if_enabled
     st._qlda_v7_caption_policy_installed = True
+
+
+def install_vn_datetime_policy_v7(st) -> None:
+    """Use Vietnam wall-clock time consistently in read-only app tables.
+
+    Storage is deliberately untouched: TIMESTAMPTZ/UTC values stay authoritative
+    in PostgreSQL.  Only presentation is converted.  The process timezone is also
+    set to Asia/Ho_Chi_Minh so future legacy ``date.today()/datetime.now()`` calls
+    inside the application follow the project's operating timezone.
+    """
+    if getattr(st, "_qlda_v7_vn_datetime_policy_installed", False):
+        return
+
+    os.environ["TZ"] = "Asia/Ho_Chi_Minh"
+    try:
+        _time.tzset()
+    except Exception:
+        pass
+
+    original_dataframe = st.dataframe
+    original_table = st.table
+
+    def _dataframe_vn(data=None, *args, **kwargs):
+        return original_dataframe(format_tabular_vn(data), *args, **kwargs)
+
+    def _table_vn(data=None, *args, **kwargs):
+        return original_table(format_tabular_vn(data), *args, **kwargs)
+
+    st._qlda_v7_original_dataframe = original_dataframe
+    st._qlda_v7_original_table = original_table
+    st.dataframe = _dataframe_vn
+    st.table = _table_vn
+
+    # Containers/columns are DeltaGenerator instances and may call their own
+    # dataframe/table methods instead of the module-level shortcuts.  Wrap those
+    # read-only renderers too; data_editor is intentionally not touched so date
+    # editing widgets retain their native value types.
+    try:
+        from streamlit.delta_generator import DeltaGenerator
+
+        if not getattr(DeltaGenerator, "_qlda_v7_vn_datetime_policy_installed", False):
+            dg_dataframe = DeltaGenerator.dataframe
+            dg_table = DeltaGenerator.table
+
+            def _dg_dataframe_vn(self, data=None, *args, **kwargs):
+                return dg_dataframe(self, format_tabular_vn(data), *args, **kwargs)
+
+            def _dg_table_vn(self, data=None, *args, **kwargs):
+                return dg_table(self, format_tabular_vn(data), *args, **kwargs)
+
+            DeltaGenerator.dataframe = _dg_dataframe_vn
+            DeltaGenerator.table = _dg_table_vn
+            DeltaGenerator._qlda_v7_vn_datetime_policy_installed = True
+    except Exception:
+        pass
+
+    st._qlda_v7_vn_datetime_policy_installed = True
 
 
 def render_admin_caption_toggle_v7(st, is_admin: bool) -> None:
@@ -150,6 +211,28 @@ html, body, [class*="css"] { color: var(--qlda-text); }
   background: var(--qlda-card);
 }
 hr { border-color: var(--qlda-border) !important; }
+
+/* Streamlit running-status control: retain its Stop action but replace the
+   misleading accessibility-looking glyph with a rotating globe. */
+@keyframes qlda-v7-globe-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+[data-testid="stStatusWidget"] svg,
+[data-testid="stStatusWidget"] [data-testid="stIconMaterial"] {
+  display:none !important;
+}
+[data-testid="stStatusWidget"]::before {
+  content:"🌍";
+  display:inline-block;
+  margin-right:7px;
+  font-size:20px;
+  line-height:1;
+  transform-origin:center;
+  animation:qlda-v7-globe-spin 1.35s linear infinite;
+  vertical-align:middle;
+}
+
 .qlda-v7-hero {
   display:flex;
   align-items:center;
