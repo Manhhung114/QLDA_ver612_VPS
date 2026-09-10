@@ -6,7 +6,7 @@ from datetime import date, datetime
 from html import escape
 from typing import Any, Callable
 
-from vn_datetime_v622 import format_tabular_vn
+from vn_datetime_v622 import format_tabular_vn, install_work_task_vn_display
 
 
 PATCH_MARKER = "V7 COMPACT UI RUNTIME V3 VN TIME GLOBE"
@@ -77,7 +77,7 @@ def install_vn_datetime_policy_v7(st) -> None:
     """Use Vietnam wall-clock time consistently in read-only app tables.
 
     Storage is deliberately untouched: TIMESTAMPTZ/UTC values stay authoritative
-    in PostgreSQL.  Only presentation is converted.  The process timezone is also
+    in PostgreSQL. Only presentation is converted. The process timezone is also
     set to Asia/Ho_Chi_Minh so future legacy ``date.today()/datetime.now()`` calls
     inside the application follow the project's operating timezone.
     """
@@ -105,7 +105,7 @@ def install_vn_datetime_policy_v7(st) -> None:
     st.table = _table_vn
 
     # Containers/columns are DeltaGenerator instances and may call their own
-    # dataframe/table methods instead of the module-level shortcuts.  Wrap those
+    # dataframe/table methods instead of the module-level shortcuts. Wrap those
     # read-only renderers too; data_editor is intentionally not touched so date
     # editing widgets retain their native value types.
     try:
@@ -127,6 +127,9 @@ def install_vn_datetime_policy_v7(st) -> None:
     except Exception:
         pass
 
+    # Work Tasks comments are rendered as Markdown rather than a dataframe, so
+    # format their read-only activity rows explicitly as part of the UI policy.
+    install_work_task_vn_display()
     st._qlda_v7_vn_datetime_policy_installed = True
 
 
