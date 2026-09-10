@@ -129,6 +129,8 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v622_boq_multisheet_patch.py" \
   "$APP_DIR/boq_multisheet_v622.py" \
   "$APP_DIR/boq_cost_components_v622.py" \
+  "$APP_DIR/boq_claim_terms_v622.py" \
+  "$APP_DIR/boq_claim_price_recovery_v622.py" \
   "$APP_DIR/boq_persistence_v622.py" \
   "$APP_DIR/v622_ipc_claim_patch.py" \
   "$APP_DIR/ipc_claim_v622.py" \
