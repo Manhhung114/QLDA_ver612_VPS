@@ -34,6 +34,8 @@ RUN python -m py_compile \
       v622_legal_qlda_patch.py \
       legal_qlda_v622.py \
       legal_documents.py \
+      original_import_storage_v622.py \
+      v622_original_import_patch.py \
       v622_boq_multisheet_patch.py \
       boq_multisheet_v622.py \
       boq_persistence_v622.py \
@@ -48,6 +50,7 @@ RUN python -m py_compile \
       multicore_excel_v622.py \
       v622_vo_claim_patch.py \
       vo_claim_v622.py \
+      vo_independent_v622.py \
       v622_report_cost_patch.py \
       report_cost_v622.py \
       ai_live_context_v622.py \
