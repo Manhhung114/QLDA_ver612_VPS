@@ -53,6 +53,13 @@ install_contractor_workspace()
 install_contractor_sidebar_admin()
 install_contractor_access_control()
 
+# Work Assignment V1 is a separate project/workspace-scoped business module.
+# It keeps its own task, comment, file-reference and append-only audit tables;
+# attachments still use the existing Drive/VPS storage gateway.
+from work_tasks_v1_v622 import install_work_tasks_v1
+
+install_work_tasks_v1()
+
 # Harden Gemini routing before the generated Streamlit source imports/uses the
 # AI assistant. 503/429 failures are retried briefly, then routed across stable
 # Flash / Flash-Lite families with per-model cooldown.
