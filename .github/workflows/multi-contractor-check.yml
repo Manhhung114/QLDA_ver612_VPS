@@ -1,0 +1,51 @@
+name: Multi Contractor Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile contractor modules
+        run: |
+          python -m py_compile contractor_workspace_v622.py contractor_ai_context_v622.py v622_contractor_workspace_patch.py
+
+      - name: Test contractor workspace and project AI
+        run: |
+          python -m unittest tests.test_contractor_workspace_v622 tests.test_contractor_ai_context_v622 -v
+
+      - name: Validate generated Streamlit source patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from v622_contractor_workspace_patch import patch_contractor_workspace, PATCH_MARKER
+          source = Path('dist/streamlit_app.py').read_text(encoding='utf-8')
+          patched = patch_contractor_workspace(source)
+          compile(patched, 'streamlit_app_multi_contractor.py', 'exec')
+          assert PATCH_MARKER in patched
+          assert 'render_ai_assistant(_master_pid)' in patched
+          assert '_v622_render_contractor_selector' in patched
+          assert '_v622_render_contractor_management' in patched
+          assert '("📅 Tiến độ", lambda: render_schedule(pid))' in patched
+          assert '("💰 Chi phí", lambda: render_cost_management(pid))' in patched
+          assert '("🏢 Nhà thầu",' in patched
+          print('Multi-contractor generated UI: OK')
+          PY
+
+      - name: Validate production entrypoint wiring
+        run: |
+          grep -Fq 'install_contractor_workspace()' streamlit_app.py
+          grep -Fq 'install_contractor_ai_context()' streamlit_app.py
+          grep -Fq 'patch_contractor_workspace(source)' streamlit_app.py
+          grep -Fq 'V6.22 CONTRACTOR WORKSPACE V1' contractor_workspace_v622.py
+          grep -Fq 'V6.22 MULTI CONTRACTOR AI V1' contractor_ai_context_v622.py
+          grep -Fq 'IPC lớn nhất được xác định RIÊNG CHO TỪNG NHÀ THẦU' contractor_ai_context_v622.py
+          grep -Fq 'PROJECT-REMAINING-ALL' contractor_ai_context_v622.py
