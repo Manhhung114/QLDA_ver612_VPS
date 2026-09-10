@@ -12,6 +12,7 @@ from boq_claim_price_recovery_v622 import (
     _recover_claims,
     install_boq_claim_price_recovery,
 )
+from boq_claim_price_header_guard_v622 import install_boq_claim_price_header_guard
 
 
 def _row(row_no: int, values: dict[int, object], width: int = 30) -> list[object]:
@@ -49,6 +50,7 @@ def _claim_snapshot() -> dict:
 class PriceRecoveryTests(unittest.TestCase):
     def setUp(self):
         install_boq_claim_price_recovery()
+        install_boq_claim_price_header_guard()
 
     def test_detects_real_boq_grouped_prices_including_vat_lieu(self):
         for label in ("Vật Tư", "Vật liệu"):
