@@ -28,7 +28,7 @@ jobs:
           from pathlib import Path
           from v622_contractor_workspace_patch import patch_contractor_workspace
           from v622_contractor_access_patch import patch_contractor_access, PATCH_MARKER
-          from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui, PATCH_MARKER as SIDEBAR_PATCH_MARKER
+          from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui, PATCH_MARKER as SIDEBAR_PATCH_MARKER, ADMIN_UI_MARKER
           source = Path('dist/streamlit_app.py').read_text(encoding='utf-8')
           patched = patch_contractor_workspace(source)
           patched = patch_contractor_access(patched)
@@ -36,6 +36,10 @@ jobs:
           compile(patched, 'streamlit_app_multi_contractor.py', 'exec')
           assert PATCH_MARKER in patched
           assert SIDEBAR_PATCH_MARKER in patched
+          assert ADMIN_UI_MARKER in patched
+          assert '_v622_render_contractor_admin_tools(st, db, int(_master_pid), dict(_contractor_ctx))' in patched
+          assert 'and bool(_is_admin())' in patched
+          assert '!= "CONTRACTOR"' in patched
           assert 'render_ai_assistant(_master_pid if _v622_can_view_all_contractors else pid)' in patched
           assert '_v622_render_contractor_selector' in patched
           assert '("🏢 Nhà thầu", lambda: _v622_render_contractor_management' not in patched
@@ -47,7 +51,7 @@ jobs:
           assert '("📅 Tiến độ", lambda: render_schedule(pid))' in patched
           assert '("💰 Chi phí", lambda: render_cost_management(pid))' in patched
           assert 'render_settings(_master_pid)' in patched
-          print('Multi-contractor sidebar/access generated UI: OK')
+          print('Multi-contractor sidebar/access generated UI incl. Admin controls: OK')
           PY
 
       - name: Validate production entrypoint wiring
@@ -63,7 +67,8 @@ jobs:
           grep -Fq 'patch_contractor_sidebar_ui(source)' streamlit_app.py
           grep -Fq 'V6.22 CONTRACTOR WORKSPACE V1' contractor_workspace_v622.py
           grep -Fq 'V6.22 CONTRACTOR SIDEBAR ADMIN V1' contractor_sidebar_admin_v622.py
-          grep -Fq 'V6.22 CONTRACTOR SIDEBAR FINAL UI V1' v622_contractor_sidebar_patch.py
+          grep -Fq 'V6.22 CONTRACTOR SIDEBAR FINAL UI V2 ADMIN CONTROLS' v622_contractor_sidebar_patch.py
+          grep -Fq 'V6.22 CONTRACTOR SIDEBAR ADMIN INJECT V1' v622_contractor_sidebar_patch.py
           grep -Fq 'V6.22 CONTRACTOR ACCESS CONTROL V1' contractor_access_control_v622.py
           grep -Fq 'V6.22 MULTI CONTRACTOR AI V1' contractor_ai_context_v622.py
           grep -Fq 'IPC lớn nhất được xác định RIÊNG CHO TỪNG NHÀ THẦU' contractor_ai_context_v622.py
