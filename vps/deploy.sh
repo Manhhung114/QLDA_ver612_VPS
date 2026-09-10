@@ -129,6 +129,8 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/single_session_v622.py" \
   "$APP_DIR/v622_single_session_patch.py" \
   "$APP_DIR/v622_schedule_management_patch.py" \
+  "$APP_DIR/original_import_storage_v622.py" \
+  "$APP_DIR/v622_original_import_patch.py" \
   "$APP_DIR/local_file_server_single_session_v622.py" \
   "$APP_DIR/contractor_workspace_v622.py" \
   "$APP_DIR/contractor_sidebar_admin_v622.py" \
@@ -160,6 +162,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/multicore_excel_v622.py" \
   "$APP_DIR/v622_vo_claim_patch.py" \
   "$APP_DIR/vo_claim_v622.py" \
+  "$APP_DIR/vo_independent_v622.py" \
   "$APP_DIR/v622_report_cost_patch.py" \
   "$APP_DIR/report_cost_v622.py" \
   "$APP_DIR/gemini_resilience_v622.py" \
