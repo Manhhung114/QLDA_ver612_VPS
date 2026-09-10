@@ -74,6 +74,13 @@ from boq_claim_terms_v622 import install_boq_claim_terms
 
 install_boq_claim_terms()
 
+# Recover split unit prices from the project-scoped workbook snapshots. This
+# repairs BOQ/Claim rows imported before the split-price patch and recognizes
+# the real multi-row Excel headers (Đơn giá -> Vật tư/Vật liệu | Nhân công).
+from boq_claim_price_recovery_v622 import install_boq_claim_price_recovery
+
+install_boq_claim_price_recovery()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
