@@ -50,8 +50,8 @@ def patch_legal_qlda(source: str) -> str:
     actions = [
         (c1, "🔄 Cập nhật QLXD", "all"),
         (c2, "⚖️ VBPL / Chính phủ", "vbpl"),
-        (c3, "📐 TCVN xây dựng - VSQI", "vsqi"),
-        (c4, "📚 QCVN / QLXD - TVPL", "tvpl"),
+        (c3, "📐 QCVN / TCVN - VSQI", "vsqi"),
+        (c4, "📚 QLXD mở rộng - TVPL", "tvpl"),
     ]
 '''
     source = _replace_once(source, actions_old, actions_new, "legal source buttons")
