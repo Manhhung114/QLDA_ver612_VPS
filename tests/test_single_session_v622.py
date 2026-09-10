@@ -92,6 +92,15 @@ def settings():
         self.assertIn("client_info=_client_info", patched)
         compile(patched, "single_session_ui_test.py", "exec")
 
+        # Local VPS rewrites the title before single-session UI is applied. The
+        # patch must remain structural and must not depend on Cloud/VPS wording.
+        vps_source = source.replace("PostgreSQL Cloud", "PostgreSQL VPS")
+        patched_vps = patch_single_session(vps_source)
+        self.assertIn(PATCH_MARKER, patched_vps)
+        self.assertIn("PostgreSQL VPS", patched_vps)
+        self.assertIn("_session_error", patched_vps)
+        compile(patched_vps, "single_session_ui_vps_test.py", "exec")
+
 
 if __name__ == "__main__":
     unittest.main()
