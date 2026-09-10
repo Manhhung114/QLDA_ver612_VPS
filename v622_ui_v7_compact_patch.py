@@ -13,7 +13,7 @@ def _insert_runtime_import(source: str) -> str:
         raise RuntimeError(f"{PATCH_MARKER}: expected one Streamlit import, found {count}")
     addition = (
         anchor
-        + "from ui_v7_compact_v622 import install_theme_v7, install_caption_policy_v7, render_admin_caption_toggle_v7, render_header_v7, render_overview_v7\n"
+        + "from ui_v7_compact_v622 import install_theme_v7, install_caption_policy_v7, install_vn_datetime_policy_v7, render_admin_caption_toggle_v7, render_header_v7, render_overview_v7\n"
         + "from work_tasks_v1_v622 import render_work_tasks_v1\n"
     )
     return source.replace(anchor, addition, 1)
@@ -24,7 +24,7 @@ def _install_theme_after_page_config(source: str) -> str:
     match = re.search(r"(?m)^st\.set_page_config\([^\n]*\)\n", source)
     if not match:
         raise RuntimeError(f"{PATCH_MARKER}: st.set_page_config anchor missing")
-    addition = "install_theme_v7(st)\ninstall_caption_policy_v7(st)\n"
+    addition = "install_theme_v7(st)\ninstall_vn_datetime_policy_v7(st)\ninstall_caption_policy_v7(st)\n"
     return source[: match.end()] + addition + source[match.end() :]
 
 
@@ -220,6 +220,7 @@ def patch_ui_v7_compact(source: str) -> str:
         "📚 Công cụ",
         "render_overview_v7",
         "render_work_tasks_v1",
+        "install_vn_datetime_policy_v7",
         "install_caption_policy_v7",
         "render_admin_caption_toggle_v7",
     )
