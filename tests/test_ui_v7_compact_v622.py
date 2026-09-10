@@ -44,6 +44,7 @@ class UIV7CompactV622Test(unittest.TestCase):
         compile(source, "streamlit_app_v7_compact_test.py", "exec")
         self.assertIn(PATCH_MARKER, source)
         self.assertIn("install_theme_v7", source)
+        self.assertIn("install_vn_datetime_policy_v7(st)", source)
         self.assertIn("install_caption_policy_v7(st)", source)
         self.assertIn("render_admin_caption_toggle_v7(st, bool(_is_admin()))", source)
         self.assertIn("render_overview_v7", source)
@@ -108,6 +109,22 @@ class UIV7CompactV622Test(unittest.TestCase):
         self.assertIn("qlda-v7-credit", runtime)
         self.assertIn("color:#000000;", runtime)
         self.assertIn("qlda-v7-hero", runtime)
+
+    def test_running_status_uses_rotating_globe(self):
+        runtime = Path("ui_v7_compact_v622.py").read_text(encoding="utf-8")
+        self.assertIn('[data-testid="stStatusWidget"]::before', runtime)
+        self.assertIn('content:"🌍";', runtime)
+        self.assertIn("qlda-v7-globe-spin", runtime)
+        self.assertIn("animation:qlda-v7-globe-spin", runtime)
+
+    def test_vietnam_datetime_policy_wraps_read_only_tables_only(self):
+        runtime = Path("ui_v7_compact_v622.py").read_text(encoding="utf-8")
+        self.assertIn("def install_vn_datetime_policy_v7", runtime)
+        self.assertIn('os.environ["TZ"] = "Asia/Ho_Chi_Minh"', runtime)
+        self.assertIn("format_tabular_vn", runtime)
+        self.assertIn("st.dataframe = _dataframe_vn", runtime)
+        self.assertIn("st.table = _table_vn", runtime)
+        self.assertNotIn("st.data_editor =", runtime)
 
 
 if __name__ == "__main__":
