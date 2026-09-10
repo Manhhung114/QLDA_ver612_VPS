@@ -1,0 +1,47 @@
+name: Original Import Storage Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Compile original-source storage modules
+        run: |
+          python -m py_compile \
+            original_import_storage_v622.py \
+            v622_original_import_patch.py \
+            streamlit_app.py
+
+      - name: Test exact original source archive
+        env:
+          QLDA_STORAGE_BACKEND: local
+        run: |
+          python -m unittest tests.test_original_import_storage_v622 -v
+
+      - name: Verify production wiring
+        run: |
+          set -euxo pipefail
+          grep -Fq 'patch_original_import_storage' streamlit_app.py
+          grep -Fq 'original_import_storage_v622.py' Dockerfile
+          grep -Fq 'v622_original_import_patch.py' Dockerfile
+          grep -Fq 'original_import_storage_v622.py' vps/deploy.sh
+          grep -Fq 'v622_original_import_patch.py' vps/deploy.sh
+          grep -Fq 'ORIGINAL_IMPORT' original_import_storage_v622.py
+          grep -Fq 'SCHEDULE_MPP' v622_original_import_patch.py
+          grep -Fq 'SCHEDULE_EXCEL' v622_original_import_patch.py
+          grep -Fq 'render_ipc_claim_ui_with_original' original_import_storage_v622.py
+          grep -Fq 'render_vo_ui_with_original' original_import_storage_v622.py
+          echo 'Original import physical VPS storage validation: OK'
