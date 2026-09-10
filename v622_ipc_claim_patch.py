@@ -214,6 +214,16 @@ def install_ipc_claim_due_date() -> None:
             _redefine(ipc, "update_ipc_claim_finance", update_source)
 
         render_source = inspect.getsource(ipc.render_ipc_claim_ui)
+        render_changed = False
+        if 'm1.metric("Số Claim"' in render_source:
+            render_source = _replace_once(
+                render_source,
+                '        m1.metric("Số Claim", f"{len(claims):,}")\n',
+                '        m1.metric("Tổng giá trị hợp đồng", f"{format_table_number(contract_value)} VND")\n',
+                "render.contract_value_metric",
+            )
+            render_changed = True
+
         if "Ngày tới hạn thanh toán" not in render_source:
             render_source = _replace_once(
                 render_source,
@@ -276,6 +286,9 @@ def install_ipc_claim_due_date() -> None:
                 '                    submitted = st.form_submit_button("💾 Cập nhật duyệt / tới hạn / giải ngân", disabled=not bool(can_update), use_container_width=True)\n',
                 "render.submit_label",
             )
+            render_changed = True
+
+        if render_changed:
             _redefine(ipc, "render_ipc_claim_ui", render_source)
 
         ipc._qlda_ipc_claim_due_date_installed = True
