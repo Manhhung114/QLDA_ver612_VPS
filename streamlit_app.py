@@ -166,6 +166,7 @@ from v622_report_cost_patch import patch_report_cost
 from v622_local_vps_patch import patch_local_vps
 from v622_contractor_workspace_patch import patch_contractor_workspace
 from v622_contractor_access_patch import patch_contractor_access
+from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui
 from v622_single_session_patch import patch_single_session
 
 
@@ -201,6 +202,7 @@ def _compiled_vps_app(signature):
     source = patch_local_vps(source)
     source = patch_contractor_workspace(source)
     source = patch_contractor_access(source)
+    source = patch_contractor_sidebar_ui(source)
     source = patch_single_session(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
