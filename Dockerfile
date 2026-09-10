@@ -31,6 +31,9 @@ RUN python -m py_compile \
       build_v621_webopt.py \
       v622_auth_refresh_v4.py \
       v622_schedule_management_patch.py \
+      v622_legal_qlda_patch.py \
+      legal_qlda_v622.py \
+      legal_documents.py \
       v622_boq_multisheet_patch.py \
       boq_multisheet_v622.py \
       boq_persistence_v622.py \
