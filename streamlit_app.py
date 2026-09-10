@@ -170,6 +170,7 @@ from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui
 from v622_single_session_patch import patch_single_session
 from v622_schedule_management_patch import patch_schedule_management
 from v622_legal_qlda_patch import patch_legal_qlda
+from v622_original_import_patch import patch_original_import_storage
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -211,6 +212,10 @@ def _compiled_vps_app(signature):
     source = patch_contractor_sidebar_ui(source)
     source = patch_schedule_management(source)
     source = patch_legal_qlda(source)
+    # Business import sources (BOQ / IPC / VO / MPP / schedule Excel) are kept
+    # as exact original files on VPS. Parsed PostgreSQL snapshots remain an
+    # index/analysis layer, never the only copy of the uploaded source.
+    source = patch_original_import_storage(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
