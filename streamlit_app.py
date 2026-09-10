@@ -26,6 +26,14 @@ from vps_postgres_resilience import install_vps_postgres_resilience
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
 
+# Add the contractor layer before the generated app creates its database object.
+# The legacy project itself becomes the default contractor workspace, so existing
+# project data is preserved in-place. Additional contractors use hidden child
+# project rows and therefore inherit every existing project-scoped feature.
+from contractor_workspace_v622 import install_contractor_workspace
+
+install_contractor_workspace()
+
 # Harden Gemini routing before the generated Streamlit source imports/uses the
 # AI assistant. 503/429 failures are retried briefly, then routed across stable
 # Flash / Flash-Lite families with per-model cooldown.
@@ -111,12 +119,18 @@ from claim_material_period_guard_v622 import install_claim_material_period_guard
 
 install_claim_material_period_guard()
 
-# Whole-project remaining material/labor always means BOQ FULL-SCAN minus the
-# cumulative components of the highest NUMERIC IPC period currently stored.
-# Earlier IPC cumulative values are never added because that would double-count.
+# A single contractor workspace still uses BOQ FULL-SCAN minus the cumulative
+# components of that contractor's highest numeric IPC period.
 from project_remaining_components_v622 import install_project_remaining_components
 
 install_project_remaining_components()
+
+# Project AI is the outermost context layer. It enumerates every contractor
+# workspace under the selected master project, runs the validated BOQ/Claim
+# calculations per contractor, then aggregates them for project-level answers.
+from contractor_ai_context_v622 import install_contractor_ai_context
+
+install_contractor_ai_context()
 
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
@@ -125,6 +139,7 @@ from v622_ipc_claim_patch import patch_ipc_claims
 from v622_vo_claim_patch import patch_vo_claims
 from v622_report_cost_patch import patch_report_cost
 from v622_local_vps_patch import patch_local_vps
+from v622_contractor_workspace_patch import patch_contractor_workspace
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -157,6 +172,7 @@ def _compiled_vps_app(signature):
     source = patch_report_cost(source)
     source = patch_auth_refresh_v4(source)
     source = patch_local_vps(source)
+    source = patch_contractor_workspace(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
