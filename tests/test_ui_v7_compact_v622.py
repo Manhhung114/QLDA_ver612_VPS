@@ -21,12 +21,7 @@ from v622_vo_claim_patch import patch_vo_claims
 
 class UIV7CompactV622Test(unittest.TestCase):
     def _patched_source(self) -> str:
-        """Mirror streamlit_app.py production source-patch order exactly.
-
-        The previous V7 test used a shortened chain and therefore missed source
-        shape changes made by payment/report/auth/storage patches. This full
-        chain is the regression test for the VPS startup path.
-        """
+        """Mirror streamlit_app.py production source-patch order exactly."""
         source = Path("dist/streamlit_app.py").read_text(encoding="utf-8")
         source = patch_boq_multisheet(source)
         source = patch_ipc_claims(source)
@@ -48,14 +43,12 @@ class UIV7CompactV622Test(unittest.TestCase):
         source = self._patched_source()
         compile(source, "streamlit_app_v7_compact_test.py", "exec")
         self.assertIn(PATCH_MARKER, source)
-        self.assertIn("from ui_v7_compact_v622 import install_theme_v7", source)
-        self.assertIn("install_theme_v7(st)", source)
+        self.assertIn("install_theme_v7", source)
+        self.assertIn("install_caption_policy_v7(st)", source)
+        self.assertIn("render_admin_caption_toggle_v7(st, bool(_is_admin()))", source)
         self.assertIn("render_overview_v7", source)
 
     def test_missing_legacy_form_anchor_never_breaks_v7(self):
-        # Payment/report patches are allowed to replace the old pay_form_ UI.
-        # V7 is presentation-only and must keep compiling whether that legacy
-        # form still exists or not.
         source = self._patched_source()
         self.assertIn(PATCH_MARKER, source)
         compile(source, "streamlit_app_v7_optional_forms.py", "exec")
@@ -72,7 +65,6 @@ class UIV7CompactV622Test(unittest.TestCase):
             self.assertIn(label, source)
         self.assertNotIn("_main_actions[_main_choice]()", source)
         self.assertNotIn('("📊 Báo cáo", lambda: render_reports(pid))', source)
-        # Detailed report is preserved but only reached from Overview on demand.
         self.assertIn("detailed_renderer=render_reports", source)
 
     def test_business_renderers_are_preserved(self):
@@ -90,18 +82,26 @@ class UIV7CompactV622Test(unittest.TestCase):
 
     def test_secondary_legal_search_is_collapsed_when_anchor_exists(self):
         source = self._patched_source()
-        # The legal UI may evolve independently. If the old online-search block
-        # exists in production source, V7 must collapse it; otherwise absence is
-        # already a valid compact state.
         self.assertNotIn(
             'with st.expander("🔎 Google / Tìm kiếm online toàn web", expanded=True):',
             source,
         )
 
-    def test_credit_lives_in_isolated_runtime_layer(self):
+    def test_caption_policy_is_global_default_off_and_admin_only(self):
+        runtime = Path("ui_v7_compact_v622.py").read_text(encoding="utf-8")
+        self.assertIn('_CAPTION_STATE_KEY = "qlda_v7_show_captions"', runtime)
+        self.assertIn('_CAPTION_ADMIN_KEY = "qlda_v7_caption_admin_authorized"', runtime)
+        self.assertIn("def install_caption_policy_v7", runtime)
+        self.assertIn("def render_admin_caption_toggle_v7", runtime)
+        self.assertIn('"Hiện chú thích / hướng dẫn"', runtime)
+        self.assertIn("if allowed and enabled:", runtime)
+        self.assertIn("st.session_state[_CAPTION_STATE_KEY] = False", runtime)
+
+    def test_credit_is_black_in_isolated_runtime_layer(self):
         runtime = Path("ui_v7_compact_v622.py").read_text(encoding="utf-8")
         self.assertIn("by: Hoàng Mạnh Hùng &amp; AI", runtime)
         self.assertIn("qlda-v7-credit", runtime)
+        self.assertIn("color:#000000;", runtime)
         self.assertIn("qlda-v7-hero", runtime)
 
 
