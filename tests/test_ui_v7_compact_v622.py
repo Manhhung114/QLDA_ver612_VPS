@@ -47,16 +47,18 @@ class UIV7CompactV622Test(unittest.TestCase):
         self.assertIn("install_caption_policy_v7(st)", source)
         self.assertIn("render_admin_caption_toggle_v7(st, bool(_is_admin()))", source)
         self.assertIn("render_overview_v7", source)
+        self.assertIn("render_work_tasks_v1", source)
 
     def test_missing_legacy_form_anchor_never_breaks_v7(self):
         source = self._patched_source()
         self.assertIn(PATCH_MARKER, source)
         compile(source, "streamlit_app_v7_optional_forms.py", "exec")
 
-    def test_navigation_is_five_business_groups(self):
+    def test_navigation_is_six_business_groups(self):
         source = self._patched_source()
         for label in (
             "🏠 Tổng quan",
+            "📋 Công việc",
             "🏗️ Thi công",
             "📁 Hồ sơ",
             "💰 Tài chính",
@@ -66,6 +68,9 @@ class UIV7CompactV622Test(unittest.TestCase):
         self.assertNotIn("_main_actions[_main_choice]()", source)
         self.assertNotIn('("📊 Báo cáo", lambda: render_reports(pid))', source)
         self.assertIn("detailed_renderer=render_reports", source)
+        self.assertIn("master_project_id=_master_pid", source)
+        self.assertIn("users=_approval_users()", source)
+        self.assertIn("gateway=_drive_gateway()", source)
 
     def test_business_renderers_are_preserved(self):
         source = self._patched_source()
