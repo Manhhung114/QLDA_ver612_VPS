@@ -115,6 +115,7 @@ class OriginalImportStorageV622Test(unittest.TestCase):
         self.assertIn('"BOQ", "BOQ"', source)
         self.assertIn('"SCHEDULE_MPP", "SCHEDULE"', source)
         self.assertIn('"SCHEDULE_EXCEL", "TASKS"', source)
+        self.assertIn('"AI_UPLOAD", "AI"', source)
         self.assertIn("render_ipc_claim_ui_with_original", source)
         self.assertIn("render_vo_ui_with_original", source)
         self.assertIn("session_token=_gateway_session_token()", source)
