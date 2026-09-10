@@ -171,6 +171,7 @@ from v622_single_session_patch import patch_single_session
 from v622_schedule_management_patch import patch_schedule_management
 from v622_legal_qlda_patch import patch_legal_qlda
 from v622_original_import_patch import patch_original_import_storage
+from v622_ui_v7_compact_patch import patch_ui_v7_compact
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -216,6 +217,9 @@ def _compiled_vps_app(signature):
     # as exact original files on VPS. Parsed PostgreSQL snapshots remain an
     # index/analysis layer, never the only copy of the uploaded source.
     source = patch_original_import_storage(source)
+    # Visual/navigation-only V7 layer is deliberately last: it changes no
+    # business formulas, database schema, permissions, upload or workflow logic.
+    source = patch_ui_v7_compact(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
