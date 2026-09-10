@@ -202,8 +202,11 @@ def _compiled_vps_app(signature):
     source = patch_local_vps(source)
     source = patch_contractor_workspace(source)
     source = patch_contractor_access(source)
-    source = patch_contractor_sidebar_ui(source)
+    # Single-session patch relies on stable authentication anchors. Apply it
+    # before the final contractor main-tab cleanup so production uses the exact
+    # same order validated by the Single Session Check workflow.
     source = patch_single_session(source)
+    source = patch_contractor_sidebar_ui(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
