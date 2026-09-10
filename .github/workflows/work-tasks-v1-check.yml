@@ -1,0 +1,30 @@
+name: Work Tasks V1 Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile Work Tasks V1
+        run: |
+          python -m py_compile work_tasks_v1_v622.py v622_ui_v7_compact_patch.py streamlit_app.py
+
+      - name: Test Work Tasks V1 lifecycle
+        run: |
+          python -m unittest tests.test_work_tasks_v1_v622 -v
+          grep -Fq 'install_work_tasks_v1()' streamlit_app.py
+          grep -Fq '📋 Công việc' v622_ui_v7_compact_patch.py
+          grep -Fq 'render_work_tasks_v1' v622_ui_v7_compact_patch.py
+          grep -Fq 'project_work_task_history' work_tasks_v1_v622.py
+          grep -Fq 'REQUEST_COMPLETION' work_tasks_v1_v622.py
+          grep -Fq 'CONFIRM' work_tasks_v1_v622.py
+          grep -Fq 'work_task_attachment' work_tasks_v1_v622.py
