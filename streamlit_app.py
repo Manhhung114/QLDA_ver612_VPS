@@ -26,6 +26,14 @@ from vps_postgres_resilience import install_vps_postgres_resilience
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
 
+# One account = one active login session. A successful login on another device
+# replaces the previous session; refresh/multiple tabs keep the same token.
+# This patch covers the PostgreSQL/local backend and adds the same API methods to
+# DriveGateway for Google Apps Script deployments.
+from single_session_v622 import install_single_session
+
+install_single_session()
+
 # Add the contractor layer before the generated app creates its database object.
 # The legacy project itself becomes the default contractor workspace, so existing
 # project data is preserved in-place. Additional contractors use hidden child
@@ -153,6 +161,7 @@ from v622_report_cost_patch import patch_report_cost
 from v622_local_vps_patch import patch_local_vps
 from v622_contractor_workspace_patch import patch_contractor_workspace
 from v622_contractor_access_patch import patch_contractor_access
+from v622_single_session_patch import patch_single_session
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -187,6 +196,7 @@ def _compiled_vps_app(signature):
     source = patch_local_vps(source)
     source = patch_contractor_workspace(source)
     source = patch_contractor_access(source)
+    source = patch_single_session(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
