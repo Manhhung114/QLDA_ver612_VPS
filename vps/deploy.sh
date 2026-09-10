@@ -128,6 +128,7 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v622_auth_refresh_v4.py" \
   "$APP_DIR/single_session_v622.py" \
   "$APP_DIR/v622_single_session_patch.py" \
+  "$APP_DIR/v622_schedule_management_patch.py" \
   "$APP_DIR/local_file_server_single_session_v622.py" \
   "$APP_DIR/contractor_workspace_v622.py" \
   "$APP_DIR/contractor_sidebar_admin_v622.py" \
