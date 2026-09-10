@@ -101,6 +101,13 @@ from claim_component_fullscan_v622 import install_claim_component_fullscan
 
 install_claim_component_fullscan()
 
+# Whole-project remaining material/labor always means BOQ FULL-SCAN minus the
+# cumulative components of the highest NUMERIC IPC period currently stored.
+# Earlier IPC cumulative values are never added because that would double-count.
+from project_remaining_components_v622 import install_project_remaining_components
+
+install_project_remaining_components()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
