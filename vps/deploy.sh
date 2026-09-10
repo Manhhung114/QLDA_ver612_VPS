@@ -126,6 +126,9 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/streamlit_app.py" \
   "$APP_DIR/build_v621_webopt.py" \
   "$APP_DIR/v622_auth_refresh_v4.py" \
+  "$APP_DIR/contractor_workspace_v622.py" \
+  "$APP_DIR/contractor_ai_context_v622.py" \
+  "$APP_DIR/v622_contractor_workspace_patch.py" \
   "$APP_DIR/v622_boq_multisheet_patch.py" \
   "$APP_DIR/boq_multisheet_v622.py" \
   "$APP_DIR/boq_cost_components_v622.py" \
@@ -139,10 +142,12 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ipc_claim_fast_v622.py" \
   "$APP_DIR/ipc_claim_summary_fix_v622.py" \
   "$APP_DIR/ipc_adaptive_parser_v622.py" \
+  "$APP_DIR/ipc_payment_semantic_v622.py" \
   "$APP_DIR/ipc_claim_number_fix_v622.py" \
   "$APP_DIR/ipc_claim_period_v622.py" \
   "$APP_DIR/ipc_claim_delete_v622.py" \
   "$APP_DIR/claim_component_fullscan_v622.py" \
+  "$APP_DIR/claim_material_period_guard_v622.py" \
   "$APP_DIR/project_remaining_components_v622.py" \
   "$APP_DIR/multicore_excel_v622.py" \
   "$APP_DIR/v622_vo_claim_patch.py" \
