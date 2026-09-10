@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import os
 import sys
 import types
@@ -27,6 +29,14 @@ from v622_vo_claim_patch import patch_vo_claims
 class _DB:
     def project(self, project_id):
         return {"id": int(project_id), "code": "E3__NT__NT-01"}
+
+
+def _raw_vps_source() -> str:
+    parts = sorted(Path("v621_webopt_source").glob("part_*.b64"))
+    if len(parts) != 9:
+        raise AssertionError(f"expected 9 source parts, found {len(parts)}")
+    encoded = "".join(p.read_text(encoding="ascii").strip() for p in parts)
+    return gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
 
 
 class OriginalImportStorageV622Test(unittest.TestCase):
@@ -83,7 +93,7 @@ class OriginalImportStorageV622Test(unittest.TestCase):
         self.assertFalse(out["stored"])
 
     def test_production_patch_archives_all_business_import_sources(self):
-        source = Path("dist/streamlit_app.py").read_text(encoding="utf-8")
+        source = _raw_vps_source()
         with patch.dict(os.environ, {"QLDA_STORAGE_BACKEND": "local"}, clear=False):
             source = _finalize_source(source)
             source = patch_boq_multisheet(source)
