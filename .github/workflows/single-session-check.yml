@@ -30,7 +30,9 @@ jobs:
           grep -Fq "action === 'list_sessions'" google_drive_appscript/SingleSession_V622.gs
           grep -Fq "action === 'force_logout'" google_drive_appscript/SingleSession_V622.gs
 
-      - name: Validate generated Streamlit single-session UI
+      - name: Validate generated Streamlit single-session UI in Local VPS mode
+        env:
+          QLDA_STORAGE_BACKEND: local
         run: |
           python build_v621_webopt.py
           python - <<'PY'
@@ -53,6 +55,7 @@ jobs:
           source = patch_report_cost(source)
           source = patch_auth_refresh_v4(source)
           source = patch_local_vps(source)
+          assert 'PostgreSQL VPS' in source
           source = patch_contractor_workspace(source)
           source = patch_contractor_access(source)
           # Keep this order identical to streamlit_app.py production runtime.
@@ -65,8 +68,9 @@ jobs:
           assert 'gw.force_logout(token, _session_target)' in source
           assert 'gateway.logout(token)' in source
           assert 'client_info=_client_info' in source
+          assert '_session_error' in source
           assert '("🏢 Nhà thầu", lambda: _v622_render_contractor_management' not in source
-          print('Production single-session + contractor-sidebar generated UI: OK')
+          print('Production Local VPS single-session + contractor-sidebar generated UI: OK')
           PY
 
       - name: Validate production and VPS wiring
