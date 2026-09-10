@@ -131,6 +131,8 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/boq_cost_components_v622.py" \
   "$APP_DIR/boq_claim_terms_v622.py" \
   "$APP_DIR/boq_claim_price_recovery_v622.py" \
+  "$APP_DIR/boq_claim_price_header_guard_v622.py" \
+  "$APP_DIR/boq_ai_fullscan_v622.py" \
   "$APP_DIR/boq_persistence_v622.py" \
   "$APP_DIR/v622_ipc_claim_patch.py" \
   "$APP_DIR/ipc_claim_v622.py" \
@@ -140,6 +142,8 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ipc_claim_number_fix_v622.py" \
   "$APP_DIR/ipc_claim_period_v622.py" \
   "$APP_DIR/ipc_claim_delete_v622.py" \
+  "$APP_DIR/claim_component_fullscan_v622.py" \
+  "$APP_DIR/project_remaining_components_v622.py" \
   "$APP_DIR/multicore_excel_v622.py" \
   "$APP_DIR/v622_vo_claim_patch.py" \
   "$APP_DIR/vo_claim_v622.py" \
