@@ -94,6 +94,13 @@ from boq_ai_fullscan_v622 import install_boq_ai_fullscan
 
 install_boq_ai_fullscan()
 
+# Claim component values are recalculated from business quantities and split
+# unit prices on every component-related AI query. Each Claim is full-scanned
+# independently, so IPC-10 uses all IPC-10 rows and never a prompt sample.
+from claim_component_fullscan_v622 import install_claim_component_fullscan
+
+install_claim_component_fullscan()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
