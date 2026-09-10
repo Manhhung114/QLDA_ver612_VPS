@@ -61,14 +61,15 @@ def _cloud_identity(refresh: bool = False):
 def auth():
     if not _gateway_session_token():
         st.title("🏗️ QLDA Xây dựng V6.22 PostgreSQL Cloud")
-        try:
-            result = gw.login(email, password)
-            token = str(result.get("session_token") or "")
-            st.session_state["qlda_drive_session_token"] = token
-            st.session_state.pop("qlda_drive_identity", None)
-            st.session_state.pop("qlda_ignore_persistent_auth", None)
-        except Exception:
-            pass
+        if submit:
+            try:
+                result = gw.login(email, password)
+                token = str(result.get("session_token") or "")
+                st.session_state["qlda_drive_session_token"] = token
+                st.session_state.pop("qlda_drive_identity", None)
+                st.session_state.pop("qlda_ignore_persistent_auth", None)
+            except Exception:
+                pass
 
 
 def settings():
