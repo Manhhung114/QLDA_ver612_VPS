@@ -3,12 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 
-PATCH_MARKER = "V6.22 LEGAL QLXD V1 NO DRAFTS"
+PATCH_MARKER = "V6.22 LEGAL QLXD V2 NO DRAFTS"
 
-# Broad construction/project-management vocabulary. These terms are appended to
-# the legacy crawler filters so official and reference searches retain more
-# documents that matter to a construction PM team without opening the scope to
-# unrelated legislation.
 EXTRA_CONSTRUCTION_KEYWORDS = (
     "quản lý dự án", "chủ đầu tư", "ban quản lý dự án", "giấy phép xây dựng",
     "khảo sát xây dựng", "thiết kế xây dựng", "thiết kế cơ sở", "thiết kế kỹ thuật",
@@ -28,8 +24,6 @@ EXTRA_CONSTRUCTION_KEYWORDS = (
     "nhà chung cư", "nhà cao tầng", "công trình dân dụng", "công trình công nghiệp",
 )
 
-# Query families are intentionally specific to construction management. More
-# query families gives better coverage than simply raising one page limit.
 EXTRA_TVPL_SYNC_QUERIES = (
     "Luật Xây dựng và văn bản hướng dẫn thi hành",
     "nghị định quản lý dự án đầu tư xây dựng",
@@ -67,17 +61,8 @@ EXTRA_TVPL_SYNC_QUERIES = (
 )
 
 EXTRA_VSQI_ICS = (
-    "91.010",  # Construction industry - general
-    "91.020",  # Physical planning / town planning
-    "91.090",  # External structures
-    "91.190",  # Building accessories
-    "93.030",  # External sewage systems
-    "93.080",  # Road engineering relevant to site/infrastructure works
-    "13.100",  # Occupational safety
-    "27.010",  # Energy efficiency
-    "29.020",  # Electrical engineering - general
-    "29.140",  # Lamps and lighting
-    "29.240",  # Power transmission/distribution
+    "91.010", "91.020", "91.090", "91.190", "93.030", "93.080",
+    "13.100", "27.010", "29.020", "29.140", "29.240",
 )
 
 
@@ -94,8 +79,32 @@ def _merge_unique(existing, extra) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _is_draft_doc(doc: Any) -> bool:
+    if not isinstance(doc, dict):
+        try:
+            doc = dict(doc)
+        except Exception:
+            return False
+    if int(doc.get("is_draft", 0) or 0) != 0:
+        return True
+    text = " ".join(str(doc.get(k, "") or "") for k in ("category", "status", "title", "note"))
+    return "dự thảo" in text.casefold()
+
+
+def _non_drafts(docs) -> list[dict]:
+    out: list[dict] = []
+    for doc in docs or []:
+        try:
+            item = dict(doc)
+        except Exception:
+            continue
+        if not _is_draft_doc(item):
+            out.append(item)
+    return out
+
+
 def purge_drafts(repo: Any) -> int:
-    """Permanently remove draft documents/logs from the local legal repository."""
+    """Permanently remove draft documents/logs from the legal repository."""
     deleted = 0
     try:
         with repo.connect() as connection:
@@ -137,9 +146,11 @@ def install_legal_qlda() -> None:
     original_vbpl = ld.fetch_vbpl_moc
     original_vsqi = ld.fetch_vsqi_recent
     original_tvpl = ld.fetch_thuvienphapluat_qlda
+    original_search_all = ld.search_online_all
+    original_search_sites = ld.search_online_sites
 
     def fetch_vbpl_qlda(max_each_type: int = 60, only_construction: bool = True):
-        return original_vbpl(max_each_type=max_each_type, only_construction=only_construction)
+        return _non_drafts(original_vbpl(max_each_type=max_each_type, only_construction=only_construction))
 
     def fetch_vsqi_qlda(
         pages: int = 2,
@@ -147,26 +158,34 @@ def install_legal_qlda() -> None:
         enrich_limit: int = 12,
         max_results: int = 220,
     ):
-        return original_vsqi(
+        return _non_drafts(original_vsqi(
             pages=pages,
             only_construction=only_construction,
             enrich_limit=enrich_limit,
             max_results=max_results,
-        )
+        ))
 
     def fetch_tvpl_qlda(
         limit: int = 520,
         per_query: int = 16,
         detail_limit: int = 45,
     ):
-        return original_tvpl(limit=limit, per_query=per_query, detail_limit=detail_limit)
+        return _non_drafts(original_tvpl(limit=limit, per_query=per_query, detail_limit=detail_limit))
+
+    def search_all_no_drafts(*args, **kwargs):
+        return _non_drafts(original_search_all(*args, **kwargs))
+
+    def search_sites_no_drafts(*args, **kwargs):
+        return _non_drafts(original_search_sites(*args, **kwargs))
 
     ld.fetch_vbpl_moc = fetch_vbpl_qlda
     ld.fetch_vsqi_recent = fetch_vsqi_qlda
     ld.fetch_thuvienphapluat_qlda = fetch_tvpl_qlda
+    ld.search_online_all = search_all_no_drafts
+    ld.search_online_sites = search_sites_no_drafts
 
-    # The user-facing application no longer maintains a draft-document source.
-    # Keep sync_source backward-compatible for old code, but 'all' never calls it.
+    # Keep sync_source backward-compatible for old integrations, but the
+    # user-facing 'all' action never calls the retired draft source.
     def sync_all_no_drafts(repo):
         return [ld.sync_source(repo, source) for source in ("vbpl", "vsqi", "tvpl")]
 
