@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import cloud_db
+from contractor_sidebar_admin_v622 import delete_contractor_completely
 from contractor_workspace_v622 import (
     add_contractor,
     delete_contractor,
@@ -74,8 +75,6 @@ class ContractorWorkspaceTests(unittest.TestCase):
         self.assertEqual(len(contractors), 2)
         self.assertEqual({r["contractor_code"] for r in contractors}, {"NT-01", "REE"})
 
-        # Child workspace projects must not appear as independent projects in the
-        # main project selector. Only the master project is visible there.
         visible_ids = {int(row["id"]) for row in self.db.projects()}
         self.assertIn(self.master, visible_ids)
         self.assertNotIn(second_pid, visible_ids)
@@ -91,18 +90,103 @@ class ContractorWorkspaceTests(unittest.TestCase):
         self.assertIsNone(self.db.project(second_pid))
         self.assertEqual(len(list_contractors(self.db, self.master)), 1)
 
+    def test_full_delete_removes_extension_rows_without_foreign_key(self):
+        ensure_default_contractor(self.db, self.master)
+        second = add_contractor(self.db, self.master, "SAMWHA", "Nhà thầu Samwha")
+        second_pid = int(second["workspace_project_id"])
+        self.db.save_cost_budget(second_pid, self._boq("BOQ SAMWHA", 123.0, "SAMWHA"))
+
+        # Simulate V6.22 extension data such as Claim/IPC tables which may carry
+        # project_id without a FK to projects.
+        with self.db.connect() as c:
+            c.execute("CREATE TABLE contractor_extension_test(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, payload TEXT)")
+            c.execute("INSERT INTO contractor_extension_test(project_id,payload) VALUES(?,?)", (second_pid, "must be deleted"))
+
+        result = delete_contractor_completely(self.db, int(second["id"]))
+        self.assertEqual(int(result["workspace_project_id"]), second_pid)
+        self.assertIsNone(self.db.project(second_pid))
+        self.assertIsNotNone(self.db.project(self.master))
+        with self.db.connect() as c:
+            row = c.execute("SELECT COUNT(*) FROM contractor_extension_test WHERE project_id=?", (second_pid,)).fetchone()
+            self.assertEqual(int(row[0]), 0)
+        self.assertEqual(len(list_contractors(self.db, self.master)), 1)
+
     def test_default_contractor_cannot_be_deleted(self):
         default = ensure_default_contractor(self.db, self.master)
         with self.assertRaises(ValueError):
             delete_contractor(self.db, int(default["id"]))
+        with self.assertRaises(ValueError):
+            delete_contractor_completely(self.db, int(default["id"]))
 
     def test_generated_ui_keeps_operations_on_workspace_but_ai_on_master(self):
-        source = '''\ndef project_selector():\n    return 1, []\n\ndef render_ai_assistant(pid):\n    pass\n\ndef render_project_info(pid):\n    pass\n\ndef render_schedule(pid):\n    pass\n\ndef render_documents(pid):\n    pass\n\ndef render_drawings(pid):\n    pass\n\ndef render_cost_management(pid):\n    pass\n\ndef render_material_management(pid):\n    pass\n\ndef render_site_diary(pid):\n    pass\n\ndef render_reports(pid):\n    pass\n\ndef render_legal_documents():\n    pass\n\ndef render_settings():\n    pass\n\n_require_cloud_login_and_access()\nsidebar_project_tools()\npid, projects = project_selector()\n\nst.title("QLDA")\nif not pid:\n    st.stop()\n\np = db.project(pid)\n_ui_note(f"Dự án: **{p['code']} - {p['name']}**")\n_role = _cloud_access_role()\n_main_sections = [\n    ("📅 Tiến độ", lambda: render_schedule(pid)),\n    ("📁 Hồ sơ", lambda: render_documents(pid)),\n    ("📐 Bản vẽ", lambda: render_drawings(pid)),\n    ("💰 Chi phí", lambda: render_cost_management(pid)),\n    ("📦 Vật tư", lambda: render_material_management(pid)),\n    ("📷 Nhật ký", lambda: render_site_diary(pid)),\n    ("📊 Báo cáo", lambda: render_reports(pid)),\n    ("📚 Văn bản", lambda: render_legal_documents()),\n    ("🤖 AI", lambda: render_ai_assistant(pid)),\n    ("⚙️ Cài đặt", lambda: render_settings()),\n    ("🏗️ Dự án", lambda: render_project_info(pid)),\n]\n'''
+        source = '''
+def project_selector():
+    return 1, []
+
+def render_ai_assistant(pid):
+    pass
+
+def render_project_info(pid):
+    pass
+
+def render_schedule(pid):
+    pass
+
+def render_documents(pid):
+    pass
+
+def render_drawings(pid):
+    pass
+
+def render_cost_management(pid):
+    pass
+
+def render_material_management(pid):
+    pass
+
+def render_site_diary(pid):
+    pass
+
+def render_reports(pid):
+    pass
+
+def render_legal_documents():
+    pass
+
+def render_settings():
+    pass
+
+_require_cloud_login_and_access()
+sidebar_project_tools()
+pid, projects = project_selector()
+
+st.title("QLDA")
+if not pid:
+    st.stop()
+
+p = db.project(pid)
+_ui_note(f"Dự án: **{p['code']} - {p['name']}**")
+_role = _cloud_access_role()
+_main_sections = [
+    ("📅 Tiến độ", lambda: render_schedule(pid)),
+    ("📁 Hồ sơ", lambda: render_documents(pid)),
+    ("📐 Bản vẽ", lambda: render_drawings(pid)),
+    ("💰 Chi phí", lambda: render_cost_management(pid)),
+    ("📦 Vật tư", lambda: render_material_management(pid)),
+    ("📷 Nhật ký", lambda: render_site_diary(pid)),
+    ("📊 Báo cáo", lambda: render_reports(pid)),
+    ("📚 Văn bản", lambda: render_legal_documents()),
+    ("🤖 AI", lambda: render_ai_assistant(pid)),
+    ("⚙️ Cài đặt", lambda: render_settings()),
+    ("🏗️ Dự án", lambda: render_project_info(pid)),
+]
+'''
         patched = patch_contractor_workspace(source)
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn("render_ai_assistant(_master_pid)", patched)
         self.assertIn("render_schedule(pid)", patched)
-        self.assertIn("_v622_render_contractor_management", patched)
+        self.assertNotIn("_v622_render_contractor_management", patched)
+        self.assertNotIn('(\"🏢 Nhà thầu\"', patched)
         self.assertIn("render_project_info(_master_pid)", patched)
         compile(patched, "multi_contractor_ui_test.py", "exec")
 
