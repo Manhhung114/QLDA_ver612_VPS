@@ -23,4 +23,6 @@ jobs:
           python -m unittest tests.test_ui_v7_compact_v622 -v
           grep -Fq 'patch_ui_v7_compact(source)' streamlit_app.py
           grep -Fq 'by: Hoàng Mạnh Hùng &amp; AI' ui_v7_compact_v622.py
-          grep -Fq 'V7 COMPACT UI SOURCE PATCH V1' v622_ui_v7_compact_patch.py
+          grep -Fq 'V7 COMPACT UI SOURCE PATCH V2' v622_ui_v7_compact_patch.py
+          grep -Fq '✏️ Thêm / sửa BOQ' v622_ui_v7_compact_patch.py
+          grep -Fq '⟳ Cập nhật kho văn bản' v622_ui_v7_compact_patch.py
