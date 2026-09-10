@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 
-PATCH_MARKER = "V6.22 LEGAL QLXD V3 TT-BXD INDEX"
+PATCH_MARKER = "V6.22 LEGAL QLXD V4 TT-BXD FAMILY BACKFILL"
 
 EXTRA_CONSTRUCTION_KEYWORDS = (
     "quản lý dự án", "chủ đầu tư", "ban quản lý dự án", "giấy phép xây dựng",
@@ -70,12 +70,19 @@ EXTRA_VSQI_ICS = (
     "13.100", "27.010", "29.020", "29.140", "29.240",
 )
 
-# Quét riêng họ Thông tư Bộ Xây dựng để các văn bản cũ không bị rơi khỏi top
-# kết quả của các truy vấn nghiệp vụ rộng. 2010 bao phủ phần lớn khung pháp lý
-# hiện đại mà dự án xây dựng đang phải tra cứu; năm hiện tại được lấy động.
+# Quét riêng họ Thông tư Bộ Xây dựng để văn bản cũ không bị rơi khỏi top của
+# các truy vấn nghiệp vụ rộng. Query chủ lực dùng chính hậu tố số hiệu
+# /YYYY/TT-BXD vì TVPL ưu tiên kết quả theo số hiệu tốt hơn câu tự nhiên dài.
 BXD_CIRCULAR_START_YEAR = 2010
-BXD_CIRCULAR_PER_YEAR = 35
-BXD_CIRCULAR_RE = re.compile(r"\b\d{1,3}\s*/\s*\d{4}\s*/\s*TT\s*-\s*BXD\b", re.I)
+BXD_CIRCULAR_PER_YEAR = 40
+BXD_CIRCULAR_RE = re.compile(r"\b\d{1,3}\s*/\s*(\d{4})\s*/\s*TT\s*-\s*BXD\b", re.I)
+
+# Các văn bản nền tảng dùng làm regression anchors. Chúng không phải dữ liệu
+# hard-code thay cho crawler: vẫn phải được tìm online và lấy URL/metadata thật.
+# 06/2021/TT-BXD là trường hợp thực tế đã bị bỏ sót khi chỉ dùng query rộng.
+BXD_PRIORITY_EXACT_NUMBERS = (
+    "06/2021/TT-BXD",
+)
 
 
 def _merge_unique(existing, extra) -> tuple[str, ...]:
@@ -126,8 +133,27 @@ def _is_bxd_circular(doc: Any) -> bool:
     return bool(BXD_CIRCULAR_RE.search(text))
 
 
+def _bxd_year(doc: Any) -> int | None:
+    try:
+        item = dict(doc)
+    except Exception:
+        return None
+    text = " ".join(str(item.get(k, "") or "") for k in ("number", "title", "note"))
+    match = BXD_CIRCULAR_RE.search(text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _normalize_number(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).upper()
+
+
 def _doc_key(doc: dict) -> str:
-    number = re.sub(r"\s+", "", str(doc.get("number", "") or "")).upper()
+    number = _normalize_number(doc.get("number", ""))
     if BXD_CIRCULAR_RE.search(str(doc.get("number", "") or "")):
         return "n:" + number
     url = str(doc.get("source_url", "") or "").split("#", 1)[0].rstrip("/").lower()
@@ -158,6 +184,30 @@ def _dedupe_priority(primary, secondary, limit: int) -> list[dict]:
     return out
 
 
+def _safe_search(search_fn: Callable[..., list[dict]], query: str, limit: int) -> list[dict]:
+    try:
+        return [dict(x) for x in (search_fn(query, limit=max(1, int(limit))) or [])]
+    except Exception:
+        return []
+
+
+def _collect_priority_exact_bxd(search_fn: Callable[..., list[dict]]) -> list[dict]:
+    """Fetch regression/critical BXD numbers by exact number, never by broad keywords."""
+    found: list[dict] = []
+    for number in BXD_PRIORITY_EXACT_NUMBERS:
+        wanted = _normalize_number(number)
+        docs = _safe_search(search_fn, number, 20)
+        for doc in docs:
+            if not _is_bxd_circular(doc):
+                continue
+            number_value = _normalize_number(doc.get("number", ""))
+            title_value = _normalize_number(doc.get("title", ""))
+            if number_value == wanted or wanted in title_value:
+                found.append(doc)
+                break
+    return found
+
+
 def _collect_bxd_circulars(
     search_fn: Callable[..., list[dict]],
     *,
@@ -165,11 +215,13 @@ def _collect_bxd_circulars(
     end_year: int | None = None,
     per_year: int = BXD_CIRCULAR_PER_YEAR,
 ) -> list[dict]:
-    """Lập chỉ mục TT-BXD theo năm bằng tìm kiếm trực tiếp TVPL.
+    """Lập chỉ mục TT-BXD theo họ số hiệu và theo năm.
 
-    Đây là lớp recall bổ sung cho bulk sync: truy vấn nghiệp vụ rộng thường ưu
-    tiên văn bản mới và có thể bỏ sót Thông tư BXD cũ. Truy vấn theo năm giữ số
-    request hữu hạn và không cần đoán từng số Thông tư.
+    V3 dùng câu ``Thông tư Bộ Xây dựng 2021 TT-BXD``. TVPL coi đây là truy vấn
+    nhiều từ và có thể xếp hàng trăm văn bản khác lên trước, vì vậy 06/2021 bị
+    rơi khỏi 20 kết quả HTML đầu tiên. V4 ưu tiên hậu tố ``/2021/TT-BXD``;
+    nếu nguồn chưa trả đủ mới fallback về câu rộng. Cuối cùng các số hiệu
+    regression quan trọng được hỏi chính xác để bảo đảm không bị mất silently.
     """
     current_year = datetime.now().year
     end = min(int(end_year or current_year), current_year)
@@ -178,16 +230,25 @@ def _collect_bxd_circulars(
     found: list[dict] = []
 
     def one(year: int) -> list[dict]:
-        query = f"Thông tư Bộ Xây dựng {year} TT-BXD"
-        try:
-            docs = search_fn(query, limit=max(20, int(per_year))) or []
-        except Exception:
-            return []
-        return [dict(doc) for doc in docs if _is_bxd_circular(doc)]
+        # TVPL index theo số hiệu tốt hơn nhiều khi query có dấu '/' của số hiệu.
+        queries = (
+            f"/{year}/TT-BXD",
+            f"{year}/TT-BXD",
+            f"Thông tư Bộ Xây dựng {year} TT-BXD",
+        )
+        year_docs: list[dict] = []
+        for idx, query in enumerate(queries):
+            docs = _safe_search(search_fn, query, per_year)
+            selected = [doc for doc in docs if _is_bxd_circular(doc) and _bxd_year(doc) == year]
+            year_docs.extend(selected)
+            # Nếu family query đã bắt được nhiều TT-BXD đúng năm thì không cần
+            # tiếp tục query rộng, giảm tải lên TVPL.
+            if idx < 2 and len(_dedupe_priority(year_docs, [], 9999)) >= 5:
+                break
+        return _dedupe_priority(year_docs, [], limit=max(1, int(per_year)))
 
-    # Nguồn TVPL có thể chậm/giới hạn kết nối; 4 luồng đủ tăng tốc nhưng không
-    # tạo tải quá lớn. Lỗi một năm không làm hỏng toàn bộ lần đồng bộ.
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="tvpl-bxd-year") as pool:
+    # 4 worker cân bằng tốc độ và tải lên nguồn. Lỗi một năm không làm hỏng cả sync.
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="tvpl-bxd-family") as pool:
         futures = {pool.submit(one, year): year for year in years}
         for future in as_completed(futures):
             try:
@@ -195,7 +256,10 @@ def _collect_bxd_circulars(
             except Exception:
                 pass
 
-    return _dedupe_priority(found, [], limit=max(1, len(found) or 1))
+    # Exact-number backfill chạy sau family scan. Nếu family scan đã có văn bản
+    # thì dedupe sẽ giữ một bản duy nhất; nếu bị thiếu, exact query sẽ cứu lại.
+    exact = _collect_priority_exact_bxd(search_fn)
+    return _dedupe_priority(exact, found, limit=max(1, len(exact) + len(found) or 1))
 
 
 def purge_drafts(repo: Any) -> int:
@@ -266,8 +330,8 @@ def install_legal_qlda() -> None:
         per_query: int = 18,
         detail_limit: int = 50,
     ):
-        # Chạy chỉ mục TT-BXD độc lập với truy vấn QLXD chung. Đặt TT-BXD trước
-        # khi cắt limit để một văn bản cũ không bị loại chỉ vì có nhiều kết quả mới.
+        # TT-BXD family/backfill được đặt trước khi cắt limit, nên văn bản cũ
+        # không thể bị loại chỉ vì danh sách QLXD chung có quá nhiều văn bản mới.
         bxd_docs = _collect_bxd_circulars(original_tvpl_search)
         general_docs = _non_drafts(
             original_tvpl(limit=limit, per_query=per_query, detail_limit=detail_limit)
