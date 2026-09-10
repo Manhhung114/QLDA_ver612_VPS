@@ -15,13 +15,19 @@ class SingleSessionTests(unittest.TestCase):
         self.assertNotEqual(digest, token)
         self.assertEqual(digest, ss._token_hash(token))
 
-    def test_local_backend_contains_atomic_replace_and_upload_binding(self):
+    def test_local_backend_contains_atomic_replace_upload_binding_and_history10(self):
         text = Path("single_session_v622.py").read_text(encoding="utf-8")
+        self.assertEqual(ss.SESSION_HISTORY_LIMIT, 10)
         self.assertIn("FOR UPDATE", text)
         self.assertIn('DELETE FROM qlda_local_sessions WHERE email=%s', text)
         self.assertIn('payload["session_hash"] = _token_hash(token)', text)
         self.assertIn("Phiên đăng nhập tạo link upload đã bị thay thế", text)
+        self.assertIn("qlda_local_session_history", text)
+        self.assertIn("LIMIT %s", text)
+        self.assertIn('if action == "list_session_history"', text)
         self.assertIn('if action == "force_logout"', text)
+        self.assertIn('"REPLACED"', text)
+        self.assertIn('"ADMIN_FORCE_LOGOUT"', text)
 
     def test_apps_script_patch_contains_same_security_invariants(self):
         text = Path("google_drive_appscript/SingleSession_V622.gs").read_text(encoding="utf-8")
@@ -35,7 +41,7 @@ class SingleSessionTests(unittest.TestCase):
         self.assertIn("uploadSid !== activeSid", text)
         self.assertIn("ticket_version: 3", text)
 
-    def test_ui_patch_adds_admin_session_management(self):
+    def test_ui_patch_adds_admin_history_and_vietnam_timezone(self):
         source = '''
 def _gateway_logout() -> None:
     holder = st.session_state.pop("_qlda_drive_gateway_instance", None)
@@ -87,9 +93,14 @@ def settings():
         patched = patch_single_session(source)
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn("gw.list_sessions(token)", patched)
+        self.assertIn("gw.list_session_history(token)", patched)
         self.assertIn("gw.force_logout(token, _session_target)", patched)
         self.assertIn("gateway.logout(token)", patched)
         self.assertIn("client_info=_client_info", patched)
+        self.assertIn("_v622_vn_time", patched)
+        self.assertIn("Asia/Ho_Chi_Minh", patched)
+        self.assertIn("10 lần đăng nhập gần nhất", patched)
+        self.assertIn('strftime("%d/%m/%Y %H:%M:%S")', patched)
         compile(patched, "single_session_ui_test.py", "exec")
 
         # Local VPS rewrites the title before single-session UI is applied. The
@@ -99,6 +110,7 @@ def settings():
         self.assertIn(PATCH_MARKER, patched_vps)
         self.assertIn("PostgreSQL VPS", patched_vps)
         self.assertIn("_session_error", patched_vps)
+        self.assertIn("Asia/Ho_Chi_Minh", patched_vps)
         compile(patched_vps, "single_session_ui_vps_test.py", "exec")
 
 
