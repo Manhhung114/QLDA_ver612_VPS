@@ -51,19 +51,22 @@ install_boq_cost_components()
 
 # IPC workbooks are large and openpyxl ReadOnlyWorksheet random cell access is
 # extremely slow. Install the sequential parser/cache first, then label-based
-# legacy fixes, then the adaptive semantic parser. Multicore Excel is installed
-# after those parser semantics so child processes can build previews while the
-# parent parses metadata/payment/GTHT. Claim-number guard remains last so the
-# explicit filename controls the final save target.
+# legacy fixes, then the adaptive semantic parser. The acceptance-period guard
+# is installed after adaptive parsing so it recognizes Kỳ trước / Kỳ này / Lũy kế
+# by meaning and arithmetic identity instead of fixed row/cell addresses.
+# Multicore Excel is installed after those parser semantics so child processes
+# build previews while the parent parses metadata/payment/GTHT.
 from ipc_claim_fast_v622 import install_ipc_claim_fast_path
 from ipc_claim_summary_fix_v622 import install_ipc_claim_summary_fix
 from ipc_adaptive_parser_v622 import install_ipc_adaptive_parser
+from ipc_payment_semantic_v622 import install_ipc_payment_semantic
 from multicore_excel_v622 import install_multicore_excel
 from ipc_claim_number_fix_v622 import install_ipc_claim_number_fix
 
 install_ipc_claim_fast_path()
 install_ipc_claim_summary_fix()
 install_ipc_adaptive_parser()
+install_ipc_payment_semantic()
 install_multicore_excel()
 install_ipc_claim_number_fix()
 
@@ -100,6 +103,13 @@ install_boq_ai_fullscan()
 from claim_component_fullscan_v622 import install_claim_component_fullscan
 
 install_claim_component_fullscan()
+
+# Period material values are controlled by the semantic payment summary:
+# Previous + Current = Cumulative. This corrects shifted/renamed forms and also
+# rescans saved sheet snapshots of old Claims without requiring a re-upload.
+from claim_material_period_guard_v622 import install_claim_material_period_guard
+
+install_claim_material_period_guard()
 
 # Whole-project remaining material/labor always means BOQ FULL-SCAN minus the
 # cumulative components of the highest NUMERIC IPC period currently stored.
