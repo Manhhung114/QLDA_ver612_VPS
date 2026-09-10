@@ -126,6 +126,9 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/streamlit_app.py" \
   "$APP_DIR/build_v621_webopt.py" \
   "$APP_DIR/v622_auth_refresh_v4.py" \
+  "$APP_DIR/single_session_v622.py" \
+  "$APP_DIR/v622_single_session_patch.py" \
+  "$APP_DIR/local_file_server_single_session_v622.py" \
   "$APP_DIR/contractor_workspace_v622.py" \
   "$APP_DIR/contractor_access_control_v622.py" \
   "$APP_DIR/contractor_ai_context_v622.py" \
