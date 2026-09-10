@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "V6.22 ORIGINAL IMPORT UI V1"
+PATCH_MARKER = "V6.22 ORIGINAL IMPORT UI V2"
 
 
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -21,7 +21,7 @@ def patch_original_import_storage(source: str) -> str:
         raise RuntimeError(f"{PATCH_MARKER}: future import anchor missing")
     helper_import = '''from __future__ import annotations
 
-# V6.22 ORIGINAL IMPORT UI V1
+# V6.22 ORIGINAL IMPORT UI V2
 from original_import_storage_v622 import (
     archive_original_upload as _v622_archive_original_upload,
     render_original_link as _v622_render_original_link,
@@ -110,6 +110,25 @@ from original_import_storage_v622 import (
                 count = 0
 '''
     source = _replace_once(source, task_excel_save, task_excel_save_new, "schedule Excel source archive")
+
+    # Files uploaded only for AI analysis were previously transient. Archive the
+    # exact bytes before AI reads them so every project file upload is recoverable.
+    ai_upload = '''        if f2.button("Phân tích file tải lên", disabled=upload is None, width="stretch", key=f"ai_uploaded_file_{pid}"):
+            try:
+                with st.spinner(f"AI đang đọc {upload.name}..."):
+                    st.session_state[f"ai_file_result_{pid}"] = ai.summarize_file(pid, upload.name, upload.getvalue(), instruction, date.today())
+'''
+    ai_upload_new = '''        if f2.button("Phân tích file tải lên", disabled=upload is None, width="stretch", key=f"ai_uploaded_file_{pid}"):
+            try:
+                _ai_upload_bytes = upload.getvalue()
+                _v622_archive_original_upload(
+                    db, pid, _gateway_session_token(), "AI_UPLOAD", "AI",
+                    upload.name, _ai_upload_bytes, str(getattr(upload, "type", "") or ""),
+                )
+                with st.spinner(f"AI đang đọc {upload.name}..."):
+                    st.session_state[f"ai_file_result_{pid}"] = ai.summarize_file(pid, upload.name, _ai_upload_bytes, instruction, date.today())
+'''
+    source = _replace_once(source, ai_upload, ai_upload_new, "AI source archive")
 
     # IPC and VO are external renderers. Route them through wrappers that capture
     # the uploaded bytes and archive them before save_ipc_claim/save_vo executes.
