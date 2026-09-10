@@ -1,0 +1,26 @@
+name: UI V7 Compact Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile V7 UI layer
+        run: |
+          python -m py_compile ui_v7_compact_v622.py v622_ui_v7_compact_patch.py streamlit_app.py
+
+      - name: Test V7 compact source patch
+        run: |
+          python -m unittest tests.test_ui_v7_compact_v622 -v
+          grep -Fq 'patch_ui_v7_compact(source)' streamlit_app.py
+          grep -Fq 'by: Hoàng Mạnh Hùng &amp; AI' ui_v7_compact_v622.py
+          grep -Fq 'V7 COMPACT UI SOURCE PATCH V1' v622_ui_v7_compact_patch.py
