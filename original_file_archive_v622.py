@@ -6,7 +6,7 @@ import mimetypes
 import os
 from typing import Any
 
-PATCH_MARKER = "V6.22 ORIGINAL FILE ARCHIVE V2"
+PATCH_MARKER = "V6.22 ORIGINAL FILE ARCHIVE V3"
 SOURCE_KIND = "source_upload"
 
 
@@ -37,11 +37,7 @@ def archive_original_upload(
     upload_purpose: str = "original_source",
     mime_type: str = "",
 ) -> dict[str, Any] | None:
-    """Store the exact uploaded bytes on VPS before business parsing.
-
-    Duplicate Streamlit reruns are deduplicated by SHA256 + workspace + subtype +
-    record code, so selecting one file does not create repeated copies.
-    """
+    """Store exact uploaded bytes on VPS before any parser/AI consumes them."""
     if not _is_local_vps():
         return None
     raw = bytes(content or b"")
@@ -53,7 +49,7 @@ def archive_original_upload(
     project_code = _project_code(db, int(project_id))
     digest = hashlib.sha256(raw).hexdigest()
 
-    from local_vps_backend_v622 import _connect, save_bytes
+    from local_vps_backend_v622 import _connect, _file_public, save_bytes
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -65,7 +61,10 @@ def archive_original_upload(
             )
             existing = cur.fetchone()
             if existing:
-                return dict(existing)
+                item = dict(existing)
+                public = _file_public(item)
+                public.update({"subtype": item.get("subtype"), "record_code": item.get("record_code"), "sha256": item.get("sha256")})
+                return public
 
     mime = str(mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
     return save_bytes(
@@ -84,7 +83,7 @@ def archive_original_upload(
 def list_original_uploads(db: Any, project_id: int, *, subtype: str = "", record_code: str = "") -> list[dict[str, Any]]:
     if not _is_local_vps():
         return []
-    from local_vps_backend_v622 import _connect
+    from local_vps_backend_v622 import _connect, _file_public
     project_code = _project_code(db, int(project_id))
     where = ["project_code=%s", "kind=%s", "trashed=FALSE", "history=FALSE"]
     params: list[Any] = [project_code, SOURCE_KIND]
@@ -96,12 +95,18 @@ def list_original_uploads(db: Any, project_id: int, *, subtype: str = "", record
         params.append(str(record_code).strip())
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id,project_code,kind,subtype,record_code,name,mime_type,size,sha256,storage_path,upload_purpose,uploaded_by,created_at,modified_at "
-                "FROM qlda_local_files WHERE " + " AND ".join(where) + " ORDER BY created_at DESC",
-                params,
-            )
-            return [dict(row) for row in cur.fetchall()]
+            cur.execute("SELECT * FROM qlda_local_files WHERE " + " AND ".join(where) + " ORDER BY created_at DESC", params)
+            rows = [dict(row) for row in cur.fetchall()]
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        public = _file_public(row)
+        public.update({
+            "subtype": row.get("subtype"), "record_code": row.get("record_code"),
+            "sha256": row.get("sha256"), "storage_path": row.get("storage_path"),
+            "uploaded_by": row.get("uploaded_by"), "created_at": row.get("created_at"),
+        })
+        out.append(public)
+    return out
 
 
 def original_download_bytes(session_token: str, file_id: str) -> tuple[str, str, bytes]:
@@ -112,7 +117,7 @@ def original_download_bytes(session_token: str, file_id: str) -> tuple[str, str,
 
 
 def install_ipc_original_archive() -> None:
-    """Patch IPC UI after due-date patch so raw workbook is stored before parse."""
+    """Patch IPC UI after due-date patch: archive exact workbook before parse."""
     import ipc_claim_v622 as ipc
     if getattr(ipc, "_qlda_original_archive_installed", False):
         return
@@ -125,6 +130,12 @@ def install_ipc_original_archive() -> None:
     elif "session_token:" not in source.split("\n", 1)[0]:
         raise RuntimeError("Không nhận diện được signature IPC để chuẩn hóa lưu file gốc.")
 
+    uploader_old = '''        upload = st.file_uploader(\n            "Chọn file IPC/Claim (.xlsx / .xlsm)",\n            type=["xlsx", "xlsm"],\n            key=f"ipc_claim_upload_{pid}",\n        )\n        parsed = None\n'''
+    uploader_new = '''        upload = st.file_uploader(\n            "Chọn file IPC/Claim (.xlsx / .xlsm)",\n            type=["xlsx", "xlsm"],\n            key=f"ipc_claim_upload_{pid}",\n        )\n        try:\n            _ipc_originals = _v622_list_original_uploads(db, pid, subtype="IPC", record_code="IPC")\n            if _ipc_originals:\n                _ipc_latest = _ipc_originals[0]\n                if _ipc_latest.get("download_url"):\n                    st.link_button(f"⬇️ Tải file IPC gốc: {_ipc_latest.get('name','IPC.xlsx')}", _ipc_latest["download_url"], width="stretch")\n        except Exception:\n            pass\n        parsed = None\n'''
+    if uploader_old not in source:
+        raise RuntimeError("Không tìm thấy uploader IPC để bổ sung tải file gốc.")
+    source = source.replace(uploader_old, uploader_new, 1)
+
     old_parse = """        if upload is not None:\n            try:\n                parsed = parse_ipc_workbook(upload.getvalue(), upload.name)\n"""
     new_parse = """        if upload is not None:\n            try:\n                _ipc_raw = upload.getvalue()\n                _v622_archive_original_upload(\n                    db, pid, session_token, subtype=\"IPC\", record_code=\"IPC\",\n                    name=upload.name, content=_ipc_raw, upload_purpose=\"ipc_original\",\n                )\n                parsed = parse_ipc_workbook(_ipc_raw, upload.name)\n"""
     if old_parse not in source:
@@ -133,6 +144,7 @@ def install_ipc_original_archive() -> None:
 
     ipc.hashlib = hashlib
     ipc._v622_archive_original_upload = archive_original_upload
+    ipc._v622_list_original_uploads = list_original_uploads
     compile(source, "ipc_claim_v622_original_archive.py", "exec")
     exec(source, ipc.__dict__, ipc.__dict__)
     ipc._qlda_original_archive_installed = True
