@@ -168,6 +168,7 @@ from v622_contractor_workspace_patch import patch_contractor_workspace
 from v622_contractor_access_patch import patch_contractor_access
 from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui
 from v622_single_session_patch import patch_single_session
+from v622_schedule_management_patch import patch_schedule_management
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -207,6 +208,7 @@ def _compiled_vps_app(signature):
     # same order validated by the Single Session Check workflow.
     source = patch_single_session(source)
     source = patch_contractor_sidebar_ui(source)
+    source = patch_schedule_management(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
