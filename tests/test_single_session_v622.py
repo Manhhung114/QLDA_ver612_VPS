@@ -33,7 +33,53 @@ class SingleSessionTests(unittest.TestCase):
         self.assertIn("uploadStarted + 1000 < activeStarted", text)
 
     def test_ui_patch_adds_admin_session_management(self):
-        source = '''\ndef _gateway_logout() -> None:\n    holder = st.session_state.pop("_qlda_drive_gateway_instance", None)\n    try:\n        if isinstance(holder, DriveGateway):\n            holder.close()\n        elif isinstance(holder, tuple) and len(holder) == 2:\n            holder[1].close()\n    except Exception:\n        pass\n    for key in ("qlda_drive_session_token", "qlda_drive_identity", "qlda_drive_error", "qlda_auth_restored_from_cookie", "_qlda_cookie_written_for_token"):\n        st.session_state.pop(key, None)\n    st.session_state["qlda_ignore_persistent_auth"] = True\n    _clear_browser_session_cookie()\n\ndef _cloud_identity(refresh: bool = False):\n    try:\n        pass\n    except Exception as exc:\n        st.session_state["qlda_drive_error"] = str(exc)\n        _gateway_logout()\n        return {"role": "unknown", "email": "", "name": "", "label": "Chưa đăng nhập"}\n\ndef auth():\n    if not _gateway_session_token():\n        st.title("🏗️ QLDA Xây dựng V6.22 PostgreSQL Cloud")\n        try:\n            result = gw.login(email, password)\n            token = str(result.get("session_token") or "")\n            st.session_state["qlda_drive_session_token"] = token\n            st.session_state.pop("qlda_drive_identity", None)\n            st.session_state.pop("qlda_ignore_persistent_auth", None)\n        except Exception:\n            pass\n\ndef settings():\n    if True:\n        if True:\n            if True:\n                if users:\n                    pass\n                else:\n                    st.info("Chỉ Admin mới được quản lý tài khoản và phân quyền.")\n'''
+        source = '''
+def _gateway_logout() -> None:
+    holder = st.session_state.pop("_qlda_drive_gateway_instance", None)
+    try:
+        if isinstance(holder, DriveGateway):
+            holder.close()
+        elif isinstance(holder, tuple) and len(holder) == 2:
+            holder[1].close()
+    except Exception:
+        pass
+    for key in ("qlda_drive_session_token", "qlda_drive_identity", "qlda_drive_error", "qlda_auth_restored_from_cookie", "_qlda_cookie_written_for_token"):
+        st.session_state.pop(key, None)
+    st.session_state["qlda_ignore_persistent_auth"] = True
+    _clear_browser_session_cookie()
+
+
+def _cloud_identity(refresh: bool = False):
+    try:
+        pass
+    except Exception as exc:
+        st.session_state["qlda_drive_error"] = str(exc)
+        _gateway_logout()
+        return {"role": "unknown", "email": "", "name": "", "label": "Chưa đăng nhập"}
+
+
+def auth():
+    if not _gateway_session_token():
+        st.title("🏗️ QLDA Xây dựng V6.22 PostgreSQL Cloud")
+        try:
+            result = gw.login(email, password)
+            token = str(result.get("session_token") or "")
+            st.session_state["qlda_drive_session_token"] = token
+            st.session_state.pop("qlda_drive_identity", None)
+            st.session_state.pop("qlda_ignore_persistent_auth", None)
+        except Exception:
+            pass
+
+
+def settings():
+    if True:
+        if True:
+            if True:
+                if users:
+                    pass
+                else:
+                    st.info("Chỉ Admin mới được quản lý tài khoản và phân quyền.")
+'''
         patched = patch_single_session(source)
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn("gw.list_sessions(token)", patched)
