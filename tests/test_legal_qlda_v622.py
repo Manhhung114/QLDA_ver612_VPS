@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from legal_qlda_v622 import (
+    BXD_PRIORITY_EXACT_NUMBERS,
     EXTRA_CONSTRUCTION_KEYWORDS,
     EXTRA_TVPL_SYNC_QUERIES,
     _collect_bxd_circulars,
@@ -48,6 +49,7 @@ class LegalQLDAV622Test(unittest.TestCase):
         self.assertIn("nghiệm thu công việc", ld.CONSTRUCTION_KEYWORDS)
         self.assertIn("BIM mô hình thông tin công trình xây dựng", ld.TVPL_SYNC_QUERIES)
         self.assertIn("phân cấp công trình xây dựng TT-BXD", ld.TVPL_SYNC_QUERIES)
+        self.assertIn("06/2021/TT-BXD", BXD_PRIORITY_EXACT_NUMBERS)
 
         seen = []
         original = ld.sync_source
@@ -60,40 +62,50 @@ class LegalQLDAV622Test(unittest.TestCase):
         self.assertEqual(len(out), 3)
         self.assertNotIn("moc_drafts", seen)
 
-    def test_tt_bxd_year_index_keeps_bxd_and_rejects_other_ministries(self):
+    def test_tt_bxd_family_backfill_reproduces_real_broad_query_miss(self):
+        """Broad natural-language search misses 06/2021; family/exact search must recover it."""
         calls = []
+
+        target = {
+            "number": "06/2021/TT-BXD",
+            "title": "Thông tư 06/2021/TT-BXD quy định về phân cấp công trình xây dựng",
+            "source_url": "https://thuvienphapluat.vn/van-ban/Xay-dung-Do-thi/Thong-tu-06-2021-TT-BXD-480818.aspx",
+            "is_draft": 0,
+        }
 
         def fake_search(query: str, limit: int = 20):
             calls.append((query, limit))
-            if "2021" not in query:
-                return []
-            return [
-                {
-                    "number": "06/2021/TT-BXD",
-                    "title": "Thông tư 06/2021/TT-BXD quy định về phân cấp công trình xây dựng",
-                    "source_url": "https://thuvienphapluat.vn/van-ban/Xay-dung-Do-thi/Thong-tu-06-2021-TT-BXD-480818.aspx",
-                    "is_draft": 0,
-                },
-                {
-                    "number": "06/2021/TT-BYT",
-                    "title": "Thông tư Bộ Y tế",
-                    "source_url": "https://thuvienphapluat.vn/van-ban/y-te/example.aspx",
-                    "is_draft": 0,
-                },
-                {
-                    "number": "07/2021/TT-BXD",
-                    "title": "Dự thảo Thông tư 07/2021/TT-BXD",
-                    "source_url": "https://example.test/draft",
-                    "is_draft": 1,
-                },
-            ]
+            # Đây là hành vi gây lỗi của V3: query rộng trả kết quả khác, không có 06/2021.
+            if query == "Thông tư Bộ Xây dựng 2021 TT-BXD":
+                return [
+                    {
+                        "number": "06/2021/TT-BYT",
+                        "title": "Thông tư Bộ Y tế",
+                        "source_url": "https://thuvienphapluat.vn/van-ban/y-te/example.aspx",
+                        "is_draft": 0,
+                    }
+                ]
+            # Family suffix và exact-number query mới mới lấy đúng văn bản cần thiết.
+            if query in {"/2021/TT-BXD", "2021/TT-BXD", "06/2021/TT-BXD"}:
+                return [
+                    target,
+                    {
+                        "number": "07/2021/TT-BXD",
+                        "title": "Dự thảo Thông tư 07/2021/TT-BXD",
+                        "source_url": "https://example.test/draft",
+                        "is_draft": 1,
+                    },
+                ]
+            return []
 
-        rows = _collect_bxd_circulars(fake_search, start_year=2021, end_year=2021, per_year=35)
-        self.assertEqual(len(calls), 1)
-        self.assertIn("2021", calls[0][0])
-        self.assertIn("TT-BXD", calls[0][0])
-        self.assertEqual([r["number"] for r in rows], ["06/2021/TT-BXD"])
-        self.assertTrue(_is_bxd_circular(rows[0]))
+        rows = _collect_bxd_circulars(fake_search, start_year=2021, end_year=2021, per_year=40)
+        numbers = [r["number"] for r in rows]
+        self.assertIn("06/2021/TT-BXD", numbers)
+        self.assertEqual(numbers.count("06/2021/TT-BXD"), 1)
+        self.assertNotIn("07/2021/TT-BXD", numbers)
+        self.assertTrue(any(q == "/2021/TT-BXD" for q, _ in calls))
+        self.assertTrue(any(q == "06/2021/TT-BXD" for q, _ in calls))
+        self.assertTrue(_is_bxd_circular(target))
         self.assertFalse(_is_bxd_circular({"number": "06/2021/TT-BYT", "title": "Khác"}))
 
     def test_purge_drafts_removes_old_draft_rows_and_logs_only(self):
