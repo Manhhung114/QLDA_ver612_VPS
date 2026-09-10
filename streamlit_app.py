@@ -87,6 +87,13 @@ from boq_claim_price_header_guard_v622 import install_boq_claim_price_header_gua
 
 install_boq_claim_price_header_guard()
 
+# For project-wide BOQ material/labor questions, aggregate every imported Excel
+# detail row across every saved sheet before the LLM sees the answer. Prompt row
+# caps are evidence/display limits only and can never define the total.
+from boq_ai_fullscan_v622 import install_boq_ai_fullscan
+
+install_boq_ai_fullscan()
+
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
 from v622_boq_multisheet_patch import patch_boq_multisheet
