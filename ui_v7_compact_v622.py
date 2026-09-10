@@ -5,7 +5,9 @@ from html import escape
 from typing import Any, Callable
 
 
-PATCH_MARKER = "V7 COMPACT UI RUNTIME V1"
+PATCH_MARKER = "V7 COMPACT UI RUNTIME V2 CAPTION CONTROL"
+_CAPTION_STATE_KEY = "qlda_v7_show_captions"
+_CAPTION_ADMIN_KEY = "qlda_v7_caption_admin_authorized"
 
 
 def _rowdict(row: Any) -> dict[str, Any]:
@@ -41,6 +43,50 @@ def _safe_date(value: Any):
         except Exception:
             pass
     return None
+
+
+def install_caption_policy_v7(st) -> None:
+    """Hide user-facing Streamlit captions by default across the whole app.
+
+    The original ``st.caption`` remains available behind an Admin-controlled
+    session flag. This is presentation-only: warnings, errors, success/status
+    messages and business data are not suppressed.
+    """
+    if getattr(st, "_qlda_v7_caption_policy_installed", False):
+        return
+
+    original_caption = st.caption
+
+    def _caption_if_enabled(*args, **kwargs):
+        allowed = bool(st.session_state.get(_CAPTION_ADMIN_KEY, False))
+        enabled = bool(st.session_state.get(_CAPTION_STATE_KEY, False))
+        if allowed and enabled:
+            return original_caption(*args, **kwargs)
+        return None
+
+    st._qlda_v7_original_caption = original_caption
+    st.caption = _caption_if_enabled
+    st._qlda_v7_caption_policy_installed = True
+
+
+def render_admin_caption_toggle_v7(st, is_admin: bool) -> None:
+    """Admin-only switch for restoring explanatory captions when needed."""
+    authorized = bool(is_admin)
+    st.session_state[_CAPTION_ADMIN_KEY] = authorized
+
+    if not authorized:
+        # A reused browser session must never carry the Admin preference into a
+        # non-Admin account.
+        st.session_state[_CAPTION_STATE_KEY] = False
+        return
+
+    with st.expander("⚙️ Giao diện · Admin", expanded=False):
+        st.toggle(
+            "Hiện chú thích / hướng dẫn",
+            value=False,
+            key=_CAPTION_STATE_KEY,
+            help="Bật tạm các dòng chú thích nhỏ trên toàn app. Mặc định giao diện V7 luôn ẩn chú thích.",
+        )
 
 
 def install_theme_v7(st) -> None:
@@ -138,8 +184,8 @@ hr { border-color: var(--qlda-border) !important; }
 .qlda-v7-section-title { font-size:1rem; font-weight:700; color:var(--qlda-navy); margin:.25rem 0 .4rem; }
 .qlda-v7-credit {
   position:fixed; right:16px; bottom:8px; z-index:999999;
-  font-size:10.5px; letter-spacing:.1px; color:#7d8795;
-  background:rgba(245,247,250,.88); border:1px solid rgba(210,218,228,.78);
+  font-size:10.5px; letter-spacing:.1px; color:#000000;
+  background:rgba(255,255,255,.92); border:1px solid rgba(210,218,228,.78);
   border-radius:999px; padding:3px 8px; pointer-events:none; backdrop-filter:blur(4px);
 }
 @media (max-width: 760px) {
