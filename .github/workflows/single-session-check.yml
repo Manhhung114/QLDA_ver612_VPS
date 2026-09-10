@@ -1,0 +1,74 @@
+name: Single Session Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile single-session modules
+        run: |
+          python -m py_compile single_session_v622.py v622_single_session_patch.py local_file_server_single_session_v622.py
+
+      - name: Test single-session security invariants
+        run: |
+          python -m unittest tests.test_single_session_v622 -v
+
+      - name: Syntax-check Apps Script patch
+        run: |
+          cp google_drive_appscript/SingleSession_V622.gs /tmp/SingleSession_V622.js
+          node --check /tmp/SingleSession_V622.js
+          grep -Fq "active_session_id" google_drive_appscript/SingleSession_V622.gs
+          grep -Fq "action === 'list_sessions'" google_drive_appscript/SingleSession_V622.gs
+          grep -Fq "action === 'force_logout'" google_drive_appscript/SingleSession_V622.gs
+
+      - name: Validate generated Streamlit single-session UI
+        run: |
+          python build_v621_webopt.py
+          python - <<'PY'
+          from pathlib import Path
+          from v622_auth_refresh_v4 import patch_auth_refresh_v4
+          from v622_boq_multisheet_patch import patch_boq_multisheet
+          from v622_ipc_claim_patch import patch_ipc_claims
+          from v622_vo_claim_patch import patch_vo_claims
+          from v622_report_cost_patch import patch_report_cost
+          from v622_local_vps_patch import patch_local_vps
+          from v622_contractor_workspace_patch import patch_contractor_workspace
+          from v622_contractor_access_patch import patch_contractor_access
+          from v622_single_session_patch import patch_single_session, PATCH_MARKER
+
+          source = Path('dist/streamlit_app.py').read_text(encoding='utf-8')
+          source = patch_boq_multisheet(source)
+          source = patch_ipc_claims(source)
+          source = patch_vo_claims(source)
+          source = patch_report_cost(source)
+          source = patch_auth_refresh_v4(source)
+          source = patch_local_vps(source)
+          source = patch_contractor_workspace(source)
+          source = patch_contractor_access(source)
+          source = patch_single_session(source)
+          compile(source, 'streamlit_app_single_session.py', 'exec')
+          assert PATCH_MARKER in source
+          assert 'gw.list_sessions(token)' in source
+          assert 'gw.force_logout(token, _session_target)' in source
+          assert 'gateway.logout(token)' in source
+          assert 'client_info=_client_info' in source
+          print('Single-session generated UI: OK')
+          PY
+
+      - name: Validate production and VPS wiring
+        run: |
+          grep -Fq 'install_single_session()' streamlit_app.py
+          grep -Fq 'patch_single_session(source)' streamlit_app.py
+          grep -Fq 'single_session_v622.py' vps/deploy.sh
+          grep -Fq 'v622_single_session_patch.py' vps/deploy.sh
+          grep -Fq 'local_file_server_single_session_v622.py' vps/deploy.sh
+          grep -Fq 'local_file_server_single_session_v622.py' vps/qlda-upload.service
