@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "V6.22 LEGAL QLXD UI V1 NO DRAFTS"
+PATCH_MARKER = "V6.22 LEGAL QLXD UI V2 STANDARDS BACKFILL"
 
 
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -26,12 +26,14 @@ def patch_legal_qlda(source: str) -> str:
     # Legal crawler stays lazy: install the expanded QLXD policy only when this
     # sheet is opened, preserving normal app cold-start performance.
     from legal_qlda_v622 import install_legal_qlda, purge_drafts
+    from legal_standards_backfill_v622 import install_legal_standard_backfill
     install_legal_qlda()
+    install_legal_standard_backfill()
     from legal_documents import sync_source, sync_all, search_online_all, search_online_sites
     legal_repo = _legal_repo_for_view()
     purge_drafts(legal_repo)
     st.subheader("📚 Văn bản QLDA Xây dựng")
-    _ui_note("Luật • Nghị định • Thông tư • Quyết định • QCVN • TCVN — ưu tiên văn bản phục vụ quản lý dự án và thi công xây dựng; luôn giữ link để mở nguồn trực tiếp.")
+    _ui_note("Luật • Nghị định • Thông tư • Quyết định • QCVN • TCVN — TT-BXD, QCVN/BXD và TCVN xây dựng có cơ chế family/exact backfill để hạn chế bỏ sót văn bản cũ.")
 '''
     source = _replace_once(source, render_old, render_new, "legal render header")
 
@@ -48,8 +50,8 @@ def patch_legal_qlda(source: str) -> str:
     actions = [
         (c1, "🔄 Cập nhật QLXD", "all"),
         (c2, "⚖️ VBPL / Chính phủ", "vbpl"),
-        (c3, "📐 QCVN / TCVN - VSQI", "vsqi"),
-        (c4, "📚 QLXD mở rộng - TVPL", "tvpl"),
+        (c3, "📐 TCVN xây dựng - VSQI", "vsqi"),
+        (c4, "📚 QCVN / QLXD - TVPL", "tvpl"),
     ]
 '''
     source = _replace_once(source, actions_old, actions_new, "legal source buttons")
