@@ -16,7 +16,7 @@ jobs:
 
       - name: Compile single-session modules
         run: |
-          python -m py_compile single_session_v622.py v622_single_session_patch.py local_file_server_single_session_v622.py
+          python -m py_compile single_session_v622.py v622_single_session_patch.py local_file_server_single_session_v622.py v622_contractor_sidebar_patch.py
 
       - name: Test single-session security invariants
         run: |
@@ -43,6 +43,7 @@ jobs:
           from v622_local_vps_patch import patch_local_vps
           from v622_contractor_workspace_patch import patch_contractor_workspace
           from v622_contractor_access_patch import patch_contractor_access
+          from v622_contractor_sidebar_patch import patch_contractor_sidebar_ui, PATCH_MARKER as SIDEBAR_PATCH_MARKER
           from v622_single_session_patch import patch_single_session, PATCH_MARKER
 
           source = Path('dist/streamlit_app.py').read_text(encoding='utf-8')
@@ -54,21 +55,27 @@ jobs:
           source = patch_local_vps(source)
           source = patch_contractor_workspace(source)
           source = patch_contractor_access(source)
+          # Keep this order identical to streamlit_app.py production runtime.
           source = patch_single_session(source)
+          source = patch_contractor_sidebar_ui(source)
           compile(source, 'streamlit_app_single_session.py', 'exec')
           assert PATCH_MARKER in source
+          assert SIDEBAR_PATCH_MARKER in source
           assert 'gw.list_sessions(token)' in source
           assert 'gw.force_logout(token, _session_target)' in source
           assert 'gateway.logout(token)' in source
           assert 'client_info=_client_info' in source
-          print('Single-session generated UI: OK')
+          assert '("🏢 Nhà thầu", lambda: _v622_render_contractor_management' not in source
+          print('Production single-session + contractor-sidebar generated UI: OK')
           PY
 
       - name: Validate production and VPS wiring
         run: |
           grep -Fq 'install_single_session()' streamlit_app.py
           grep -Fq 'patch_single_session(source)' streamlit_app.py
+          grep -Fq 'patch_contractor_sidebar_ui(source)' streamlit_app.py
           grep -Fq 'single_session_v622.py' vps/deploy.sh
           grep -Fq 'v622_single_session_patch.py' vps/deploy.sh
+          grep -Fq 'v622_contractor_sidebar_patch.py' vps/deploy.sh
           grep -Fq 'local_file_server_single_session_v622.py' vps/deploy.sh
           grep -Fq 'local_file_server_single_session_v622.py' vps/qlda-upload.service
