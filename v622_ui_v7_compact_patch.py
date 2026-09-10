@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 
-PATCH_MARKER = "V7 COMPACT UI SOURCE PATCH V2"
+PATCH_MARKER = "V7 COMPACT UI SOURCE PATCH V3"
 
 
 def _insert_runtime_import(source: str) -> str:
@@ -55,17 +55,22 @@ def _replace_main_navigation(source: str) -> str:
 
 
 def _indent_block(source: str, start_token: str, end_token: str, wrapper_line: str, label: str) -> str:
-    """Wrap one source range in a Streamlit container without changing its logic."""
+    """Wrap one source range in a Streamlit container without changing its logic.
+
+    This is a visual-only optimization. If a prior business patch has changed the
+    source shape, leave that block untouched instead of preventing app startup.
+    """
     start = source.find(start_token)
     if start < 0:
-        raise RuntimeError(f"{PATCH_MARKER}: {label} start anchor missing")
+        return source
     line_start = source.rfind("\n", 0, start) + 1
     end = source.find(end_token, start)
     if end < 0:
-        raise RuntimeError(f"{PATCH_MARKER}: {label} end anchor missing")
+        return source
     end_line_start = source.rfind("\n", 0, end) + 1
     block = source[line_start:end_line_start]
-    first_line = source[line_start:source.find("\n", line_start)]
+    first_newline = source.find("\n", line_start)
+    first_line = source[line_start:first_newline if first_newline >= 0 else len(source)]
     indent = first_line[: len(first_line) - len(first_line.lstrip())]
     wrapped = indent + wrapper_line + "\n"
     for line in block.splitlines(keepends=True):
@@ -74,41 +79,48 @@ def _indent_block(source: str, start_token: str, end_token: str, wrapper_line: s
 
 
 def _wrap_form(source: str, anchor: str, title: str) -> str:
-    """Put one legacy CRUD form inside a collapsed expander.
+    """Put matching legacy CRUD forms inside collapsed expanders.
 
-    Variables created inside a ``with`` block remain in the function scope, so
-    existing save/delete code after the form is left byte-for-byte unchanged.
+    The V7 layer is presentation-only. Earlier V6.22 patches are allowed to
+    rename, replace or remove a form, so zero matches is valid and must never
+    make the production app fail. Multiple matches are wrapped independently.
     """
     lines = source.splitlines(keepends=True)
     hits = [i for i, line in enumerate(lines) if anchor in line]
-    if len(hits) != 1:
-        raise RuntimeError(f"{PATCH_MARKER}: expected one {anchor} form, found {len(hits)}")
-    i = hits[0]
-    raw = lines[i]
-    stripped = raw.lstrip(" ")
-    indent_len = len(raw) - len(stripped)
-    indent = " " * indent_len
+    if not hits:
+        return source
 
-    end = i + 1
-    while end < len(lines):
-        line = lines[end]
-        if not line.strip():
+    # Process from bottom to top so line indexes above each edit remain stable.
+    for i in reversed(hits):
+        raw = lines[i]
+        stripped = raw.lstrip(" ")
+        indent_len = len(raw) - len(stripped)
+        indent = " " * indent_len
+
+        end = i + 1
+        while end < len(lines):
+            line = lines[end]
+            if not line.strip():
+                end += 1
+                continue
+            current_indent = len(line) - len(line.lstrip(" "))
+            if current_indent <= indent_len:
+                break
             end += 1
-            continue
-        current_indent = len(line) - len(line.lstrip(" "))
-        if current_indent <= indent_len:
-            break
-        end += 1
 
-    block = lines[i:end]
-    replacement = [f'{indent}with st.expander("{title}", expanded=False):\n']
-    replacement.extend(("    " + line) if line.strip() else line for line in block)
-    return "".join(lines[:i] + replacement + lines[end:])
+        block = lines[i:end]
+        replacement = [f'{indent}with st.expander("{title}", expanded=False):\n']
+        replacement.extend(("    " + line) if line.strip() else line for line in block)
+        lines = lines[:i] + replacement + lines[end:]
+
+    return "".join(lines)
 
 
 def _compact_crud_forms(source: str) -> str:
     # Approval RFA/RFI and Shopdrawing/As-built intentionally stay untouched:
     # their upload/approval workflow must remain immediately visible when active.
+    # Every entry is best-effort because earlier business patches may already
+    # have replaced a legacy form with another UI structure.
     forms = (
         ('with st.form(f"cost_boq_form_', "✏️ Thêm / sửa BOQ"),
         ('with st.form(f"pay_form_', "✏️ Thêm / sửa thanh toán"),
@@ -127,7 +139,8 @@ def _compact_crud_forms(source: str) -> str:
 
 def _compact_legal_tools(source: str) -> str:
     # Source sync remains fully available, but no longer occupies the main legal
-    # screen. Search/filter/table becomes the default visual hierarchy.
+    # screen. Search/filter/table becomes the default visual hierarchy. This is
+    # deliberately best-effort so legal business patches can evolve independently.
     source = _indent_block(
         source,
         "    c1, c2, c3, c4 = st.columns(4)\n    actions = [",
@@ -151,10 +164,11 @@ def _compact_ai(source: str) -> str:
     )
     tabs_old = '    tab_chat, tab_risk, tab_file, tab_legal = st.tabs(["💬 Chat với dự án", "📈 Rủi ro & báo cáo", "📎 Đọc hồ sơ", "⚖️ Văn bản AI"])\n'
     tabs_new = '''    # V7: chat là tác vụ chính; công cụ phân tích chuyên sâu đóng mặc định.\n    tab_chat = st.container()\n    tab_risk = st.expander("📈 Phân tích rủi ro & báo cáo", expanded=False)\n    tab_file = st.expander("📎 Đọc / phân tích hồ sơ", expanded=False)\n    tab_legal = st.expander("⚖️ Tra cứu văn bản bằng AI", expanded=False)\n'''
-    count = source.count(tabs_old)
-    if count != 1:
-        raise RuntimeError(f"{PATCH_MARKER}: expected one AI tab group, found {count}")
-    return source.replace(tabs_old, tabs_new, 1)
+    # A prior AI patch may alter its controls. In that case keep the proven
+    # business UI instead of failing the entire application for a cosmetic step.
+    if source.count(tabs_old) == 1:
+        source = source.replace(tabs_old, tabs_new, 1)
+    return source
 
 
 def _clean_technical_labels(source: str) -> str:
@@ -192,6 +206,9 @@ def patch_ui_v7_compact(source: str) -> str:
 
     source += f"\n# {PATCH_MARKER}\n"
 
+    # Only structural V7 requirements are fatal. Optional cosmetic compaction
+    # markers are intentionally excluded because earlier business patches may
+    # legitimately replace those source blocks.
     required = (
         "🏠 Tổng quan",
         "🏗️ Thi công",
@@ -199,9 +216,6 @@ def patch_ui_v7_compact(source: str) -> str:
         "💰 Tài chính",
         "📚 Công cụ",
         "render_overview_v7",
-        "✏️ Thêm / sửa BOQ",
-        "⟳ Cập nhật kho văn bản",
-        "📈 Phân tích rủi ro & báo cáo",
     )
     for marker in required:
         if marker not in source:
