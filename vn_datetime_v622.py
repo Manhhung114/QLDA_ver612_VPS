@@ -41,7 +41,6 @@ _TEMPORAL_NAME_PARTS = (
 )
 
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$|^\d{1,2}[/-]\d{1,2}[/-]\d{4}$")
-_HAS_TZ_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$", re.I)
 
 
 def _text(value: Any) -> str:
@@ -68,7 +67,7 @@ def _parse_string(value: str) -> tuple[datetime | date | None, bool]:
             except ValueError:
                 pass
 
-    # Python's ISO parser handles fractional seconds and UTC offsets.  Convert Z
+    # Python's ISO parser handles fractional seconds and UTC offsets. Convert Z
     # explicitly for compatibility across Python versions.
     iso = text.replace("Z", "+00:00").replace("z", "+00:00")
     try:
@@ -97,9 +96,9 @@ def to_vn_datetime(value: Any, *, naive_is_vietnam: bool = True) -> datetime | d
     """Return a Vietnam-local date/datetime without changing stored data.
 
     A timezone-aware value (including ISO strings ending in ``Z`` or an offset)
-    is converted to Asia/Ho_Chi_Minh.  Legacy app tables often store naive wall
+    is converted to Asia/Ho_Chi_Minh. Legacy app tables often store naive wall
     clock strings; those are treated as Vietnam local time by default so they are
-    not shifted a second time.  Callers may set ``naive_is_vietnam=False`` only
+    not shifted a second time. Callers may set ``naive_is_vietnam=False`` only
     for a known legacy UTC-naive source.
     """
     if value is None or value == "":
@@ -174,7 +173,7 @@ def _format_temporal_value(value: Any) -> Any:
 def format_tabular_vn(data: Any) -> Any:
     """Return a display copy with temporal columns formatted in Vietnam time.
 
-    Supported inputs are pandas DataFrames/Series and list/tuple records.  The
+    Supported inputs are pandas DataFrames/Series and list/tuple records. The
     function is deliberately display-only and never mutates the caller's object.
     """
     if data is None:
@@ -218,3 +217,38 @@ def format_tabular_vn(data: Any) -> Any:
         return row
 
     return data
+
+
+def install_work_task_vn_display() -> None:
+    """Format Work Tasks comments/audit rows without altering stored timestamps."""
+    try:
+        import work_tasks_v1_v622 as work
+    except Exception:
+        return
+    if getattr(work, "_qlda_vn_datetime_display_installed", False):
+        return
+
+    original_comments = work.list_work_task_comments
+    original_history = work.list_work_task_history
+
+    def comments_vn(*args, **kwargs):
+        rows = original_comments(*args, **kwargs)
+        out = []
+        for raw in rows:
+            row = dict(raw)
+            row["created_at"] = format_vn_datetime(row.get("created_at"))
+            out.append(row)
+        return out
+
+    def history_vn(*args, **kwargs):
+        rows = original_history(*args, **kwargs)
+        out = []
+        for raw in rows:
+            row = dict(raw)
+            row["created_at"] = format_vn_datetime(row.get("created_at"))
+            out.append(row)
+        return out
+
+    work.list_work_task_comments = comments_vn
+    work.list_work_task_history = history_vn
+    work._qlda_vn_datetime_display_installed = True
