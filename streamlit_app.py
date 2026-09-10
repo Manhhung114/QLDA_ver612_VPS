@@ -31,8 +31,14 @@ _postgres_backend.install_postgres_backend()
 # project data is preserved in-place. Additional contractors use hidden child
 # project rows and therefore inherit every existing project-scoped feature.
 from contractor_workspace_v622 import install_contractor_workspace
+from contractor_access_control_v622 import (
+    install_contractor_access_control,
+    capture_single_contractor_ai_context,
+    install_ai_access_guard,
+)
 
 install_contractor_workspace()
+install_contractor_access_control()
 
 # Harden Gemini routing before the generated Streamlit source imports/uses the
 # AI assistant. 503/429 failures are retried briefly, then routed across stable
@@ -125,12 +131,18 @@ from project_remaining_components_v622 import install_project_remaining_componen
 
 install_project_remaining_components()
 
+# Capture the fully patched single-workspace AI context BEFORE the outer project
+# aggregator is installed. The access guard can later force CONTRACTOR users back
+# to exactly this safe single-workspace context, including the default workspace.
+capture_single_contractor_ai_context()
+
 # Project AI is the outermost context layer. It enumerates every contractor
 # workspace under the selected master project, runs the validated BOQ/Claim
 # calculations per contractor, then aggregates them for project-level answers.
 from contractor_ai_context_v622 import install_contractor_ai_context
 
 install_contractor_ai_context()
+install_ai_access_guard()
 
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
@@ -140,6 +152,7 @@ from v622_vo_claim_patch import patch_vo_claims
 from v622_report_cost_patch import patch_report_cost
 from v622_local_vps_patch import patch_local_vps
 from v622_contractor_workspace_patch import patch_contractor_workspace
+from v622_contractor_access_patch import patch_contractor_access
 
 
 # VPS entrypoint. The historical V6.21 source bundle is rebuilt in memory and
@@ -173,6 +186,7 @@ def _compiled_vps_app(signature):
     source = patch_auth_refresh_v4(source)
     source = patch_local_vps(source)
     source = patch_contractor_workspace(source)
+    source = patch_contractor_access(source)
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
