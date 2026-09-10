@@ -29,8 +29,11 @@ class SingleSessionTests(unittest.TestCase):
         self.assertIn("LOGIN_SINGLE_SESSION", text)
         self.assertIn("action === 'list_sessions'", text)
         self.assertIn("action === 'force_logout'", text)
-        self.assertIn("ticketStarted + 1000 < activeStarted", text)
-        self.assertIn("uploadStarted + 1000 < activeStarted", text)
+        self.assertIn("session_id: sid", text)
+        self.assertIn("ticketSid !== activeSid", text)
+        self.assertIn("state.session_id = String(meta.session_id", text)
+        self.assertIn("uploadSid !== activeSid", text)
+        self.assertIn("ticket_version: 3", text)
 
     def test_ui_patch_adds_admin_session_management(self):
         source = '''
