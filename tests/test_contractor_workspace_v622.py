@@ -14,6 +14,10 @@ from contractor_workspace_v622 import (
     list_contractors,
 )
 from v622_contractor_workspace_patch import PATCH_MARKER, patch_contractor_workspace
+from v622_contractor_sidebar_patch import (
+    PATCH_MARKER as SIDEBAR_PATCH_MARKER,
+    patch_contractor_sidebar_ui,
+)
 
 
 class ContractorWorkspaceTests(unittest.TestCase):
@@ -185,10 +189,18 @@ _main_sections = [
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn("render_ai_assistant(_master_pid)", patched)
         self.assertIn("render_schedule(pid)", patched)
-        self.assertNotIn("_v622_render_contractor_management", patched)
-        self.assertNotIn('(\"🏢 Nhà thầu\"', patched)
+        # Kept temporarily as the compatibility anchor consumed by the access patch.
+        self.assertIn("_v622_render_contractor_management", patched)
+        self.assertIn('(\"🏢 Nhà thầu\"', patched)
         self.assertIn("render_project_info(_master_pid)", patched)
-        compile(patched, "multi_contractor_ui_test.py", "exec")
+        compile(patched, "multi_contractor_ui_intermediate_test.py", "exec")
+
+        final_ui = patch_contractor_sidebar_ui(patched)
+        self.assertIn(SIDEBAR_PATCH_MARKER, final_ui)
+        self.assertNotIn('(\"🏢 Nhà thầu\", lambda: _v622_render_contractor_management', final_ui)
+        self.assertIn("render_ai_assistant(_master_pid)", final_ui)
+        self.assertIn("render_schedule(pid)", final_ui)
+        compile(final_ui, "multi_contractor_ui_final_test.py", "exec")
 
 
 if __name__ == "__main__":
