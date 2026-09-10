@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 
-PATCH_MARKER = "V7 COMPACT UI SOURCE PATCH V1"
+PATCH_MARKER = "V7 COMPACT UI SOURCE PATCH V2"
 
 
 def _insert_runtime_import(source: str) -> str:
@@ -54,6 +54,128 @@ def _replace_main_navigation(source: str) -> str:
     return source[:start] + replacement + source[end:]
 
 
+def _indent_block(source: str, start_token: str, end_token: str, wrapper_line: str, label: str) -> str:
+    """Wrap one source range in a Streamlit container without changing its logic."""
+    start = source.find(start_token)
+    if start < 0:
+        raise RuntimeError(f"{PATCH_MARKER}: {label} start anchor missing")
+    line_start = source.rfind("\n", 0, start) + 1
+    end = source.find(end_token, start)
+    if end < 0:
+        raise RuntimeError(f"{PATCH_MARKER}: {label} end anchor missing")
+    end_line_start = source.rfind("\n", 0, end) + 1
+    block = source[line_start:end_line_start]
+    first_line = source[line_start:source.find("\n", line_start)]
+    indent = first_line[: len(first_line) - len(first_line.lstrip())]
+    wrapped = indent + wrapper_line + "\n"
+    for line in block.splitlines(keepends=True):
+        wrapped += (indent + "    " + line[len(indent):]) if line.strip() else line
+    return source[:line_start] + wrapped + source[end_line_start:]
+
+
+def _wrap_form(source: str, anchor: str, title: str) -> str:
+    """Put one legacy CRUD form inside a collapsed expander.
+
+    Variables created inside a ``with`` block remain in the function scope, so
+    existing save/delete code after the form is left byte-for-byte unchanged.
+    """
+    lines = source.splitlines(keepends=True)
+    hits = [i for i, line in enumerate(lines) if anchor in line]
+    if len(hits) != 1:
+        raise RuntimeError(f"{PATCH_MARKER}: expected one {anchor} form, found {len(hits)}")
+    i = hits[0]
+    raw = lines[i]
+    stripped = raw.lstrip(" ")
+    indent_len = len(raw) - len(stripped)
+    indent = " " * indent_len
+
+    end = i + 1
+    while end < len(lines):
+        line = lines[end]
+        if not line.strip():
+            end += 1
+            continue
+        current_indent = len(line) - len(line.lstrip(" "))
+        if current_indent <= indent_len:
+            break
+        end += 1
+
+    block = lines[i:end]
+    replacement = [f'{indent}with st.expander("{title}", expanded=False):\n']
+    replacement.extend(("    " + line) if line.strip() else line for line in block)
+    return "".join(lines[:i] + replacement + lines[end:])
+
+
+def _compact_crud_forms(source: str) -> str:
+    # Approval RFA/RFI and Shopdrawing/As-built intentionally stay untouched:
+    # their upload/approval workflow must remain immediately visible when active.
+    forms = (
+        ('with st.form(f"cost_boq_form_', "✏️ Thêm / sửa BOQ"),
+        ('with st.form(f"pay_form_', "✏️ Thêm / sửa thanh toán"),
+        ('with st.form(f"vo_cost_form_', "✏️ Thêm / sửa VO"),
+        ('with st.form(f"mat_form_', "✏️ Thêm / sửa vật tư"),
+        ('with st.form(f"proc_form_', "✏️ Thêm / sửa kế hoạch mua sắm"),
+        ('with st.form(f"inv_form_', "✏️ Thêm / sửa phiếu nhập xuất"),
+        ('with st.form(f"doc_form_', "✏️ Thêm / sửa hồ sơ"),
+        ('with st.form(f"drawing_form_', "✏️ Thêm / sửa bản vẽ"),
+        ('with st.form(f"site_diary_form_', "✏️ Thêm / sửa nhật ký"),
+    )
+    for anchor, title in forms:
+        source = _wrap_form(source, anchor, title)
+    return source
+
+
+def _compact_legal_tools(source: str) -> str:
+    # Source sync remains fully available, but no longer occupies the main legal
+    # screen. Search/filter/table becomes the default visual hierarchy.
+    source = _indent_block(
+        source,
+        "    c1, c2, c3, c4 = st.columns(4)\n    actions = [",
+        '    with st.expander("🔎 Google / Tìm kiếm online toàn web", expanded=True):',
+        'with st.expander("⟳ Cập nhật kho văn bản", expanded=False):',
+        "legal sync tools",
+    )
+    source = source.replace(
+        'with st.expander("🔎 Google / Tìm kiếm online toàn web", expanded=True):',
+        'with st.expander("🔎 Tìm kiếm online nâng cao", expanded=False):',
+        1,
+    )
+    return source
+
+
+def _compact_ai(source: str) -> str:
+    source = source.replace(
+        'st.subheader("🤖 Trợ lý AI QLDA")',
+        'st.subheader("🤖 Trợ lý QLDA")',
+        1,
+    )
+    tabs_old = '    tab_chat, tab_risk, tab_file, tab_legal = st.tabs(["💬 Chat với dự án", "📈 Rủi ro & báo cáo", "📎 Đọc hồ sơ", "⚖️ Văn bản AI"])\n'
+    tabs_new = '''    # V7: chat là tác vụ chính; công cụ phân tích chuyên sâu đóng mặc định.\n    tab_chat = st.container()\n    tab_risk = st.expander("📈 Phân tích rủi ro & báo cáo", expanded=False)\n    tab_file = st.expander("📎 Đọc / phân tích hồ sơ", expanded=False)\n    tab_legal = st.expander("⚖️ Tra cứu văn bản bằng AI", expanded=False)\n'''
+    count = source.count(tabs_old)
+    if count != 1:
+        raise RuntimeError(f"{PATCH_MARKER}: expected one AI tab group, found {count}")
+    return source.replace(tabs_old, tabs_new, 1)
+
+
+def _clean_technical_labels(source: str) -> str:
+    # Browser/sidebar labels are product-facing. Backend/version details remain
+    # visible in Settings/System and in logs, not in daily operational screens.
+    source = re.sub(
+        r'st\.set_page_config\(page_title="QLDA Xây dựng V6\.22[^\n]*?page_icon="🏗️", layout="wide"\)',
+        'st.set_page_config(page_title="QLDA Xây dựng", page_icon="🏗️", layout="wide")',
+        source,
+        count=1,
+    )
+    for old in (
+        'st.sidebar.markdown("### 🏗️ QLDA Xây dựng V6.22 PostgreSQL VPS AI")',
+        'st.sidebar.markdown("### 🏗️ QLDA Xây dựng V6.22 PostgreSQL Cloud AI")',
+    ):
+        if old in source:
+            source = source.replace(old, 'st.sidebar.markdown("### 🏗️ QLDA Xây dựng")', 1)
+            break
+    return source
+
+
 def patch_ui_v7_compact(source: str) -> str:
     """Apply visual/navigation-only V7 on top of the validated V6.22 backend."""
     if PATCH_MARKER in source:
@@ -61,38 +183,27 @@ def patch_ui_v7_compact(source: str) -> str:
 
     source = _insert_runtime_import(source)
     source = _install_theme_after_page_config(source)
+    source = _clean_technical_labels(source)
+    source = _compact_crud_forms(source)
+    source = _compact_legal_tools(source)
+    source = _compact_ai(source)
     source = _replace_main_header(source)
     source = _replace_main_navigation(source)
-
-    # Keep secondary legal tools available but closed by default. The primary
-    # page becomes search + metrics + result table rather than a large tool panel.
-    source = source.replace(
-        'with st.expander("🔎 Google / Tìm kiếm online toàn web", expanded=True):',
-        'with st.expander("🔎 Tìm kiếm online nâng cao", expanded=False):',
-        1,
-    )
-
-    # Simpler user-facing AI label; all full-scan/audit logic remains unchanged.
-    source = source.replace(
-        'st.subheader("🤖 Trợ lý AI QLDA")',
-        'st.subheader("🤖 Trợ lý QLDA")',
-        1,
-    )
 
     source += f"\n# {PATCH_MARKER}\n"
 
     required = (
-        "by: Hoàng Mạnh Hùng",  # helper import/source marker validation happens in tests
         "🏠 Tổng quan",
         "🏗️ Thi công",
         "📁 Hồ sơ",
         "💰 Tài chính",
         "📚 Công cụ",
         "render_overview_v7",
+        "✏️ Thêm / sửa BOQ",
+        "⟳ Cập nhật kho văn bản",
+        "📈 Phân tích rủi ro & báo cáo",
     )
-    # The credit text lives in the isolated runtime file rather than generated
-    # source, so only validate the generated-source markers here.
-    for marker in required[1:]:
+    for marker in required:
         if marker not in source:
             raise RuntimeError(f"{PATCH_MARKER}: generated source missing {marker}")
     if "_main_actions[_main_choice]()" in source:
