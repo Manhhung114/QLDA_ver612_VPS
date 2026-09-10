@@ -7,8 +7,8 @@
  *
  * Rule: one account = one active session. A successful login replaces the
  * previous login. Refresh/multiple tabs are unaffected because they reuse the
- * same signed token. Old upload tickets/sessions are invalidated after a newer
- * login as well.
+ * same signed token. Upload tickets and resumable uploads are bound to the
+ * exact login session id, so the old browser cannot continue after replacement.
  */
 
 var V622_SINGLE_SESSION_PATCH = 'V6.22 SINGLE ACTIVE SESSION V1';
@@ -16,7 +16,9 @@ var _V622_SS_ORIGINAL_DOPOST = doPost;
 var _V622_SS_ORIGINAL_SET_USER = setUser_;
 var _V622_SS_ORIGINAL_CHANGE_PASSWORD = changePassword_;
 var _V622_SS_ORIGINAL_VALIDATE_UPLOAD_TICKET = validateUploadTicketMeta_;
+var _V622_SS_ORIGINAL_START_RESUMABLE_UPLOAD = startResumableUpload;
 var _V622_SS_ORIGINAL_READ_UPLOAD_STATE = readUploadState_;
+var _V622_SS_ORIGINAL_SAVE_UPLOAD_STATE = saveUploadState_;
 
 function v622SessionPropertyKey_(sid) {
   return 'qlda_active_session_' + String(sid || '');
@@ -245,27 +247,88 @@ changePassword_ = function(body) {
   return result;
 };
 
-// A ticket created before the current login must not survive a replacement login.
+// Rebuild ticket creation so the signed ticket contains the exact session id
+// from requireUploadRole_(). This closes the sub-second race between two logins.
+createUploadTicket_ = function(body) {
+  const session = requireUploadRole_(body);
+  const sid = String(session.sid || '');
+  if (!sid) throw new Error('Phiên đăng nhập không có session id. Hãy đăng nhập lại.');
+  const target = ensureRecordFolderFromBody_(body);
+  const requestedMax = Number(body.max_bytes || MAX_DIRECT_UPLOAD_BYTES);
+  const maxBytes = Math.min(MAX_DIRECT_UPLOAD_BYTES, Math.max(1, requestedMax));
+  const now = Date.now();
+  const meta = {
+    v: 3,
+    email: session.email,
+    role: session.role,
+    approval_role: String(session.approval_role || ''),
+    session_id: sid,
+    upload_purpose: String(body.upload_purpose || ''),
+    folder_id: target.getId(),
+    folder_url: target.getUrl(),
+    project_code: sanitizeName_(body.project_code || 'DU_AN'),
+    kind: String(body.kind || ''),
+    subtype: sanitizeName_(body.subtype || 'Khac'),
+    record_code: sanitizeName_(body.record_code || 'Chung'),
+    tower_name: towerFolderNameFromRecordCode_(body.record_code || ''),
+    max_bytes: maxBytes,
+    created_at: new Date(now).toISOString(),
+    expires_at: now + UPLOAD_TICKET_TTL_SECONDS * 1000,
+    nonce: randomSecret_()
+  };
+  const ticket = makeSignedUploadTicket_(meta);
+  const configuredBase = String(body.webapp_url || '').trim();
+  const base = validWebAppExecUrl_(configuredBase) ? configuredBase : String(ScriptApp.getService().getUrl() || '').trim();
+  if (!base) throw new Error('Không xác định được URL Web App /exec.');
+  return {
+    upload: {
+      ticket: ticket,
+      url: base + (base.indexOf('?') >= 0 ? '&' : '?') + 'mode=upload&ticket=' + encodeURIComponent(ticket),
+      folder_url: target.getUrl(),
+      max_bytes: maxBytes,
+      max_gb: Math.round(maxBytes / 1024 / 1024 / 1024 * 10) / 10,
+      expires_seconds: UPLOAD_TICKET_TTL_SECONDS,
+      ticket_version: 3
+    }
+  };
+};
+
+// Every ticket must belong to the currently active login, not merely the same
+// email/role. Pre-patch tickets are intentionally rejected after deployment.
 validateUploadTicketMeta_ = function(meta) {
   _V622_SS_ORIGINAL_VALIDATE_UPLOAD_TICKET(meta);
   const email = normalizeEmail_(meta.email || '');
   const u = currentUserRecord_(email);
-  const activeStarted = Date.parse(String(u.active_session_started_at || ''));
-  const ticketStarted = Date.parse(String(meta.created_at || ''));
-  if (!u.active_session_id || !Number.isFinite(activeStarted) || !Number.isFinite(ticketStarted) || ticketStarted + 1000 < activeStarted) {
+  const activeSid = String(u.active_session_id || '');
+  const ticketSid = String(meta.session_id || '');
+  if (!activeSid || !ticketSid || ticketSid !== activeSid) {
     throw new Error('Phiên đăng nhập tạo link upload đã bị thay thế. Hãy đăng nhập lại và tạo link mới.');
   }
   return true;
 };
 
-// A resumable upload already started on an old login is also stopped.
+// The original startResumableUpload validates the signed ticket again. Before
+// returning upload_id to the browser, copy that ticket session id into the
+// server-side resumable state. There is no client-visible race window.
+startResumableUpload = function(ticket, fileName, mimeType, fileSize) {
+  const meta = readUploadTicket_(String(ticket || ''));
+  const result = _V622_SS_ORIGINAL_START_RESUMABLE_UPLOAD(ticket, fileName, mimeType, fileSize);
+  const uploadId = String((result && result.upload_id) || '');
+  if (!uploadId) throw new Error('Không tạo được mã phiên upload.');
+  const state = _V622_SS_ORIGINAL_READ_UPLOAD_STATE(uploadId);
+  state.session_id = String(meta.session_id || '');
+  _V622_SS_ORIGINAL_SAVE_UPLOAD_STATE(uploadId, state);
+  return result;
+};
+
+// Every chunk/query must still belong to the active login that started upload.
 readUploadState_ = function(uploadId) {
   const state = _V622_SS_ORIGINAL_READ_UPLOAD_STATE(uploadId);
   const email = normalizeEmail_(state.email || '');
   const u = currentUserRecord_(email);
-  const activeStarted = Date.parse(String(u.active_session_started_at || ''));
-  const uploadStarted = Date.parse(String(state.created_at || ''));
-  if (!u.active_session_id || !Number.isFinite(activeStarted) || !Number.isFinite(uploadStarted) || uploadStarted + 1000 < activeStarted) {
+  const activeSid = String(u.active_session_id || '');
+  const uploadSid = String(state.session_id || '');
+  if (!activeSid || !uploadSid || uploadSid !== activeSid) {
     throw new Error('Phiên upload thuộc đăng nhập cũ đã bị kết thúc. Hãy đăng nhập lại.');
   }
   return state;
