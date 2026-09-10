@@ -126,7 +126,7 @@ def install_ipc_original_archive() -> None:
         raise RuntimeError("Không nhận diện được signature IPC để chuẩn hóa lưu file gốc.")
 
     old_parse = """        if upload is not None:\n            try:\n                parsed = parse_ipc_workbook(upload.getvalue(), upload.name)\n"""
-    new_parse = """        if upload is not None:\n            try:\n                _ipc_raw = upload.getvalue()\n                _pre_record = f\"IPC-UPLOAD-{hashlib.sha256(_ipc_raw).hexdigest()[:12]}\"\n                _v622_archive_original_upload(\n                    db, pid, session_token, subtype=\"IPC\", record_code=_pre_record,\n                    name=upload.name, content=_ipc_raw, upload_purpose=\"ipc_original\",\n                )\n                parsed = parse_ipc_workbook(_ipc_raw, upload.name)\n"""
+    new_parse = """        if upload is not None:\n            try:\n                _ipc_raw = upload.getvalue()\n                _v622_archive_original_upload(\n                    db, pid, session_token, subtype=\"IPC\", record_code=\"IPC\",\n                    name=upload.name, content=_ipc_raw, upload_purpose=\"ipc_original\",\n                )\n                parsed = parse_ipc_workbook(_ipc_raw, upload.name)\n"""
     if old_parse not in source:
         raise RuntimeError("Không tìm thấy điểm parse IPC để lưu file gốc trước khi đọc.")
     source = source.replace(old_parse, new_parse, 1)
