@@ -18,7 +18,7 @@ jobs:
         run: |
           python -m py_compile \
             streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
-            v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_cost_components_v622.py boq_persistence_v622.py \
+            v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_cost_components_v622.py boq_claim_terms_v622.py boq_claim_price_recovery_v622.py boq_persistence_v622.py \
             v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py ipc_claim_summary_fix_v622.py \
             ipc_adaptive_parser_v622.py ipc_claim_number_fix_v622.py ipc_claim_period_v622.py ipc_claim_delete_v622.py \
             v622_vo_claim_patch.py vo_claim_v622.py \
@@ -75,7 +75,12 @@ jobs:
           grep -Fq 'labor_unit_price' boq_cost_components_v622.py
           grep -Fq 'material_cost' boq_cost_components_v622.py
           grep -Fq 'labor_cost' boq_cost_components_v622.py
+          grep -Fq 'V6.22 BOQ CLAIM PRICE RECOVERY V1' boq_claim_price_recovery_v622.py
+          grep -Fq 'Vật tư/Vật liệu' boq_claim_price_recovery_v622.py
+          grep -Fq '_recover_boq' boq_claim_price_recovery_v622.py
+          grep -Fq '_recover_claims' boq_claim_price_recovery_v622.py
           grep -Fq 'install_boq_cost_components()' streamlit_app.py
+          grep -Fq 'install_boq_claim_price_recovery()' streamlit_app.py
           grep -Fq '_v622_save_saved_boq_workbook' v622_boq_multisheet_patch.py
           grep -Fq '_v622_load_saved_boq_workbook' v622_boq_multisheet_patch.py
           grep -Fq '_sheet_df.map(_v622_format_table_number)' v622_boq_multisheet_patch.py
@@ -202,6 +207,8 @@ jobs:
           grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
           grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
           grep -Fq 'boq_cost_components_v622.py' vps/deploy.sh
+          grep -Fq 'boq_claim_terms_v622.py' vps/deploy.sh
+          grep -Fq 'boq_claim_price_recovery_v622.py' vps/deploy.sh
           grep -Fq 'boq_persistence_v622.py' vps/deploy.sh
           grep -Fq 'v622_ipc_claim_patch.py' vps/deploy.sh
           grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
