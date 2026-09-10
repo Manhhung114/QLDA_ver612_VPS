@@ -130,10 +130,12 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v622_single_session_patch.py" \
   "$APP_DIR/local_file_server_single_session_v622.py" \
   "$APP_DIR/contractor_workspace_v622.py" \
+  "$APP_DIR/contractor_sidebar_admin_v622.py" \
   "$APP_DIR/contractor_access_control_v622.py" \
   "$APP_DIR/contractor_ai_context_v622.py" \
   "$APP_DIR/v622_contractor_workspace_patch.py" \
   "$APP_DIR/v622_contractor_access_patch.py" \
+  "$APP_DIR/v622_contractor_sidebar_patch.py" \
   "$APP_DIR/v622_boq_multisheet_patch.py" \
   "$APP_DIR/boq_multisheet_v622.py" \
   "$APP_DIR/boq_cost_components_v622.py" \
