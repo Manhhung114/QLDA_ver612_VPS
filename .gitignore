@@ -15,6 +15,7 @@ backups/
 logs/
 *.log
 dist/
+legal_cache.json
 CHANGELOG_V*.md
 DEPLOY_V*.md
 *.bak
