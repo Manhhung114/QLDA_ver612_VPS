@@ -1,0 +1,20 @@
+name: Default Workspace Reset Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  reset-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify default workspace reset
+        run: python -m unittest -v tests.test_default_workspace_reset_v622
+      - name: Compile reset module and VPS entrypoint
+        run: python -m py_compile contractor_workspace_reset_v622.py streamlit_app.py
