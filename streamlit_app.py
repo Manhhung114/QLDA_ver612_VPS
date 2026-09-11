@@ -74,6 +74,13 @@ from contract_duration_v622 import install_contract_duration_v622
 
 install_contract_duration_v622()
 
+# Large contract PDFs are split by page into provider-safe parts before the AI
+# request. Scanned pages remain inside the PDF chunks, so no OCR dependency is
+# required and files above the former 25 MB per-file limit can still be read.
+from contract_ai_large_pdf_v622 import install_contract_ai_large_pdf_v622
+
+install_contract_ai_large_pdf_v622()
+
 # Harden Gemini routing before the generated Streamlit source imports/uses the
 # AI assistant. 503/429 failures are retried briefly, then routed across stable
 # Flash / Flash-Lite families with per-model cooldown.
