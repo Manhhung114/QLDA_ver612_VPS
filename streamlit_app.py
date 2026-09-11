@@ -23,9 +23,14 @@ for _name, _value in {
 # CloudDatabase instance can create/use a pooled SSL connection.
 import postgres_backend_v622 as _postgres_backend
 from vps_postgres_resilience import install_vps_postgres_resilience
+from performance_postgres_v1_v622 import install_performance_postgres_v1
 
 install_vps_postgres_resilience(_postgres_backend)
 _postgres_backend.install_postgres_backend()
+# Performance V1 keeps all SQL/business semantics intact. It only reuses
+# deterministic SQL translations and skips repeated core DDL/migration after
+# the first successful database bootstrap in this Streamlit process.
+install_performance_postgres_v1(_postgres_backend)
 
 # One account = one active login session. A successful login on another device
 # replaces the previous session; refresh/multiple tabs keep the same token.
