@@ -153,6 +153,14 @@ def install_contract_ai_large_pdf_v622() -> None:
     cm._collect_ai_files = _collect_ai_files_large_pdf
     _INSTALLED = True
 
+    # Install the second-stage scanner here so every entrypoint that already
+    # activates large-PDF support automatically gets question-targeted deep scan.
+    # It locally extracts searchable PDF text with original page numbers and
+    # sends scanned/image chunks to the configured multimodal AI sequentially.
+    from contract_ai_deep_scan_v622 import install_contract_ai_deep_scan_v622
+
+    install_contract_ai_deep_scan_v622()
+
 
 __all__ = [
     "PATCH_MARKER",
