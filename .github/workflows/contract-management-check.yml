@@ -16,7 +16,7 @@ jobs:
 
       - name: Compile contract management
         run: |
-          python -m py_compile contract_management_v622.py contract_duration_v622.py contract_ai_large_pdf_v622.py v622_ui_v7_compact_patch.py streamlit_app.py
+          python -m py_compile contract_management_v622.py contract_duration_v622.py contract_ai_large_pdf_v622.py contract_ai_deep_scan_v622.py v622_ui_v7_compact_patch.py streamlit_app.py
 
       - name: Test workspace contract management
         run: |
@@ -31,6 +31,10 @@ jobs:
           grep -Fq 'gateway.download_bytes' contract_management_v622.py
           grep -Fq 'V6.22 CONTRACT AI LARGE PDF SPLIT' contract_ai_large_pdf_v622.py
           grep -Fq 'split_large_pdf' contract_ai_large_pdf_v622.py
+          grep -Fq 'install_contract_ai_deep_scan_v622()' contract_ai_large_pdf_v622.py
+          grep -Fq 'V6.22 CONTRACT AI DEEP SCAN' contract_ai_deep_scan_v622.py
+          grep -Fq 'NỘI DUNG TRÍCH TRỰC TIẾP TỪ PDF' contract_ai_deep_scan_v622.py
+          grep -Fq 'AI chưa nhận được nội dung file hợp đồng' contract_ai_deep_scan_v622.py
           grep -Fq 'install_contract_ai_large_pdf_v622()' streamlit_app.py
           grep -Fq 'pypdf>=5,<7' requirements.txt
           grep -Fq 'can_access_contract_management(_v7_identity)' v622_ui_v7_compact_patch.py
