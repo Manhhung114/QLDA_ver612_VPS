@@ -46,6 +46,7 @@ from contractor_access_control_v622 import (
     capture_single_contractor_ai_context,
     install_ai_access_guard,
 )
+from default_workspace_admin_guard_v622 import install_default_workspace_admin_guard
 
 install_contractor_workspace()
 # Admin-only contractor controls are rendered directly below the active
@@ -54,6 +55,10 @@ install_contractor_workspace()
 install_contractor_sidebar_admin()
 install_contractor_workspace_reset()
 install_contractor_access_control()
+# The default workspace is a protected system workspace: only Admin may see,
+# select, manage, reset or query it. All other roles receive only non-default
+# contractor workspaces; their AI context is pinned to the selected workspace.
+install_default_workspace_admin_guard()
 
 # Work Assignment V1 is a separate project/workspace-scoped business module.
 # It keeps its own task, comment, file-reference and append-only audit tables;
@@ -154,13 +159,13 @@ from project_remaining_components_v622 import install_project_remaining_componen
 install_project_remaining_components()
 
 # Capture the fully patched single-workspace AI context BEFORE the outer project
-# aggregator is installed. The access guard can later force CONTRACTOR users back
-# to exactly this safe single-workspace context, including the default workspace.
+# aggregator is installed. The access guard later forces every non-Admin session
+# to this single-workspace context; only Admin may aggregate the default workspace.
 capture_single_contractor_ai_context()
 
 # Project AI is the outermost context layer. It enumerates every contractor
 # workspace under the selected master project, runs the validated BOQ/Claim
-# calculations per contractor, then aggregates them for project-level answers.
+# calculations per contractor, then aggregates them for Admin project-level answers.
 from contractor_ai_context_v622 import install_contractor_ai_context
 
 install_contractor_ai_context()
