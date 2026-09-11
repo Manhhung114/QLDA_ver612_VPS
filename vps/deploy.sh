@@ -97,6 +97,20 @@ restart_local_file_service_if_enabled() {
   fi
 }
 
+sync_python_dependencies() {
+  echo "Synchronizing Python dependencies from requirements.txt..."
+  run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
+
+  # Runtime smoke test for modules that are required by contract AI. This catches
+  # the exact class of failure where code is current but the VPS venv is stale.
+  run_as_app "$VENV_DIR/bin/python" - <<'PY'
+from pypdf import PdfReader, PdfWriter
+import openai
+from google import genai
+print("QLDA AI/PDF runtime OK: pypdf + openai + google-genai")
+PY
+}
+
 mkdir -p "$SHARED_DIR"
 cd "$APP_DIR"
 
@@ -112,16 +126,21 @@ NEW_COMMIT="$(git_app rev-parse --verify "${REMOTE_REF}^{commit}")"
 echo "Local HEAD : $OLD_COMMIT"
 echo "Remote HEAD: $NEW_COMMIT"
 
-if [[ "$OLD_COMMIT" == "$NEW_COMMIT" ]]; then
-  echo "Already up to date: $NEW_COMMIT"
-  exit 0
+CODE_CHANGED=0
+if [[ "$OLD_COMMIT" != "$NEW_COMMIT" ]]; then
+  CODE_CHANGED=1
+  echo "$OLD_COMMIT" > "$SHARED_DIR/previous_commit"
+  chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/previous_commit"
+  git_app reset --hard "$NEW_COMMIT"
+else
+  # Do NOT exit here. The source may already be current while the virtualenv is
+  # stale (for example a new package was added to requirements.txt). Re-sync the
+  # venv and restart/health-check the service on every deploy invocation.
+  echo "Source already up to date; repairing/verifying runtime dependencies."
 fi
 
-echo "$OLD_COMMIT" > "$SHARED_DIR/previous_commit"
-chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/previous_commit"
+sync_python_dependencies
 
-git_app reset --hard "$NEW_COMMIT"
-run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
 run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/streamlit_app.py" \
   "$APP_DIR/build_v621_webopt.py" \
@@ -169,6 +188,10 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/ai_live_context_v622.py" \
   "$APP_DIR/ai_claim_context_v622.py" \
   "$APP_DIR/ai_vo_context_v622.py" \
+  "$APP_DIR/contract_management_v622.py" \
+  "$APP_DIR/contract_duration_v622.py" \
+  "$APP_DIR/contract_ai_large_pdf_v622.py" \
+  "$APP_DIR/contract_ai_deep_scan_v622.py" \
   "$APP_DIR/postgres_backend_v622.py" \
   "$APP_DIR/vps_postgres_resilience.py" \
   "$APP_DIR/streamlit_secrets_v622.py" \
@@ -206,15 +229,22 @@ if [[ "$ok" -eq 1 ]] && local_storage_enabled; then
 fi
 
 if [[ "$ok" -eq 1 ]]; then
-  echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
+  if [[ "$CODE_CHANGED" -eq 1 ]]; then
+    echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
+  else
+    echo "Deploy/repair OK: source already at $NEW_COMMIT; dependencies verified."
+  fi
   exit 0
 fi
 
-echo "Health check failed. Rolling back to $OLD_COMMIT" >&2
-git_app reset --hard "$OLD_COMMIT"
-run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
-restart_local_file_service_if_enabled || true
-systemctl restart "$SERVICE"
-sleep 3
-"$APP_DIR/vps/healthcheck.sh"
+echo "Health check failed." >&2
+if [[ "$CODE_CHANGED" -eq 1 ]]; then
+  echo "Rolling back to $OLD_COMMIT" >&2
+  git_app reset --hard "$OLD_COMMIT"
+  sync_python_dependencies
+  restart_local_file_service_if_enabled || true
+  systemctl restart "$SERVICE"
+  sleep 3
+  "$APP_DIR/vps/healthcheck.sh"
+fi
 exit 1
