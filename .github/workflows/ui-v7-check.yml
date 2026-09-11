@@ -20,16 +20,18 @@ jobs:
 
       - name: Compile V7 UI layer
         run: |
-          python -m py_compile ui_v7_compact_v622.py v622_ui_v7_compact_patch.py vn_datetime_v622.py work_tasks_v1_v622.py streamlit_app.py
+          python -m py_compile ui_v7_compact_v622.py v622_ui_v7_compact_patch.py vn_datetime_v622.py work_tasks_v1_v622.py contract_management_v622.py streamlit_app.py
 
       - name: Test V7 compact source patch
         run: |
-          python -m unittest tests.test_ui_v7_compact_v622 tests.test_vn_datetime_v622 -v
+          python -m unittest tests.test_ui_v7_compact_v622 tests.test_vn_datetime_v622 tests.test_contract_management_v622 -v
           grep -Fq 'patch_ui_v7_compact(source)' streamlit_app.py
           grep -Fq 'by: Hoàng Mạnh Hùng &amp; AI' ui_v7_compact_v622.py
-          grep -Fq 'V7 COMPACT UI SOURCE PATCH V5 WORK TASKS' v622_ui_v7_compact_patch.py
+          grep -Fq 'V7 COMPACT UI SOURCE PATCH V6 CONTRACT MANAGEMENT' v622_ui_v7_compact_patch.py
           grep -Fq '📋 Công việc' v622_ui_v7_compact_patch.py
           grep -Fq 'render_work_tasks_v1' v622_ui_v7_compact_patch.py
+          grep -Fq '📑 Quản lý hợp đồng' v622_ui_v7_compact_patch.py
+          grep -Fq 'can_access_contract_management(_v7_identity)' v622_ui_v7_compact_patch.py
           grep -Fq 'install_vn_datetime_policy_v7(st)' v622_ui_v7_compact_patch.py
           grep -Fq 'install_caption_policy_v7(st)' v622_ui_v7_compact_patch.py
           grep -Fq 'render_admin_caption_toggle_v7(st, bool(_is_admin()))' v622_ui_v7_compact_patch.py
