@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import gzip
 import os
-from functools import lru_cache
 from pathlib import Path
+
+from performance_v1_v622 import get_compiled_app, phase as performance_phase
 
 # Keep the WebOpt resource limits before pandas/numpy/BLAS are imported.
 # Heavy Excel parsing uses separate Python processes; numerical libraries stay
@@ -216,9 +217,7 @@ if len(_PARTS) != 9:
 _SIGNATURE = tuple((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in _PARTS)
 
 
-@lru_cache(maxsize=1)
-def _compiled_vps_app(signature):
-    del signature
+def _build_compiled_vps_app():
     try:
         encoded = "".join(p.read_text(encoding="ascii").strip() for p in _PARTS)
         source = gzip.decompress(base64.b64decode(encoded)).decode("utf-8")
@@ -251,4 +250,12 @@ def _compiled_vps_app(signature):
     return compile(source, str(_ROOT / "streamlit_app_v622_postgresql.py"), "exec")
 
 
-exec(_compiled_vps_app(_SIGNATURE), globals(), globals())
+def _compiled_vps_app(signature):
+    # lru_cache defined in this entrypoint is recreated by Streamlit on every
+    # rerun. Performance V1 stores the immutable code object in an imported
+    # process-level module, so all sessions/reruns share one compiled bundle.
+    return get_compiled_app(("qlda-v622-generated-app", signature), _build_compiled_vps_app)
+
+
+with performance_phase("generated_app_exec"):
+    exec(_compiled_vps_app(_SIGNATURE), globals(), globals())
