@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 from typing import Any
 
 
-PATCH_MARKER = "V6.22 DEFAULT CONTRACTOR WORKSPACE RESET V1"
+PATCH_MARKER = "V6.22 DEFAULT CONTRACTOR WORKSPACE RESET V2"
 RESET_PHRASE = "RESET TOAN BO DU LIEU"
 
 # Project-scoped system/access metadata must survive a business-data reset.
@@ -20,6 +21,7 @@ _PROTECTED_TABLE_NAMES = {
     "project_settings",
     "project_config",
     "project_configs",
+    "admin_workspace_reset_log",
 }
 _PROTECTED_NAME_PARTS = (
     "permission",
@@ -55,11 +57,71 @@ def _is_protected_project_table(table: str) -> bool:
     return any(part in name for part in _PROTECTED_NAME_PARTS)
 
 
+def _workspace_scope_tables(connection) -> list[tuple[str, str]]:
+    """Discover business tables scoped by project_id or workspace_project_id.
+
+    New modules can be reset automatically without maintaining a hard-coded list.
+    workspace_project_id is preferred where both keys exist, which is important
+    for Work Assignment V1. Access/config tables are filtered separately.
+    """
+    found: dict[str, set[str]] = {}
+    try:
+        rows = connection.execute(
+            """SELECT table_name,column_name
+               FROM information_schema.columns
+               WHERE table_schema=current_schema()
+                 AND column_name IN ('project_id','workspace_project_id')
+               ORDER BY table_name,column_name"""
+        ).fetchall()
+        for raw in rows:
+            try:
+                table, column = str(raw[0]), str(raw[1])
+            except Exception:
+                data = _rowdict(raw)
+                table = str(data.get("table_name") or "")
+                column = str(data.get("column_name") or "")
+            if table and column:
+                found.setdefault(table, set()).add(column)
+    except Exception:
+        pass
+
+    if not found:
+        try:
+            tables = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+            for raw in tables:
+                table = str(raw[0])
+                cols = connection.execute(f"PRAGMA table_info({table})").fetchall()
+                names = set()
+                for col in cols:
+                    try:
+                        names.add(str(col[1]))
+                    except Exception:
+                        names.add(str(_rowdict(col).get("name") or ""))
+                scope_cols = names.intersection({"project_id", "workspace_project_id"})
+                if scope_cols:
+                    found[table] = scope_cols
+        except Exception:
+            pass
+
+    out: list[tuple[str, str]] = []
+    for table in sorted(found):
+        if _is_protected_project_table(table):
+            continue
+        cols = found[table]
+        key = "workspace_project_id" if "workspace_project_id" in cols else "project_id"
+        out.append((table, key))
+    return out
+
+
 def _ensure_reset_audit_table(connection) -> None:
+    # TEXT primary key is portable across both the local SQLite test backend and
+    # the PostgreSQL compatibility backend used on VPS.
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS admin_workspace_reset_log(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reset_id TEXT PRIMARY KEY,
             master_project_id INTEGER NOT NULL,
             workspace_project_id INTEGER NOT NULL,
             contractor_id INTEGER NOT NULL,
@@ -92,8 +154,8 @@ def reset_default_workspace(db, contractor_id: int, *, actor: str = "Admin") -> 
     """Reset all business data of the default contractor workspace.
 
     The master project row and project_contractors mapping are intentionally kept.
-    User/auth/access/config tables are protected even if they own project_id.
-    Physical VPS files belonging to this workspace are also removed.
+    User/auth/access/config tables are protected even if they are project-scoped.
+    Physical VPS files belonging to this workspace are removed as well.
     """
     import contractor_workspace_v622 as cw
     import contractor_sidebar_admin_v622 as sidebar_admin
@@ -117,26 +179,21 @@ def reset_default_workspace(db, contractor_id: int, *, actor: str = "Admin") -> 
     if not is_default or workspace_id <= 0 or workspace_id != master_id:
         raise ValueError("Reset này chỉ áp dụng cho workspace mặc định của dự án.")
 
-    # Remove physical business files for this workspace. The project/workspace
-    # identity itself remains untouched.
+    # Files are part of the business workspace and are reset together with DB data.
     file_result = sidebar_admin._purge_local_vps_files(str(info.get("workspace_code") or ""))
 
     deleted: dict[str, int] = {}
-    protected: list[str] = []
     with db.connect() as connection:
-        tables = sidebar_admin._project_tables_with_project_id(connection)
-        for table in tables:
-            if _is_protected_project_table(table):
-                protected.append(table)
-                continue
+        scope_tables = _workspace_scope_tables(connection)
+        for table, key in scope_tables:
             try:
-                cur = connection.execute(f"DELETE FROM {table} WHERE project_id=?", (workspace_id,))
+                cur = connection.execute(f"DELETE FROM {table} WHERE {key}=?", (workspace_id,))
                 deleted[table] = max(0, int(getattr(cur, "rowcount", 0) or 0))
             except Exception as exc:
                 raise RuntimeError(f"Không thể reset dữ liệu bảng {table}: {exc}") from exc
 
-        # A reset should also forget schedule-source metadata while preserving
-        # project code/name/dates/manager and the contractor mapping.
+        # Forget imported schedule source while preserving project code/name/date,
+        # manager, note and the project/contractor identity itself.
         try:
             connection.execute(
                 "UPDATE projects SET source_mpp_path='',last_sync='' WHERE id=?",
@@ -148,10 +205,11 @@ def reset_default_workspace(db, contractor_id: int, *, actor: str = "Admin") -> 
         _ensure_reset_audit_table(connection)
         connection.execute(
             """INSERT INTO admin_workspace_reset_log(
-                   master_project_id,workspace_project_id,contractor_id,
+                   reset_id,master_project_id,workspace_project_id,contractor_id,
                    contractor_code,contractor_name,actor,deleted_json,file_json,created_at
-               ) VALUES(?,?,?,?,?,?,?,?,?)""",
+               ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
+                uuid.uuid4().hex,
                 master_id,
                 workspace_id,
                 cid,
@@ -168,7 +226,6 @@ def reset_default_workspace(db, contractor_id: int, *, actor: str = "Admin") -> 
         "contractor": info,
         "workspace_project_id": workspace_id,
         "db_deleted": deleted,
-        "protected_tables": sorted(protected),
         "files_deleted": file_result,
     }
 
