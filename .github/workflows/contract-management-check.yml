@@ -1,0 +1,33 @@
+name: Contract Management Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile contract management
+        run: |
+          python -m py_compile contract_management_v622.py v622_ui_v7_compact_patch.py
+
+      - name: Test workspace contract management
+        run: |
+          python -m unittest tests.test_contract_management_v622 -v
+
+      - name: Validate private navigation and VPS storage wiring
+        run: |
+          grep -Fq 'V6.22 CONTRACT MANAGEMENT V1 WORKSPACE PRIVATE' contract_management_v622.py
+          grep -Fq 'VISIBLE_APPROVAL_ROLES = {"SITE_MANAGEMENT", "PROJECT_MANAGEMENT"}' contract_management_v622.py
+          grep -Fq 'kind="contract"' contract_management_v622.py
+          grep -Fq 'gateway.upload_bytes' contract_management_v622.py
+          grep -Fq 'gateway.download_bytes' contract_management_v622.py
+          grep -Fq 'can_access_contract_management(_v7_identity)' v622_ui_v7_compact_patch.py
+          grep -Fq '📑 Quản lý hợp đồng' v622_ui_v7_compact_patch.py
