@@ -40,6 +40,7 @@ install_single_session()
 # project rows and therefore inherit every existing project-scoped feature.
 from contractor_workspace_v622 import install_contractor_workspace
 from contractor_sidebar_admin_v622 import install_contractor_sidebar_admin
+from contractor_workspace_reset_v622 import install_contractor_workspace_reset
 from contractor_access_control_v622 import (
     install_contractor_access_control,
     capture_single_contractor_ai_context,
@@ -47,10 +48,11 @@ from contractor_access_control_v622 import (
 )
 
 install_contractor_workspace()
-# Admin-only Add / Update / Delete controls are rendered directly below
-# "Nhà thầu đang làm việc". Delete performs a full workspace/project_id purge
-# and permanently removes local VPS files for that contractor workspace.
+# Admin-only contractor controls are rendered directly below the active
+# contractor selector. The default workspace cannot be deleted; Admin can reset
+# its business data while preserving the project/workspace identity and access.
 install_contractor_sidebar_admin()
+install_contractor_workspace_reset()
 install_contractor_access_control()
 
 # Work Assignment V1 is a separate project/workspace-scoped business module.
