@@ -67,6 +67,13 @@ from work_tasks_v1_v622 import install_work_tasks_v1
 
 install_work_tasks_v1()
 
+# Contract duration is entered manually from the signed contract. Expiry is
+# derived automatically as effective date + construction duration, and the
+# migration preserves existing contract records on SQLite/PostgreSQL.
+from contract_duration_v622 import install_contract_duration_v622
+
+install_contract_duration_v622()
+
 # Harden Gemini routing before the generated Streamlit source imports/uses the
 # AI assistant. 503/429 failures are retried briefly, then routed across stable
 # Flash / Flash-Lite families with per-model cooldown.
