@@ -1,0 +1,32 @@
+name: Performance V1 Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'performance_v1_v622.py'
+      - 'performance_postgres_v1_v622.py'
+      - 'streamlit_app.py'
+      - 'tests/test_performance_v1_v622.py'
+      - '.github/workflows/performance-v1-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax check
+        run: |
+          python -m py_compile performance_v1_v622.py performance_postgres_v1_v622.py streamlit_app.py tests/test_performance_v1_v622.py
+      - name: Performance V1 unit tests
+        run: python -m unittest tests.test_performance_v1_v622 -v
+      - name: Static integration markers
+        run: |
+          grep -q 'V6.22 PERFORMANCE V1' performance_v1_v622.py
+          grep -q 'V6.22 PERFORMANCE V1 POSTGRES' performance_postgres_v1_v622.py
+          grep -q 'install_performance_postgres_v1(_postgres_backend)' streamlit_app.py
+          grep -q 'get_compiled_app' streamlit_app.py
