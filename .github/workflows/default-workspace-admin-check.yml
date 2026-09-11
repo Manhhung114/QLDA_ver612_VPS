@@ -1,0 +1,30 @@
+name: Default Workspace Admin Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile default workspace guard
+        run: |
+          python -m py_compile default_workspace_admin_guard_v622.py streamlit_app.py
+
+      - name: Test Admin-only default workspace
+        run: |
+          python -m unittest tests.test_default_workspace_admin_guard_v622 -v
+
+      - name: Validate production wiring
+        run: |
+          grep -Fq 'install_default_workspace_admin_guard()' streamlit_app.py
+          grep -Fq 'V6.22 DEFAULT WORKSPACE ADMIN ONLY V1' default_workspace_admin_guard_v622.py
+          grep -Fq 'Workspace mặc định chỉ Admin' default_workspace_admin_guard_v622.py
+          grep -Fq 'int(pid) if not bool(_is_admin()) else None' default_workspace_admin_guard_v622.py
