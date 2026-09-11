@@ -1,0 +1,23 @@
+name: VPS Load Test V2 Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vps/load_test_current_v2.py'
+      - 'vps/run_load_test_v2.sh'
+      - '.github/workflows/load-test-v2-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python syntax
+        run: python -m py_compile vps/load_test_current_v2.py
+      - name: Shell syntax
+        run: bash -n vps/run_load_test_v2.sh
