@@ -1,0 +1,86 @@
+name: Unused Code Audit
+
+on:
+  push:
+    paths:
+      - '.github/workflows/unused-code-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Scan Python module references
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          skip_dirs = {'.git', '.venv', 'venv', '__pycache__', 'dist'}
+          text_ext = {'.py', '.yml', '.yaml', '.sh', '.service', '.toml', '.md', '.txt', '.json'}
+
+          def allowed(p: Path) -> bool:
+              return not any(part in skip_dirs for part in p.parts)
+
+          py_files = sorted(p for p in root.rglob('*.py') if allowed(p))
+          text_files = sorted(
+              p for p in root.rglob('*')
+              if p.is_file() and allowed(p) and (p.suffix.lower() in text_ext or p.name in {'Dockerfile'})
+          )
+          cache = {}
+          for p in text_files:
+              try:
+                  cache[p] = p.read_text(encoding='utf-8', errors='ignore')
+              except Exception:
+                  cache[p] = ''
+
+          no_refs = []
+          ci_only = []
+          test_only = []
+          prod = []
+          print('=== MODULE REFERENCE AUDIT ===')
+          for p in py_files:
+              stem = p.stem
+              pattern = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(stem)}(?![A-Za-z0-9_])')
+              refs = []
+              for q, text in cache.items():
+                  if q == p:
+                      continue
+                  if pattern.search(text):
+                      refs.append(q)
+              rel = p.as_posix().removeprefix('./')
+              ref_names = [q.as_posix().removeprefix('./') for q in refs]
+              non_ci = [r for r in ref_names if not r.startswith('.github/workflows/')]
+              non_test = [r for r in non_ci if not r.startswith('tests/')]
+              if not ref_names:
+                  no_refs.append(rel)
+                  bucket = 'NO_REFS'
+              elif not non_ci:
+                  ci_only.append(rel)
+                  bucket = 'CI_ONLY'
+              elif not non_test:
+                  test_only.append(rel)
+                  bucket = 'TEST_ONLY'
+              else:
+                  prod.append(rel)
+                  bucket = 'USED'
+              print(f'{bucket:9} {rel} -> {", ".join(ref_names[:12])}')
+
+          print('\n=== SUMMARY ===')
+          print('NO_REFS:')
+          for x in no_refs: print('  ', x)
+          print('CI_ONLY:')
+          for x in ci_only: print('  ', x)
+          print('TEST_ONLY:')
+          for x in test_only: print('  ', x)
+          print(f'USED_COUNT={len(prod)} PY_COUNT={len(py_files)}')
+          PY
