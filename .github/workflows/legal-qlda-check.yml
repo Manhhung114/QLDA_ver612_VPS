@@ -24,9 +24,9 @@ jobs:
 
       - name: Compile legal modules
         run: |
-          python -m py_compile legal_documents.py legal_qlda_v622.py v622_legal_qlda_patch.py streamlit_app.py
+          python -m py_compile legal_documents.py legal_qlda_v622.py legal_standards_backfill_v622.py legal_pccc_backfill_v622.py v622_legal_qlda_patch.py streamlit_app.py
 
-      - name: Test no-draft expanded QLXD workflow
+      - name: Test no-draft expanded QLXD and PCCC workflow
         run: |
           python -m unittest tests.test_legal_qlda_v622 -v
 
@@ -35,4 +35,6 @@ jobs:
           grep -Fq 'from v622_legal_qlda_patch import patch_legal_qlda' streamlit_app.py
           grep -Fq 'source = patch_legal_qlda(source)' streamlit_app.py
           grep -Fq 'legal_qlda_v622.py' Dockerfile
+          grep -Fq 'legal_standards_backfill_v622.py' Dockerfile
+          grep -Fq 'legal_pccc_backfill_v622.py' Dockerfile
           grep -Fq 'v622_legal_qlda_patch.py' Dockerfile
