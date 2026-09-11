@@ -13,7 +13,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     QLDA_MP_START_METHOD=forkserver
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      default-jre-headless \
       build-essential \
       curl \
       ca-certificates \
