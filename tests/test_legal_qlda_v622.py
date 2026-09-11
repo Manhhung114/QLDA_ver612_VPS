@@ -5,6 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from legal_pccc_backfill_v622 import (
+    OFFICIAL_CORE_DOCS,
+    PCCC_SYNC_QUERIES,
+    clear_pccc_seed_for_tests,
+    seed_official_legal_documents,
+)
 from legal_qlda_v622 import (
     BXD_PRIORITY_EXACT_NUMBERS,
     EXTRA_CONSTRUCTION_KEYWORDS,
@@ -25,14 +31,30 @@ class _Repo:
         return sqlite3.connect(self.path)
 
 
+class _SeedRepo:
+    def __init__(self, path: str = "seed-test"):
+        self.path = path
+        self.docs: list[dict] = []
+        self.calls = 0
+
+    def upsert_many(self, docs, source_name=""):
+        self.calls += 1
+        self.docs = [dict(x) for x in docs]
+        return {"found": len(self.docs), "added": len(self.docs), "updated": 0}
+
+
 class LegalQLDAV622Test(unittest.TestCase):
-    def test_generated_ui_has_no_draft_controls(self):
+    def test_generated_ui_has_no_draft_controls_and_has_pccc(self):
         source = Path("dist/streamlit_app.py").read_text(encoding="utf-8")
         patched = patch_legal_qlda(source)
         compile(patched, "streamlit_app_legal_qlda.py", "exec")
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn("📚 QLXD mở rộng - TVPL", patched)
         self.assertIn("🔄 Cập nhật QLXD", patched)
+        self.assertIn("🔥 PCCC / CNCH", patched)
+        self.assertIn("install_legal_pccc_backfill()", patched)
+        self.assertIn("seed_official_legal_documents(legal_repo)", patched)
+        self.assertIn('m4.metric("PCCC / CNCH", pccc)', patched)
         self.assertIn("purge_drafts(legal_repo)", patched)
         self.assertNotIn("📝 Dự thảo BXD", patched)
         self.assertNotIn("Hiển thị cả dự thảo đang lấy ý kiến", patched)
@@ -85,7 +107,7 @@ class LegalQLDAV622Test(unittest.TestCase):
                         "is_draft": 0,
                     }
                 ]
-            # Family suffix và exact-number query mới mới lấy đúng văn bản cần thiết.
+            # Family suffix và exact-number query mới lấy đúng văn bản cần thiết.
             if query in {"/2021/TT-BXD", "2021/TT-BXD", "06/2021/TT-BXD"}:
                 return [
                     target,
@@ -107,6 +129,57 @@ class LegalQLDAV622Test(unittest.TestCase):
         self.assertTrue(any(q == "06/2021/TT-BXD" for q, _ in calls))
         self.assertTrue(_is_bxd_circular(target))
         self.assertFalse(_is_bxd_circular({"number": "06/2021/TT-BYT", "title": "Khác"}))
+
+    def test_official_seed_guarantees_requested_tt06_and_current_pccc_core(self):
+        clear_pccc_seed_for_tests()
+        repo = _SeedRepo()
+        stats = seed_official_legal_documents(repo)
+        self.assertEqual(stats["found"], len(OFFICIAL_CORE_DOCS))
+        numbers = {str(d.get("number", "")) for d in repo.docs}
+        for required in (
+            "06/2021/TT-BXD",
+            "06/VBHN-BXD",
+            "55/2024/QH15",
+            "105/2025/NĐ-CP",
+            "106/2025/NĐ-CP",
+            "69/2026/NĐ-CP",
+            "36/2025/TT-BCA",
+            "63/2025/TT-BXD",
+            "QCVN 06:2022/BXD",
+            "QCVN 03:2023/BCA",
+            "QCVN 10:2025/BCA",
+            "TCVN 3890:2023",
+            "TCVN 7336:2021",
+            "TCVN 7568-14:2025",
+        ):
+            self.assertIn(required, numbers)
+
+        tt06 = next(d for d in repo.docs if d.get("number") == "06/2021/TT-BXD")
+        self.assertEqual(
+            tt06["source_url"],
+            "https://congbao.chinhphu.vn/van-ban/thong-tu-so-06-2021-tt-bxd-33988.htm",
+        )
+        self.assertIn("Công báo", tt06["source_name"])
+
+        # Process-level guard prevents write amplification on Streamlit reruns.
+        second = seed_official_legal_documents(repo)
+        self.assertEqual(second, {"found": 0, "added": 0, "updated": 0})
+        self.assertEqual(repo.calls, 1)
+
+    def test_pccc_queries_cover_legal_design_equipment_and_standards(self):
+        joined = " | ".join(PCCC_SYNC_QUERIES).lower()
+        for token in (
+            "luật phòng cháy",
+            "xử phạt",
+            "thẩm định thiết kế",
+            "nghiệm thu",
+            "qcvn 06",
+            "qcvn 10",
+            "tcvn",
+            "báo cháy",
+            "chữa cháy tự động",
+        ):
+            self.assertIn(token, joined)
 
     def test_purge_drafts_removes_old_draft_rows_and_logs_only(self):
         with tempfile.TemporaryDirectory() as td:
