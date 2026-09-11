@@ -1,0 +1,30 @@
+name: VPS Status Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile VPS status module
+        run: |
+          python -m py_compile vps_status_v622.py v622_ui_v7_compact_patch.py
+
+      - name: Test VPS storage status
+        run: |
+          python -m unittest tests.test_vps_status_v622 -v
+
+      - name: Validate Admin-only Công cụ wiring
+        run: |
+          grep -Fq 'from vps_status_v622 import render_vps_status_v622' v622_ui_v7_compact_patch.py
+          grep -Fq 'if _v7_group == "📚 Công cụ" and bool(_is_admin()):' v622_ui_v7_compact_patch.py
+          grep -Fq '🖥️ Trạng thái VPS' v622_ui_v7_compact_patch.py
+          grep -Fq 'V6.22 VPS STORAGE STATUS V1 ADMIN ONLY' vps_status_v622.py
