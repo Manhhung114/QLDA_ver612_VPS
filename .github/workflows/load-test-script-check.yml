@@ -1,0 +1,23 @@
+name: VPS Load Test Script Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vps/load_test_current.py'
+      - 'vps/run_load_test.sh'
+      - '.github/workflows/load-test-script-check.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python harness
+        run: python -m py_compile vps/load_test_current.py
+      - name: Validate shell runner
+        run: bash -n vps/run_load_test.sh
