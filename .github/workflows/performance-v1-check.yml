@@ -1,5 +1,6 @@
 name: Performance V1 Check
 
+# Validates the low-risk process cache / PostgreSQL fast-path layer independently.
 on:
   push:
     branches: [main]
