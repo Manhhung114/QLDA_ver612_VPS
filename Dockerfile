@@ -33,6 +33,8 @@ RUN python -m py_compile \
       v622_schedule_management_patch.py \
       v622_legal_qlda_patch.py \
       legal_qlda_v622.py \
+      legal_standards_backfill_v622.py \
+      legal_pccc_backfill_v622.py \
       legal_documents.py \
       original_import_storage_v622.py \
       v622_original_import_patch.py \
