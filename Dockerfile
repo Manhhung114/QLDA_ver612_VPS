@@ -13,6 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     QLDA_MP_START_METHOD=forkserver
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+      default-jre-headless \
       build-essential \
       curl \
       ca-certificates \
@@ -28,6 +29,7 @@ COPY . .
 RUN python -m py_compile \
       streamlit_app.py \
       build_v621_webopt.py \
+      mpp_cloud_reader.py \
       v622_auth_refresh_v4.py \
       v622_schedule_management_patch.py \
       v622_legal_qlda_patch.py \
@@ -68,8 +70,3 @@ RUN python -m py_compile \
     && python build_v621_webopt.py
 
 EXPOSE 8501
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8501/_stcore/health || exit 1
-
-CMD ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
