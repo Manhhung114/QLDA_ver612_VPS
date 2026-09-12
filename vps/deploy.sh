@@ -101,13 +101,14 @@ sync_python_dependencies() {
   echo "Synchronizing Python dependencies from requirements.txt..."
   run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
 
-  # Runtime smoke test for modules that are required by contract AI. This catches
-  # the exact class of failure where code is current but the VPS venv is stale.
+  # Runtime smoke test for modules required by PDF/AI and encrypted Admin settings.
+  # This catches code-current / stale-venv mismatches before services restart.
   run_as_app "$VENV_DIR/bin/python" - <<'PY'
+from cryptography.fernet import Fernet
 from pypdf import PdfReader, PdfWriter
 import openai
 from google import genai
-print("QLDA AI/PDF runtime OK: pypdf + openai + google-genai")
+print("QLDA AI/PDF/Admin-settings runtime OK: cryptography + pypdf + openai + google-genai")
 PY
 }
 
@@ -143,6 +144,9 @@ sync_python_dependencies
 
 run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/streamlit_app.py" \
+  "$APP_DIR/settings_store.py" \
+  "$APP_DIR/system_settings_v622.py" \
+  "$APP_DIR/runtime_settings_bridge_v622.py" \
   "$APP_DIR/build_v621_webopt.py" \
   "$APP_DIR/v622_auth_refresh_v4.py" \
   "$APP_DIR/single_session_v622.py" \
