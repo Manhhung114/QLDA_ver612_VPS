@@ -97,18 +97,31 @@ restart_local_file_service_if_enabled() {
   fi
 }
 
+ensure_mpp_system_runtime() {
+  if command -v java >/dev/null 2>&1; then
+    return
+  fi
+  echo "Java runtime missing; installing default-jre-headless for Microsoft Project (.mpp) support..."
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y default-jre-headless
+}
+
 sync_python_dependencies() {
   echo "Synchronizing Python dependencies from requirements.txt..."
   run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
 
-  # Runtime smoke test for modules required by PDF/AI and encrypted Admin settings.
-  # This catches code-current / stale-venv mismatches before services restart.
+  # Runtime smoke test for modules required by PDF/AI, encrypted Admin settings,
+  # and Microsoft Project (.mpp) import. This catches code-current / stale-venv
+  # mismatches before services restart.
   run_as_app "$VENV_DIR/bin/python" - <<'PY'
 from cryptography.fernet import Fernet
 from pypdf import PdfReader, PdfWriter
+import jpype
+import mpxj
+import mpp_cloud_reader
 import openai
 from google import genai
-print("QLDA AI/PDF/Admin-settings runtime OK: cryptography + pypdf + openai + google-genai")
+print("QLDA runtime OK: Admin/PDF/AI + MPP (JPype/MPXJ/mpp_cloud_reader)")
 PY
 }
 
@@ -140,10 +153,12 @@ else
   echo "Source already up to date; repairing/verifying runtime dependencies."
 fi
 
+ensure_mpp_system_runtime
 sync_python_dependencies
 
 run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/streamlit_app.py" \
+  "$APP_DIR/mpp_cloud_reader.py" \
   "$APP_DIR/settings_store.py" \
   "$APP_DIR/system_settings_v622.py" \
   "$APP_DIR/runtime_settings_bridge_v622.py" \
@@ -245,6 +260,7 @@ echo "Health check failed." >&2
 if [[ "$CODE_CHANGED" -eq 1 ]]; then
   echo "Rolling back to $OLD_COMMIT" >&2
   git_app reset --hard "$OLD_COMMIT"
+  ensure_mpp_system_runtime
   sync_python_dependencies
   restart_local_file_service_if_enabled || true
   systemctl restart "$SERVICE"
