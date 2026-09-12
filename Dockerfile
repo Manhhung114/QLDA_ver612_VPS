@@ -67,6 +67,7 @@ RUN python -m py_compile \
       local_file_server_v622.py \
       local_vps_runtime_fix_v622.py \
       v622_local_vps_patch.py \
-    && python build_v621_webopt.py
+    && python build_v621_webopt.py \
+    && python -c "import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
 
 EXPOSE 8501
