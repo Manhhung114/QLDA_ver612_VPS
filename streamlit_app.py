@@ -32,6 +32,14 @@ _postgres_backend.install_postgres_backend()
 # the first successful database bootstrap in this Streamlit process.
 install_performance_postgres_v1(_postgres_backend)
 
+# Admin-managed mutable runtime settings (AI/storage/Excel limits) live in the
+# shared VPS config store. Bootstrap/database/signing secrets remain in qlda.env.
+# Install before local storage and multicore helpers are used so new requests see
+# Admin changes without rewriting the systemd environment file.
+from runtime_settings_bridge_v622 import install_runtime_settings_bridge
+
+install_runtime_settings_bridge()
+
 # One account = one active login session. A successful login on another device
 # replaces the previous session; refresh/multiple tabs keep the same token.
 # This patch covers the PostgreSQL/local backend and adds the same API methods to
