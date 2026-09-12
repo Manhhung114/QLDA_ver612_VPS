@@ -11,6 +11,10 @@ WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+# ProtectHome=true intentionally hides /home/qlda. Point HOME/settings at the
+# shared writable tree so settings_store never probes the protected legacy home.
+Environment=HOME=/opt/qlda/shared
+Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
 ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_single_session_v622.py --host 127.0.0.1 --port 8502
 Restart=always
 RestartSec=3
