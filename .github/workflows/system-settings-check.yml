@@ -1,0 +1,44 @@
+name: System Settings V6.22 Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'cryptography>=45,<47'
+
+      - name: Compile system settings modules
+        run: |
+          python -m py_compile \
+            settings_store.py \
+            system_settings_v622.py \
+            runtime_settings_bridge_v622.py \
+            streamlit_app.py \
+            local_file_server_single_session_v622.py \
+            v622_ui_v7_compact_patch.py
+
+      - name: Unit test Admin settings
+        run: |
+          python -m unittest tests.test_system_settings_v622 -v
+
+      - name: Validate Admin-only navigation wiring
+        run: |
+          grep -Fq 'from system_settings_v622 import render_system_settings_admin' v622_ui_v7_compact_patch.py
+          grep -Fq 'if _v7_group == "📚 Công cụ" and bool(_is_admin()):' v622_ui_v7_compact_patch.py
+          grep -Fq '"🛠️ Hệ thống"' v622_ui_v7_compact_patch.py
+          grep -Fq 'render_system_settings_admin' v622_ui_v7_compact_patch.py
+          grep -Fq 'install_runtime_settings_bridge()' streamlit_app.py
+          grep -Fq 'install_runtime_settings_bridge()' local_file_server_single_session_v622.py
+          grep -Fq 'ReadWritePaths=/opt/qlda /var/log/qlda' vps/qlda-upload.service
+          grep -Fq 'V6.22 ADMIN SYSTEM SETTINGS V1' system_settings_v622.py
