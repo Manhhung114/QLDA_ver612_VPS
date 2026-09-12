@@ -71,3 +71,8 @@ RUN python -m py_compile \
     && python -c "import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
 
 EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=8s --start-period=30s --retries=3 \
+  CMD curl --fail --silent --show-error --max-time 8 http://127.0.0.1:8501/_stcore/health || exit 1
+
+CMD ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
