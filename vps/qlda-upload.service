@@ -11,7 +11,7 @@ WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_single_session_v622.py --host 127.0.0.1 --port 8502
+ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_single_session_v622.py --host 127.0.0.1 --port=8502
 Restart=always
 RestartSec=3
 TimeoutStopSec=30
@@ -20,7 +20,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/qlda/data /var/log/qlda
+# Admin may choose another data/trash folder, but system_settings_v622 restricts
+# it to /opt/qlda. Keep the whole QLDA tree writable for those approved paths.
+ReadWritePaths=/opt/qlda /var/log/qlda
 
 [Install]
 WantedBy=multi-user.target
