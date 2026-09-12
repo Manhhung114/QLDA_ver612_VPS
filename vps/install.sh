@@ -17,7 +17,7 @@ fi
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  git curl rsync nginx build-essential \
+  git curl rsync nginx default-jre-headless build-essential \
   python3 python3-venv python3-pip ca-certificates \
   postgresql postgresql-contrib \
   certbot python3-certbot-nginx
