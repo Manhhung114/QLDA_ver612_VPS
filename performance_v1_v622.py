@@ -8,9 +8,17 @@ from contextlib import contextmanager
 from types import CodeType
 from typing import Any, Callable, Hashable
 
+from v623_bootstrap import install_v623_uiux
+
 
 PATCH_MARKER = "V6.22 PERFORMANCE V1"
 PERFORMANCE_V1_VERSION = "1.0.0"
+
+# V6.23 is presentation-only and composes on top of the validated V7 source
+# patch. Installing here is deliberate: streamlit_app imports this module before
+# importing patch_ui_v7_compact, so the later import receives the V6.23 wrapper
+# without changing any business/backend patch ordering.
+install_v623_uiux()
 
 # Streamlit re-executes the entrypoint for every session/rerun. Module globals in
 # imported modules survive those reruns, so this module is the process-level home
