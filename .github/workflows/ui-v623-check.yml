@@ -1,0 +1,44 @@
+name: UI V6.23 Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ui_v623_ux.py'
+      - 'v623_uiux_patch.py'
+      - 'v623_bootstrap.py'
+      - 'performance_v1_v622.py'
+      - 'v622_ui_v7_compact_patch.py'
+      - 'VERSION.txt'
+      - '.github/workflows/ui-v623-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile V6.23 modules
+        run: |
+          python -m py_compile ui_v623_ux.py v623_uiux_patch.py v623_bootstrap.py performance_v1_v622.py
+      - name: Validate V6.23 bootstrap composition
+        run: |
+          python - <<'PY'
+          import performance_v1_v622  # installs V6.23 wrapper
+          import v622_ui_v7_compact_patch as v7
+          assert getattr(v7.patch_ui_v7_compact, '_qlda_v623_uiux', False)
+          print('V6.23 bootstrap OK')
+          PY
+      - name: Validate V6.23 source transformation
+        run: |
+          python - <<'PY'
+          from v623_uiux_patch import patch_uiux_v623
+          src = '''from ui_v7_compact_v622 import install_theme_v7, install_caption_policy_v7, install_vn_datetime_policy_v7, render_admin_caption_toggle_v7, render_header_v7, render_overview_v7\ninstall_theme_v7(st)\nrender_header_v7(st, p, _contractor_ctx, _v7_identity)\n_v7_group_labels = []\nwith st.sidebar:\n    render_admin_caption_toggle_v7(st, bool(_is_admin()))\nif _v7_group == "🏠 Tổng quan":\n    render_overview_v7(\n        st, db, pid,\n        doc_config=DOC_CONFIG,\n        drawing_types=DRAWING_TYPES,\n        detailed_renderer=render_reports,\n    )\n'''
+          out = patch_uiux_v623(src)
+          for token in ('install_theme_v623', 'apply_pending_navigation_v623', 'render_header_v623', 'render_overview_v623', 'master_project_id=_master_pid', 'identity=_v7_identity'):
+              assert token in out, token
+          print('V6.23 source patch OK')
+          PY
