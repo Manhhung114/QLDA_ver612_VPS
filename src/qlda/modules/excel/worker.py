@@ -9,12 +9,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from qlda.infrastructure.database import make_database
-from qlda.services.excel import ExcelImportService
-from qlda.services.files import FileService
-from qlda.services.jobs import JobService
+from qlda.bootstrap import get_application, get_database
 
-PATCH_VERSION = "V6.26 SERVICE-LAYER EXCEL WORKER"
+PATCH_VERSION = "V7.0 CLEAN-ARCHITECTURE EXCEL WORKER"
 _STOP = False
 
 
@@ -28,8 +25,9 @@ def _worker_id() -> str:
 
 
 def _make_db():
-    """Compatibility alias for callers that previously used the worker factory."""
-    return make_database()
+    """Compatibility alias retained for older callers."""
+
+    return get_database()
 
 
 def scan_workbook_path(
@@ -38,7 +36,7 @@ def scan_workbook_path(
     progress: Callable[[int, str, str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    return ExcelImportService.scan_workbook(
+    return get_application().excel.scan_workbook(
         path,
         progress=progress,
         cancelled=cancelled,
@@ -46,17 +44,17 @@ def scan_workbook_path(
 
 
 def _process_job(job: dict[str, Any]) -> dict[str, Any]:
+    services = get_application()
     job_id = int(job["id"])
-    file_row, path = FileService.local_path(str(job.get("file_id") or ""))
+    file_row, path = services.files.local_path(str(job.get("file_id") or ""))
 
     def report(percent: int, stage: str, sheet: str = "") -> None:
-        JobService.update_progress(job_id, percent, stage, sheet)
+        services.jobs.update_progress(job_id, percent, stage, sheet)
 
     def is_cancelled() -> bool:
-        return _STOP or JobService.cancel_requested(job_id)
+        return _STOP or services.jobs.cancel_requested(job_id)
 
-    service = ExcelImportService(db_factory=make_database)
-    summary = service.process_job(
+    summary = services.excel.process_job(
         job,
         path,
         file_row,
@@ -74,39 +72,40 @@ def _process_job(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_once(worker_id: str) -> bool:
-    limits = JobService.resource_limits()
-    ram = JobService.memory_used_percent()
+    services = get_application()
+    limits = services.jobs.resource_limits()
+    ram = services.jobs.memory_used_percent()
     if ram >= float(limits["hold_percent"]):
         state = "PAUSED_RAM" if ram >= float(limits["pause_percent"]) else "HOLD_RAM"
-        JobService.heartbeat(worker_id, status=f"{state}:{ram:.1f}%")
+        services.jobs.heartbeat(worker_id, status=f"{state}:{ram:.1f}%")
         return False
 
-    job = JobService.claim_next(worker_id)
+    job = services.jobs.claim_next(worker_id)
     if not job:
-        JobService.heartbeat(worker_id, status="IDLE")
+        services.jobs.heartbeat(worker_id, status="IDLE")
         return False
 
     job_id = int(job["id"])
-    JobService.heartbeat(worker_id, status="RUNNING", current_job_id=job_id)
+    services.jobs.heartbeat(worker_id, status="RUNNING", current_job_id=job_id)
     print(
         f"Excel job #{job_id} started type={job.get('job_type')} file={job.get('file_name')}",
         flush=True,
     )
     try:
         summary = _process_job(job)
-        if JobService.cancel_requested(job_id) or _STOP:
-            JobService.fail(job_id, "Job đã được yêu cầu hủy.", retry=False)
+        if services.jobs.cancel_requested(job_id) or _STOP:
+            services.jobs.fail(job_id, "Job đã được yêu cầu hủy.", retry=False)
         else:
-            JobService.complete(job_id, summary)
+            services.jobs.complete(job_id, summary)
             print(f"Excel job #{job_id} DONE", flush=True)
     except InterruptedError as exc:
-        JobService.fail(job_id, str(exc), retry=False)
+        services.jobs.fail(job_id, str(exc), retry=False)
         print(f"Excel job #{job_id} CANCELLED: {exc}", flush=True)
     except Exception as exc:
-        JobService.fail(job_id, f"{type(exc).__name__}: {exc}", retry=True)
+        services.jobs.fail(job_id, f"{type(exc).__name__}: {exc}", retry=True)
         print(f"Excel job #{job_id} ERROR: {type(exc).__name__}: {exc}", flush=True)
     finally:
-        JobService.heartbeat(worker_id, status="IDLE")
+        services.jobs.heartbeat(worker_id, status="IDLE")
         gc.collect()
     return True
 
@@ -117,7 +116,7 @@ def _recycle_after_job() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="QLDA V6.26 service-layer Excel worker")
+    parser = argparse.ArgumentParser(description="QLDA V7.0 clean-architecture Excel worker")
     parser.add_argument("--once", action="store_true", help="Process at most one job then exit")
     parser.add_argument(
         "--poll-seconds",
@@ -128,16 +127,17 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
-    JobService.ensure_schema()
+    services = get_application()
+    services.jobs.ensure_schema()
     try:
-        recovered = JobService.recover_stale()
+        recovered = services.jobs.recover_stale()
         if recovered:
             print(f"Recovered {recovered} stale Excel job(s).", flush=True)
     except Exception as exc:
         print(f"Excel stale-job recovery warning: {exc}", flush=True)
 
     worker_id = _worker_id()
-    JobService.heartbeat(worker_id, status="STARTING")
+    services.jobs.heartbeat(worker_id, status="STARTING")
     poll = max(0.5, min(float(args.poll_seconds), 30.0))
 
     while not _STOP:
@@ -149,7 +149,7 @@ def main() -> None:
         if not processed:
             time.sleep(poll)
 
-    JobService.heartbeat(worker_id, status="STOPPED")
+    services.jobs.heartbeat(worker_id, status="STOPPED")
     print(f"{PATCH_VERSION} worker stopped: {worker_id}", flush=True)
 
 

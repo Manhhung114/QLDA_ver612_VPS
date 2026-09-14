@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from qlda.bootstrap import get_application
 from qlda.presentation.api.dependencies import Principal, require_roles
 from qlda.presentation.api.schemas import SearchRequest
-from qlda.services import ProjectAccessService, SearchService
 
 router = APIRouter(prefix="/api/v1/search", tags=["search"])
 
@@ -14,8 +14,9 @@ def search(
     request: SearchRequest,
     principal: Principal = Depends(require_roles("read", "update", "admin")),
 ):
-    scope = ProjectAccessService.require_project(principal.user, request.project_id)
-    rows = SearchService.search(
+    services = get_application()
+    scope = services.access.require_project(principal.user, request.project_id)
+    rows = services.search.search(
         scope.workspace_project_id,
         request.query,
         kinds=request.kinds,

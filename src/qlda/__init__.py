@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-"""QLDA modular monolith package.
+"""QLDA V7.0 clean-architecture package.
 
-V6.25 established module boundaries. V6.26 added the application Service Layer.
-V6.27 adds a thin FastAPI transport for jobs, files, AI and search while keeping
-business rules inside services/modules.
+Dependency rule:
+    domain <- application <- infrastructure/presentation
+
+The composition root in :mod:`qlda.bootstrap` wires V7 use cases to the proven
+V6.x compatibility runtime while legacy code is progressively retired.
 """
 
-__version__ = "6.27"
-ARCHITECTURE = "modular-monolith"
-SERVICE_LAYER = "application-services"
+__version__ = "7.0"
+ARCHITECTURE = "clean-architecture"
+SERVICE_LAYER = "application-use-cases"
 HTTP_API = "fastapi"
+CLEAN_CORE = True

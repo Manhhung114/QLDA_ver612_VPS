@@ -6,7 +6,8 @@ from typing import Any, Callable
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from qlda.services.auth import AuthenticationError, SessionService
+from qlda.bootstrap import get_application
+from qlda.domain.errors import AuthenticationError
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ def current_principal(
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        user = SessionService.current_user(credentials.credentials)
+        user = get_application().sessions.current_user(credentials.credentials)
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

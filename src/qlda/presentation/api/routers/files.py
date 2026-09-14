@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 
+from qlda.bootstrap import get_application
 from qlda.presentation.api.dependencies import Principal, current_principal, require_roles
 from qlda.presentation.api.schemas import FileCountRequest, FileTicketRequest
-from qlda.services import FileService, ProjectAccessService
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
@@ -19,8 +19,9 @@ def list_files(
     include_history: bool = False,
     principal: Principal = Depends(current_principal),
 ):
-    ProjectAccessService.require_project_code(principal.user, project_code)
-    return FileService.list_record_files(
+    services = get_application()
+    services.access.require_project_code(principal.user, project_code)
+    return services.files.list_record_files(
         principal.token,
         project_code=project_code,
         kind=kind,
@@ -35,8 +36,9 @@ def file_counts(
     request: FileCountRequest,
     principal: Principal = Depends(current_principal),
 ):
-    ProjectAccessService.require_project_code(principal.user, request.project_code)
-    return FileService.record_file_counts(
+    services = get_application()
+    services.access.require_project_code(principal.user, request.project_code)
+    return services.files.record_file_counts(
         principal.token,
         project_code=request.project_code,
         kind=request.kind,
@@ -50,8 +52,9 @@ def upload_ticket(
     request: FileTicketRequest,
     principal: Principal = Depends(require_roles("update", "admin")),
 ):
-    ProjectAccessService.require_project_code(principal.user, request.project_code)
-    return FileService.make_upload_ticket(
+    services = get_application()
+    services.access.require_project_code(principal.user, request.project_code)
+    return services.files.make_upload_ticket(
         principal.token,
         project_code=request.project_code,
         kind=request.kind,
@@ -67,9 +70,10 @@ def file_info(
     file_id: str,
     principal: Principal = Depends(current_principal),
 ):
-    info = FileService.info(principal.token, file_id)
+    services = get_application()
+    info = services.files.info(principal.token, file_id)
     data = dict(info.get("file") or {})
-    ProjectAccessService.require_project_code(principal.user, str(data.get("project_code") or ""))
+    services.access.require_project_code(principal.user, str(data.get("project_code") or ""))
     return info
 
 
@@ -78,10 +82,11 @@ def download_file(
     file_id: str,
     principal: Principal = Depends(current_principal),
 ):
-    info = FileService.info(principal.token, file_id)
+    services = get_application()
+    info = services.files.info(principal.token, file_id)
     data = dict(info.get("file") or {})
-    ProjectAccessService.require_project_code(principal.user, str(data.get("project_code") or ""))
-    _, path = FileService.local_path(file_id)
+    services.access.require_project_code(principal.user, str(data.get("project_code") or ""))
+    _, path = services.files.local_path(file_id)
     return FileResponse(
         path,
         filename=str(data.get("name") or path.name),
@@ -94,7 +99,8 @@ def trash_file(
     file_id: str,
     principal: Principal = Depends(require_roles("update", "admin")),
 ):
-    info = FileService.info(principal.token, file_id)
+    services = get_application()
+    info = services.files.info(principal.token, file_id)
     data = dict(info.get("file") or {})
-    ProjectAccessService.require_project_code(principal.user, str(data.get("project_code") or ""))
-    return FileService.trash(principal.token, file_id)
+    services.access.require_project_code(principal.user, str(data.get("project_code") or ""))
+    return services.files.trash(principal.token, file_id)

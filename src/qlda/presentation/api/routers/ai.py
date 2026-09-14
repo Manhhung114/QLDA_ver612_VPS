@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from qlda.bootstrap import get_application
+from qlda.domain.errors import AIApplicationError
 from qlda.presentation.api.dependencies import Principal, require_roles
 from qlda.presentation.api.schemas import (
     AIAskRequest,
@@ -10,13 +12,12 @@ from qlda.presentation.api.schemas import (
     AIReportRequest,
     AITestRequest,
 )
-from qlda.services import AIApplicationError, AIService, ProjectAccessService
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
 
 def _scope(principal: Principal, project_id: int) -> tuple[int, int | None]:
-    scope = ProjectAccessService.require_project(principal.user, project_id)
+    scope = get_application().access.require_project(principal.user, project_id)
     workspace_scope = None if scope.is_master_scope else scope.workspace_project_id
     return scope.requested_project_id, workspace_scope
 
@@ -40,7 +41,7 @@ def ask_ai(
 ):
     project_id, workspace_scope = _scope(principal, request.project_id)
     try:
-        answer = AIService.ask(
+        answer = get_application().ai.ask(
             project_id,
             request.question,
             provider=request.provider,
@@ -61,7 +62,7 @@ def schedule_risk(
 ):
     project_id, workspace_scope = _scope(principal, request.project_id)
     try:
-        answer = AIService.schedule_risk(
+        answer = get_application().ai.schedule_risk(
             project_id,
             provider=request.provider,
             status_date=request.status_date,
@@ -79,7 +80,7 @@ def draft_report(
 ):
     project_id, workspace_scope = _scope(principal, request.project_id)
     try:
-        answer = AIService.draft_report(
+        answer = get_application().ai.draft_report(
             project_id,
             provider=request.provider,
             period=request.period,
@@ -98,7 +99,7 @@ def legal_qa(
 ):
     project_id, workspace_scope = _scope(principal, request.project_id)
     try:
-        answer = AIService.legal_qa(
+        answer = get_application().ai.legal_qa(
             project_id,
             request.question,
             provider=request.provider,
@@ -118,7 +119,7 @@ def test_ai(
 ):
     del principal
     try:
-        result = AIService.test_connection(provider=request.provider)
+        result = get_application().ai.test_connection(provider=request.provider)
     except AIApplicationError as exc:
         raise _ai_error(exc) from exc
     return {"ok": True, "result": result, "provider": request.provider}

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Application Service Layer introduced in QLDA V6.26 and extended in V6.27."""
+"""Deprecated V6 compatibility Service Layer.
+
+V7.0 runtime entry points use :mod:`qlda.application` through
+:mod:`qlda.bootstrap`. These classes remain available while legacy Streamlit and
+module code is migrated behind infrastructure adapters.
+"""
 
 from qlda.services.access import ProjectAccessService, ProjectScope
 from qlda.services.ai import AIApplicationError, AIService
