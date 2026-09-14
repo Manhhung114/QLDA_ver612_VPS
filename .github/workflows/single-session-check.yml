@@ -16,7 +16,12 @@ jobs:
 
       - name: Compile single-session modules
         run: |
-          python -m py_compile single_session_v622.py v622_single_session_patch.py local_file_server_single_session_v622.py v622_contractor_sidebar_patch.py
+          python -m py_compile \
+            single_session_v622.py \
+            v622_single_session_patch.py \
+            local_file_server_single_session_v622.py \
+            local_file_server_background.py \
+            v622_contractor_sidebar_patch.py
 
       - name: Test single-session security invariants
         run: |
@@ -82,4 +87,8 @@ jobs:
           grep -Fq 'v622_single_session_patch.py' vps/deploy.sh
           grep -Fq 'v622_contractor_sidebar_patch.py' vps/deploy.sh
           grep -Fq 'local_file_server_single_session_v622.py' vps/deploy.sh
-          grep -Fq 'local_file_server_single_session_v622.py' vps/qlda-upload.service
+          # V6.24.2 upload service now starts the background wrapper. The wrapper
+          # installs the same single-session guard before importing the base
+          # file server, then adds the Excel queue hand-off.
+          grep -Fq 'local_file_server_background.py' vps/qlda-upload.service
+          grep -Fq 'install_local_single_session()' local_file_server_background.py
