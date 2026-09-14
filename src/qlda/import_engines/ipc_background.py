@@ -32,15 +32,15 @@ def _max_file_bytes() -> int:
 
 def _install_ipc_parser_semantics() -> None:
     """Install the same parser semantics used by the production Streamlit app."""
-    from ipc_claim_fast_v622 import install_ipc_claim_fast_path
-    from ipc_claim_summary_fix_v622 import install_ipc_claim_summary_fix
-    from ipc_adaptive_parser_v622 import install_ipc_adaptive_parser
-    from ipc_payment_semantic_v622 import install_ipc_payment_semantic
-    from ipc_claim_number_fix_v622 import install_ipc_claim_number_fix
-    from ipc_claim_period_v622 import install_ipc_claim_period_parser_fix
-    from boq_claim_terms_v622 import install_boq_claim_terms
-    from boq_claim_price_recovery_v622 import install_boq_claim_price_recovery
-    from boq_claim_price_header_guard_v622 import install_boq_claim_price_header_guard
+    from qlda.runtime_core.ipc_claim_fast import install_ipc_claim_fast_path
+    from qlda.runtime_core.ipc_claim_summary_fix import install_ipc_claim_summary_fix
+    from qlda.runtime_core.ipc_adaptive_parser import install_ipc_adaptive_parser
+    from qlda.runtime_core.ipc_payment_semantic import install_ipc_payment_semantic
+    from qlda.runtime_core.ipc_claim_number_fix import install_ipc_claim_number_fix
+    from qlda.runtime_core.ipc_claim_period import install_ipc_claim_period_parser_fix
+    from qlda.runtime_core.boq_claim_terms import install_boq_claim_terms
+    from qlda.runtime_core.boq_claim_price_recovery import install_boq_claim_price_recovery
+    from qlda.runtime_core.boq_claim_price_header_guard import install_boq_claim_price_header_guard
 
     install_ipc_claim_fast_path()
     install_ipc_claim_summary_fix()
@@ -54,8 +54,8 @@ def _install_ipc_parser_semantics() -> None:
 
 
 def _decorate_parser_profile(result: dict[str, Any], filename: str) -> dict[str, Any]:
-    from ipc_adaptive_parser_v622 import _adaptive_parse_wrapper_factory
-    from ipc_claim_number_fix_v622 import _apply_filename_identity
+    from qlda.runtime_core.ipc_adaptive_parser import _adaptive_parse_wrapper_factory
+    from qlda.runtime_core.ipc_claim_number_fix import _apply_filename_identity
 
     decorate = _adaptive_parse_wrapper_factory(lambda _data, _filename: result)
     profiled = decorate(b"", filename)
@@ -73,8 +73,7 @@ def parse_ipc_path(
     from openpyxl import load_workbook
 
     _install_ipc_parser_semantics()
-    import ipc_claim_v622 as ipc
-
+    import qlda.runtime_core.ipc_claim as ipc
     source = Path(path)
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Không tìm thấy file IPC trên VPS: {source}")

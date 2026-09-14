@@ -66,8 +66,7 @@ def save_vo_result_batched(
     batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Atomically save one VO revision and verify every detail row in PostgreSQL."""
-    import vo_claim_v622 as core
-
+    import qlda.runtime_core.vo_claim as core
     pid = int(project_id)
     if pid <= 0:
         raise ValueError("project_id VO không hợp lệ.")

@@ -53,7 +53,7 @@ def save_schedule_result_batched(
     batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Replace only prior background-Excel tasks and verify the new batch."""
-    from cloud_db import calc_progress_status
+    from qlda.runtime_core.project_store import calc_progress_status
 
     pid = int(project_id)
     if pid <= 0:

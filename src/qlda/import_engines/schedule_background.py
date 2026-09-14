@@ -96,7 +96,7 @@ def parse_schedule_excel_path(
 ) -> dict[str, Any]:
     """Stream the first worksheet using the same columns as the legacy importer."""
     from openpyxl import load_workbook
-    from cloud_db import planned_progress
+    from qlda.runtime_core.project_store import planned_progress
 
     source = Path(path)
     if not source.exists() or not source.is_file():

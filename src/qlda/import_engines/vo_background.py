@@ -164,8 +164,7 @@ def parse_vo_path(
 ) -> dict[str, Any]:
     """Parse a VO from its durable VPS path without loading the file as bytes."""
     from openpyxl import load_workbook
-    import vo_claim_v622 as core
-
+    import qlda.runtime_core.vo_claim as core
     source = Path(path)
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Không tìm thấy file VO trên VPS: {source}")

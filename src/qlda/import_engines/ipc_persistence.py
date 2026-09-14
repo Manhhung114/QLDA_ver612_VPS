@@ -84,8 +84,7 @@ def save_ipc_result_batched(
     batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Atomically save one IPC/revision and verify every detail row in PostgreSQL."""
-    import ipc_claim_v622 as ipc
-
+    import qlda.runtime_core.ipc_claim as ipc
     pid = int(project_id)
     if pid <= 0:
         raise ValueError("project_id IPC không hợp lệ.")

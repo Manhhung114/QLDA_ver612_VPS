@@ -90,14 +90,13 @@ def parse_boq_path(
 
     # Install the same split-price semantics used by the web app. This patches
     # boq._parse_sheet and boq.save_boq_summary_to_project in-process.
-    from boq_cost_components_v622 import install_boq_cost_components
-    from boq_claim_terms_v622 import install_boq_claim_terms
+    from qlda.runtime_core.boq_cost_components import install_boq_cost_components
+    from qlda.runtime_core.boq_claim_terms import install_boq_claim_terms
 
     install_boq_cost_components()
     install_boq_claim_terms()
 
-    import boq_multisheet_v622 as boq
-
+    import qlda.runtime_core.boq_multisheet as boq
     source = Path(path)
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Không tìm thấy file BOQ trên VPS: {source}")

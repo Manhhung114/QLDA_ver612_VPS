@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from boq_cost_components_v622 import ensure_cost_component_schema
+from qlda.runtime_core.boq_cost_components import ensure_cost_component_schema
 
 PATCH_VERSION = "V6.24.2 BOQ BATCHED PERSISTENCE"
 AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"
@@ -74,8 +74,7 @@ def save_boq_result_batched(
     V6.22 material/labor component columns in the same INSERT. Cancellation or
     an exception rolls back the whole replacement transaction.
     """
-    import boq_multisheet_v622 as boq
-
+    import qlda.runtime_core.boq_multisheet as boq
     detail_items = list(result.get("detail_items") or [])
     if not detail_items:
         raise boq.BOQWorkbookError("Không có dòng BOQ chi tiết để lưu.")
