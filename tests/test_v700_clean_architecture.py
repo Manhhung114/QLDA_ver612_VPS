@@ -15,7 +15,8 @@ class V700CleanArchitectureTests(unittest.TestCase):
     def test_version_and_architecture_markers(self):
         import qlda
 
-        self.assertEqual(qlda.__version__, "7.0")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (7, 0))
         self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
         self.assertEqual(qlda.SERVICE_LAYER, "application-use-cases")
         self.assertTrue(qlda.CLEAN_CORE)
@@ -67,7 +68,7 @@ class V700CleanArchitectureTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("qlda.services", source)
-        self.assertIn("Anti-corruption adapters", source)
+        self.assertIn("anti-corruption adapters", source.lower())
 
     def test_application_contract_is_importable_without_legacy_runtime(self):
         before = set(sys.modules)

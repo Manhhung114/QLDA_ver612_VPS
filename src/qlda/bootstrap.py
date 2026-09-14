@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""QLDA V7.0 composition root.
+"""QLDA V7.1 composition root.
 
-Only this outer-layer module wires application use cases to infrastructure
-adapters. Domain/application code remains independent from frameworks, DBs and
-legacy compatibility modules.
+Native infrastructure now owns identity/session, local files, durable Excel jobs
+and project search. The remaining V6.x anti-corruption adapters are limited to
+project access policy, AI context and Excel import pipelines.
 """
 
 from functools import lru_cache
@@ -26,33 +26,31 @@ def get_application() -> ApplicationServices:
     from qlda.infrastructure.legacy_adapters import (
         LegacyAIAdapter,
         LegacyExcelImportAdapter,
-        LegacyFileAdapter,
-        LegacyJobAdapter,
         LegacyProjectAccessAdapter,
-        LegacySearchAdapter,
-        LegacySessionAdapter,
     )
+    from qlda.infrastructure.native_files import NativeFileAdapter
+    from qlda.infrastructure.native_jobs import NativeJobAdapter
+    from qlda.infrastructure.native_search import NativeSearchAdapter
+    from qlda.infrastructure.native_session import NativeSessionAdapter
 
     return ApplicationServices(
-        sessions=SessionUseCases(LegacySessionAdapter()),
+        sessions=SessionUseCases(NativeSessionAdapter()),
         access=ProjectAccessUseCases(LegacyProjectAccessAdapter()),
-        files=FileUseCases(LegacyFileAdapter()),
-        jobs=JobUseCases(LegacyJobAdapter()),
+        files=FileUseCases(NativeFileAdapter()),
+        jobs=JobUseCases(NativeJobAdapter()),
         ai=AIUseCases(LegacyAIAdapter()),
-        search=SearchUseCases(LegacySearchAdapter()),
+        search=SearchUseCases(NativeSearchAdapter()),
         excel=ExcelImportUseCases(LegacyExcelImportAdapter()),
     )
 
 
 def reset_application() -> None:
-    """Clear the singleton composition; mainly useful for tests/reconfiguration."""
-
+    """Clear the singleton composition; useful for tests/reconfiguration."""
     get_application.cache_clear()
 
 
 def get_database():
     """Compatibility escape hatch owned by the composition root, not use cases."""
-
     from qlda.infrastructure.database import make_database
 
     return make_database()
