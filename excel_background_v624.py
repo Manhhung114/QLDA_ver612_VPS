@@ -126,11 +126,26 @@ def render_boq_background_panel(
                     st.error(f"Không thể hủy tác vụ: {exc}")
     elif status == "DONE":
         result = dict(latest.get("result") or {})
-        st.success(
-            f"Xử lý nền hoàn tất: {int(result.get('inserted') or 0):,} dòng BOQ"
-            + (f" · {float(result.get('after_tax_total') or 0):,.0f} VND sau thuế" if result else "")
-            + "."
-        )
+        expected = int(result.get("expected_rows") or 0)
+        scanned = int(result.get("scanned_rows") or result.get("detail_line_count") or 0)
+        written = int(result.get("written_rows") or 0)
+        failed = int(result.get("failed_rows") or 0)
+        verification = str(result.get("verification_status") or "").strip().upper()
+        verified = bool(result.get("verified_postgresql")) and verification == "HOÀN TẤT"
+        if verified:
+            st.success(
+                "PostgreSQL **HOÀN TẤT** · "
+                f"expected **{expected:,}** · scanned **{scanned:,}** · "
+                f"written **{written:,}** · failed **{failed:,}**"
+                + (f" · {float(result.get('after_tax_total') or 0):,.0f} VND sau thuế" if result else "")
+                + "."
+            )
+        else:
+            legacy_inserted = int(result.get("inserted") or 0)
+            st.warning(
+                "Job đã kết thúc nhưng chưa có xác nhận số dòng PostgreSQL theo chuẩn V6.24.2 mới"
+                + (f" · bộ đếm cũ: {legacy_inserted:,} dòng." if legacy_inserted else ".")
+            )
     elif status == "FAILED":
         st.error(f"Job BOQ thất bại: {latest.get('error_message') or stage or 'Không rõ nguyên nhân'}")
     elif status == "CANCELLED":

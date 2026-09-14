@@ -165,6 +165,13 @@ def _process_boq(
         "filename": filename,
         "file_size": int(file_row.get("size") or path.stat().st_size),
         "inserted": int(stats.get("inserted") or 0),
+        "expected_rows": int(stats.get("expected_rows") or 0),
+        "scanned_rows": int(stats.get("scanned_rows") or 0),
+        "prepared_rows": int(stats.get("prepared_rows") or 0),
+        "written_rows": int(stats.get("written_rows") or 0),
+        "failed_rows": int(stats.get("failed_rows") or 0),
+        "verification_status": str(stats.get("verification_status") or "CHƯA ĐỦ"),
+        "verified_postgresql": bool(stats.get("verified_postgresql")),
         "deleted": int(stats.get("deleted") or 0),
         "detail_line_count": int(result.get("detail_line_count") or 0),
         "before_tax_total": float(stats.get("before_tax_total") or 0),
@@ -179,7 +186,10 @@ def _process_boq(
     del result
     gc.collect()
     print(
-        f"Excel job #{job_id} BOQ saved workspace={workspace_pid} rows={summary['inserted']}",
+        f"Excel job #{job_id} BOQ PostgreSQL verification "
+        f"workspace={workspace_pid} expected={summary['expected_rows']} "
+        f"scanned={summary['scanned_rows']} written={summary['written_rows']} "
+        f"failed={summary['failed_rows']} status={summary['verification_status']}",
         flush=True,
     )
     return summary

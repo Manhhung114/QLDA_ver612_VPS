@@ -10,6 +10,7 @@ on:
       - 'excel_background_v624.py'
       - 'boq_background_v624.py'
       - 'boq_persist_v624.py'
+      - 'tests/test_boq_persist_v624.py'
       - 'local_file_server_background.py'
       - 'v624_excel_background_patch.py'
       - 'streamlit_app.py'
@@ -23,13 +24,27 @@ on:
 jobs:
   excel-v624:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qlda
+          POSTGRES_PASSWORD: qlda_test
+          POSTGRES_DB: qlda_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qlda -d qlda_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install workbook dependency
-        run: python -m pip install 'openpyxl>=3.1,<4'
+        run: python -m pip install 'openpyxl>=3.1,<4' 'psycopg[binary]>=3.2,<4' 'psycopg-pool>=3.2,<4'
       - name: Compile V6.24.2 modules
         run: |
           python -m py_compile \
@@ -89,6 +104,10 @@ jobs:
               assert result['source_file_size'] == path.stat().st_size
               assert result['pipeline'].startswith('V6.24.2')
           PY
+      - name: Confirm BOQ rows written to PostgreSQL
+        env:
+          DATABASE_URL: postgresql://qlda:qlda_test@127.0.0.1:5432/qlda_test
+        run: python -m unittest -v tests.test_boq_persist_v624
       - name: Verify source patch activates BOQ background panel
         run: |
           python - <<'PY'

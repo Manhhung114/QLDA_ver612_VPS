@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## V6.24.2 — Xác minh số dòng BOQ PostgreSQL
+- Sau khi ghi BOQ theo batch, worker đọc lại đúng lô bằng `project_id + batch_id`; không dùng bộ đếm vòng lặp làm kết quả xác nhận.
+- Kết quả job lưu và hiển thị đủ `expected_rows`, `scanned_rows`, `prepared_rows`, `written_rows`, `failed_rows` và trạng thái `HOÀN TẤT/CHƯA ĐỦ`.
+- Nếu số dòng PostgreSQL không khớp, toàn bộ transaction bị rollback và job không được chuyển sang `DONE`.
+- GitHub Actions chạy kiểm thử tích hợp trên PostgreSQL 16 trước khi cho phép chuyển sang V6.24.3 IPC Background.
+- File Excel gốc vẫn được giữ nguyên trên SSD VPS và chỉ được mở `read_only=True`.
+
 ## V6.22 PostgreSQL Cloud — Streamlit Community Cloud
 - Chạy trực tiếp bằng `streamlit_app.py` trên **Streamlit Community Cloud**.
 - Source WebOpt được giải nén, finalize và compile trực tiếp trong bộ nhớ; không cần bước build container khi chạy Community Cloud.

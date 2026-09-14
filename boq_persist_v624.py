@@ -11,6 +11,8 @@ from boq_cost_components_v622 import ensure_cost_component_schema
 
 PATCH_VERSION = "V6.24.2 BOQ BATCHED PERSISTENCE"
 AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"
+VERIFY_COMPLETE = "HOÀN TẤT"
+VERIFY_INCOMPLETE = "CHƯA ĐỦ"
 
 ProgressFn = Callable[[int, str, str], None]
 CancelFn = Callable[[], bool]
@@ -32,6 +34,28 @@ def _batch_size(value: int | None = None) -> int:
         except Exception:
             value = 500
     return max(50, min(int(value), 2000))
+
+
+def _scalar_int(row: Any, key: str = "row_count") -> int:
+    if row is None:
+        return 0
+    try:
+        return max(0, int(row[key] or 0))
+    except Exception:
+        try:
+            return max(0, int(row[0] or 0))
+        except Exception:
+            return 0
+
+
+def _count_written_batch(connection, project_id: int, batch_id: str) -> int:
+    """Count the rows PostgreSQL can actually read for this exact BOQ batch."""
+    row = connection.execute(
+        "SELECT COUNT(*) AS row_count FROM cost_budgets "
+        "WHERE project_id=? AND note LIKE ?",
+        (int(project_id), f"{AUTO_NOTE_PREFIX}%|batch={batch_id}"),
+    ).fetchone()
+    return _scalar_int(row)
 
 
 def save_boq_result_batched(
@@ -79,7 +103,19 @@ def save_boq_result_batched(
 
     deleted = 0
     inserted = 0
-    total = len(detail_items)
+    prepared_rows = len(detail_items)
+    parsed_rows = int(result.get("detail_line_count") or prepared_rows)
+    expected_rows = parsed_rows
+    written_rows = 0
+    failed_rows = expected_rows
+    verification_status = VERIFY_INCOMPLETE
+    if parsed_rows != prepared_rows:
+        raise boq.BOQWorkbookError(
+            "BOQ chưa nhất quán trước khi ghi PostgreSQL: "
+            f"đã quét {parsed_rows:,} dòng nhưng chuẩn bị ghi {prepared_rows:,} dòng."
+        )
+
+    total = prepared_rows
     with db.connect() as connection:
         if cancelled and cancelled():
             raise InterruptedError("Job BOQ đã được yêu cầu hủy trước khi ghi database.")
@@ -133,9 +169,44 @@ def save_boq_result_batched(
                 pct = 76 + int(inserted * 16 / max(1, total))
                 progress(min(pct, 92), f"Đang ghi BOQ vào PostgreSQL · {inserted:,}/{total:,} dòng", "")
 
+        # Do not trust the client-side loop counter. Read the batch back from
+        # PostgreSQL in the same transaction and fail atomically on any gap.
+        written_rows = _count_written_batch(connection, pid, batch_id)
+        failed_rows = abs(expected_rows - written_rows)
+        complete = (
+            expected_rows > 0
+            and prepared_rows == expected_rows
+            and inserted == expected_rows
+            and written_rows == expected_rows
+        )
+        verification_status = VERIFY_COMPLETE if complete else VERIFY_INCOMPLETE
+        if progress:
+            progress(
+                93,
+                "Xác minh PostgreSQL · "
+                f"expected={expected_rows:,} · scanned={parsed_rows:,} · "
+                f"written={written_rows:,} · failed={failed_rows:,} · {verification_status}",
+                "",
+            )
+        if not complete:
+            raise boq.BOQWorkbookError(
+                "Xác minh số dòng BOQ PostgreSQL CHƯA ĐỦ: "
+                f"expected={expected_rows:,}, scanned={parsed_rows:,}, "
+                f"prepared={prepared_rows:,}, inserted={inserted:,}, "
+                f"written={written_rows:,}, failed={failed_rows:,}. "
+                "Transaction đã rollback; BOQ cũ vẫn được giữ nguyên."
+            )
+
     return {
         "pipeline": PATCH_VERSION,
         "inserted": inserted,
+        "expected_rows": expected_rows,
+        "scanned_rows": parsed_rows,
+        "prepared_rows": prepared_rows,
+        "written_rows": written_rows,
+        "failed_rows": failed_rows,
+        "verification_status": verification_status,
+        "verified_postgresql": verification_status == VERIFY_COMPLETE,
         "deleted": deleted,
         "batch_id": batch_id,
         "detail_grand_total": float(result.get("detail_grand_total") or 0),
