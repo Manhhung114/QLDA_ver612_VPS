@@ -55,11 +55,13 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # Workflow mutations are applied separately by the GitHub connector.
-          # Restore the checked-out workflow set so this temporary output branch
-          # contains only the validated source/test/Docker/lock retirement.
+          # The migration script intentionally rewrites the workflow directory.
+          # The Actions token cannot push workflow mutations, so restore tracked
+          # workflows and remove newly-created untracked workflow files before
+          # staging the validated source/test/Docker/lock changes.
           git restore --staged .github/workflows 2>/dev/null || true
           git restore .github/workflows
+          git clean -fd .github/workflows
           git add -A
           if git diff --cached --quiet; then
             echo 'No retirement changes.'
