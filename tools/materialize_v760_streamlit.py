@@ -92,4 +92,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Intentional V7.6 trigger marker: once materialized source is committed,
+    # this one-time migration utility will be removed before the final release.
     main()
