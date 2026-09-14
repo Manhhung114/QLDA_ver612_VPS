@@ -24,37 +24,19 @@ class V700CleanArchitectureTests(unittest.TestCase):
     def test_domain_is_pure(self):
         root = SRC / "qlda" / "domain"
         source = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
-        for forbidden in (
-            "qlda.infrastructure",
-            "qlda.presentation",
-            "qlda.services",
-            "qlda.modules",
-            "qlda.shared",
-            "fastapi",
-            "streamlit",
-        ):
+        for forbidden in ("qlda.infrastructure", "qlda.presentation", "qlda.services", "qlda.modules", "qlda.shared", "fastapi", "streamlit"):
             self.assertNotIn(forbidden, source)
 
     def test_application_depends_only_inward(self):
         root = SRC / "qlda" / "application"
         source = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
-        for forbidden in (
-            "qlda.infrastructure",
-            "qlda.presentation",
-            "qlda.services",
-            "qlda.modules",
-            "qlda.shared",
-            "fastapi",
-            "streamlit",
-        ):
+        for forbidden in ("qlda.infrastructure", "qlda.presentation", "qlda.services", "qlda.modules", "qlda.shared", "fastapi", "streamlit"):
             self.assertNotIn(forbidden, source)
 
     def test_outer_adapters_do_not_call_v6_service_layer_directly(self):
         api_root = SRC / "qlda" / "presentation" / "api"
         api_source = "\n".join(path.read_text(encoding="utf-8") for path in api_root.rglob("*.py"))
-        worker_source = (SRC / "qlda" / "modules" / "excel" / "worker.py").read_text(
-            encoding="utf-8"
-        )
+        worker_source = (SRC / "qlda" / "modules" / "excel" / "worker.py").read_text(encoding="utf-8")
         for source in (api_source, worker_source):
             self.assertNotIn("qlda.services", source)
             self.assertNotIn("qlda.shared.legacy", source)
@@ -63,12 +45,18 @@ class V700CleanArchitectureTests(unittest.TestCase):
         self.assertIn("get_application", api_source)
         self.assertIn("get_application", worker_source)
 
-    def test_legacy_coupling_is_quarantined_in_infrastructure_adapter(self):
-        source = (SRC / "qlda" / "infrastructure" / "legacy_adapters.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("qlda.services", source)
-        self.assertIn("anti-corruption adapters", source.lower())
+    def test_legacy_coupling_is_quarantined_or_retired(self):
+        import qlda
+
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        legacy = SRC / "qlda" / "infrastructure" / "legacy_adapters.py"
+        if version >= (7, 4):
+            self.assertFalse(legacy.exists())
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ())
+        else:
+            source = legacy.read_text(encoding="utf-8")
+            self.assertIn("qlda.services", source)
+            self.assertIn("anti-corruption adapters", source.lower())
 
     def test_application_contract_is_importable_without_legacy_runtime(self):
         before = set(sys.modules)
@@ -85,16 +73,7 @@ class V700CleanArchitectureTests(unittest.TestCase):
         from qlda.presentation.api.app import app
 
         paths = set(app.openapi().get("paths", {}))
-        expected = {
-            "/api/health",
-            "/api/v1/jobs",
-            "/api/v1/jobs/enqueue",
-            "/api/v1/files",
-            "/api/v1/files/upload-ticket",
-            "/api/v1/ai/ask",
-            "/api/v1/ai/schedule-risk",
-            "/api/v1/search",
-        }
+        expected = {"/api/health", "/api/v1/jobs", "/api/v1/jobs/enqueue", "/api/v1/files", "/api/v1/files/upload-ticket", "/api/v1/ai/ask", "/api/v1/ai/schedule-risk", "/api/v1/search"}
         self.assertTrue(expected.issubset(paths), expected - paths)
 
 

@@ -32,17 +32,14 @@ class V710NativeAdaptersTests(unittest.TestCase):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         self.assertGreaterEqual(version, (7, 1))
         self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
-        if version >= (7, 3):
-            self.assertEqual(
-                qlda.NATIVE_ADAPTERS,
-                ("sessions", "project-access", "files", "jobs", "search", "ai"),
-            )
+        if version >= (7, 4):
+            self.assertEqual(qlda.NATIVE_ADAPTERS, ("sessions", "project-access", "files", "jobs", "search", "ai", "excel"))
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ())
+        elif version >= (7, 3):
+            self.assertEqual(qlda.NATIVE_ADAPTERS, ("sessions", "project-access", "files", "jobs", "search", "ai"))
             self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
         elif version >= (7, 2):
-            self.assertEqual(
-                qlda.NATIVE_ADAPTERS,
-                ("sessions", "project-access", "files", "jobs", "search"),
-            )
+            self.assertEqual(qlda.NATIVE_ADAPTERS, ("sessions", "project-access", "files", "jobs", "search"))
             self.assertEqual(qlda.LEGACY_ADAPTERS, ("ai", "excel"))
         else:
             self.assertEqual(qlda.NATIVE_ADAPTERS, ("sessions", "files", "jobs", "search"))
@@ -50,34 +47,29 @@ class V710NativeAdaptersTests(unittest.TestCase):
 
     def test_native_adapters_have_no_service_or_legacy_module_dependency(self):
         infrastructure = SRC / "qlda" / "infrastructure"
-        forbidden_prefixes = (
-            "qlda.services",
-            "qlda.shared.legacy",
-            "local_vps_backend_v622",
-            "excel_jobs_v624",
-        )
+        forbidden_prefixes = ("qlda.services", "qlda.shared.legacy", "local_vps_backend_v622", "excel_jobs_v624")
         names = ["native_session.py", "native_files.py", "native_jobs.py", "native_search.py"]
-        if (infrastructure / "native_project_access.py").exists():
-            names.append("native_project_access.py")
-        if (infrastructure / "native_ai.py").exists():
-            names.append("native_ai.py")
+        for optional in ("native_project_access.py", "native_ai.py", "native_excel.py"):
+            if (infrastructure / optional).exists():
+                names.append(optional)
         for name in names:
             source = (infrastructure / name).read_text(encoding="utf-8")
             imports = imported_modules(source)
             for module in imports:
-                self.assertFalse(
-                    any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden_prefixes),
-                    f"{name}: forbidden import {module}",
-                )
+                self.assertFalse(any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden_prefixes), f"{name}: forbidden import {module}")
             self.assertNotIn("load_module(", source, name)
 
     def test_legacy_adapter_surface_shrinks_monotonically(self):
         import qlda
 
-        source = (SRC / "qlda" / "infrastructure" / "legacy_adapters.py").read_text(encoding="utf-8")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        legacy = SRC / "qlda" / "infrastructure" / "legacy_adapters.py"
+        if version >= (7, 4):
+            self.assertFalse(legacy.exists())
+            return
+        source = legacy.read_text(encoding="utf-8")
         for retired in ("LegacySessionAdapter", "LegacyFileAdapter", "LegacyJobAdapter", "LegacySearchAdapter"):
             self.assertNotIn(retired, source)
-        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         if version >= (7, 3):
             self.assertNotIn("LegacyProjectAccessAdapter", source)
             self.assertNotIn("LegacyAIAdapter", source)
@@ -103,17 +95,16 @@ class V710NativeAdaptersTests(unittest.TestCase):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         expected_access = "NativeProjectAccessAdapter" if version >= (7, 2) else "LegacyProjectAccessAdapter"
         expected_ai = "NativeAIAdapter" if version >= (7, 3) else "LegacyAIAdapter"
+        expected_excel = "NativeExcelImportAdapter" if version >= (7, 4) else "LegacyExcelImportAdapter"
         self.assertEqual(app.access._port.__class__.__name__, expected_access)
         self.assertEqual(app.ai._port.__class__.__name__, expected_ai)
-        self.assertEqual(app.excel._port.__class__.__name__, "LegacyExcelImportAdapter")
+        self.assertEqual(app.excel._port.__class__.__name__, expected_excel)
 
     def test_job_upload_purpose_remains_v624_wire_compatible(self):
         from qlda.infrastructure.native_jobs import NativeJobAdapter
 
         jobs = NativeJobAdapter()
-        purpose = jobs.build_upload_purpose(
-            "BOQ_IMPORT", 7, workspace_project_id=9, status_date="2026-09-14"
-        )
+        purpose = jobs.build_upload_purpose("BOQ_IMPORT", 7, workspace_project_id=9, status_date="2026-09-14")
         self.assertTrue(purpose.startswith("QLDA_EXCEL_JOB|V624|BOQ|7|9|"))
         parsed = jobs.parse_upload_purpose(purpose)
         self.assertEqual(parsed["job_type"], "BOQ")
@@ -128,14 +119,7 @@ class V710NativeAdaptersTests(unittest.TestCase):
         from qlda.infrastructure.native_files import file_public
 
         with patch.dict(os.environ, {"QLDA_PUBLIC_BASE_URL": ""}, clear=False):
-            data = file_public({
-                "id": "abc123", "project_code": "DA-01", "kind": "BOQ",
-                "subtype": "Khac", "record_code": "Chung", "name": "boq.xlsx",
-                "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "size": 1234, "sha256": "deadbeef",
-                "storage_path": "projects/DA-01/BOQ/Khac/Chung/abc123__boq.xlsx",
-                "history": False,
-            })
+            data = file_public({"id": "abc123", "project_code": "DA-01", "kind": "BOQ", "subtype": "Khac", "record_code": "Chung", "name": "boq.xlsx", "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "size": 1234, "sha256": "deadbeef", "storage_path": "projects/DA-01/BOQ/Khac/Chung/abc123__boq.xlsx", "history": False})
         self.assertEqual(data["project_code"], "DA-01")
         self.assertEqual(data["sha256"], "deadbeef")
         self.assertEqual(data["id"], "abc123")
@@ -144,11 +128,7 @@ class V710NativeAdaptersTests(unittest.TestCase):
         from qlda.presentation.api.app import app
 
         paths = set(app.openapi().get("paths", {}))
-        expected = {
-            "/api/health", "/api/v1/jobs", "/api/v1/jobs/enqueue",
-            "/api/v1/files", "/api/v1/files/upload-ticket",
-            "/api/v1/ai/ask", "/api/v1/ai/schedule-risk", "/api/v1/search",
-        }
+        expected = {"/api/health", "/api/v1/jobs", "/api/v1/jobs/enqueue", "/api/v1/files", "/api/v1/files/upload-ticket", "/api/v1/ai/ask", "/api/v1/ai/schedule-risk", "/api/v1/search"}
         self.assertTrue(expected.issubset(paths), expected - paths)
         self.assertEqual(app.docs_url, "/api/docs")
         self.assertEqual(app.openapi_url, "/api/openapi.json")

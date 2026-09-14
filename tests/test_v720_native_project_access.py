@@ -31,7 +31,11 @@ class V720NativeProjectAccessTests(unittest.TestCase):
         self.assertGreaterEqual(version, (7, 2))
         self.assertIn("project-access", qlda.NATIVE_ADAPTERS)
         self.assertNotIn("project-access", qlda.LEGACY_ADAPTERS)
-        if version >= (7, 3):
+        if version >= (7, 4):
+            self.assertIn("ai", qlda.NATIVE_ADAPTERS)
+            self.assertIn("excel", qlda.NATIVE_ADAPTERS)
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ())
+        elif version >= (7, 3):
             self.assertIn("ai", qlda.NATIVE_ADAPTERS)
             self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
         else:
@@ -60,9 +64,14 @@ class V720NativeProjectAccessTests(unittest.TestCase):
     def test_legacy_adapter_surface_keeps_project_access_retired(self):
         import qlda
 
-        source = (SRC / "qlda" / "infrastructure" / "legacy_adapters.py").read_text(encoding="utf-8")
-        self.assertNotIn("LegacyProjectAccessAdapter", source)
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        legacy = SRC / "qlda" / "infrastructure" / "legacy_adapters.py"
+        if version >= (7, 4):
+            self.assertFalse(legacy.exists())
+            return
+
+        source = legacy.read_text(encoding="utf-8")
+        self.assertNotIn("LegacyProjectAccessAdapter", source)
         if version >= (7, 3):
             self.assertNotIn("LegacyAIAdapter", source)
             self.assertIn("LegacyExcelImportAdapter", source)

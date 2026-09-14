@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-"""QLDA V7.3 composition root.
+"""QLDA V7.4 composition root.
 
-Native infrastructure owns identity/session, project access, local files,
-durable Excel jobs, project search and AI orchestration. The only remaining
-V6.x anti-corruption adapter is the business-heavy Excel import pipeline.
+All application ports are now wired to native V7 infrastructure adapters.
+Excel import orchestration is native as of V7.4; proven V6 parser/persistence
+engines remain lazy compatibility engines behind the native infrastructure
+boundary while they are migrated independently.
 """
 
 from functools import lru_cache
@@ -23,8 +24,8 @@ from qlda.application import (
 
 @lru_cache(maxsize=1)
 def get_application() -> ApplicationServices:
-    from qlda.infrastructure.legacy_adapters import LegacyExcelImportAdapter
     from qlda.infrastructure.native_ai import NativeAIAdapter
+    from qlda.infrastructure.native_excel import NativeExcelImportAdapter
     from qlda.infrastructure.native_files import NativeFileAdapter
     from qlda.infrastructure.native_jobs import NativeJobAdapter
     from qlda.infrastructure.native_project_access import NativeProjectAccessAdapter
@@ -38,7 +39,7 @@ def get_application() -> ApplicationServices:
         jobs=JobUseCases(NativeJobAdapter()),
         ai=AIUseCases(NativeAIAdapter()),
         search=SearchUseCases(NativeSearchAdapter()),
-        excel=ExcelImportUseCases(LegacyExcelImportAdapter()),
+        excel=ExcelImportUseCases(NativeExcelImportAdapter()),
     )
 
 

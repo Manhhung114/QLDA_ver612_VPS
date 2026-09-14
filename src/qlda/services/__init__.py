@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Deprecated V6 compatibility Service Layer.
 
-V7.3 runtime entry points use :mod:`qlda.application` through
-:mod:`qlda.bootstrap`. Native session/project-access/file/job/search/AI facades
-have been retired. Only business-heavy Excel/domain import compatibility
-services remain here temporarily.
+V7.4 runtime entry points use :mod:`qlda.application` through
+:mod:`qlda.bootstrap`, and every application port now has a native
+infrastructure adapter. The classes exported here remain only for older callers
+and regression compatibility; they are not part of the V7 runtime composition.
 """
 
 from qlda.services.boq import BOQService

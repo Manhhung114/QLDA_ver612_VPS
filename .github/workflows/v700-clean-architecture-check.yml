@@ -47,11 +47,16 @@ jobs:
           ! grep -R "qlda.services" src/qlda/presentation/api src/qlda/modules/excel/worker.py
           ! grep -R "qlda.shared.legacy" src/qlda/presentation/api src/qlda/application src/qlda/domain
           ! grep -R "qlda.infrastructure" src/qlda/application src/qlda/domain
-          grep -q "qlda.services" src/qlda/infrastructure/legacy_adapters.py
           PYTHONPATH=src:. python - <<'PY'
           import qlda
+          from pathlib import Path
           version = tuple(int(x) for x in qlda.__version__.split('.')[:2])
           assert version >= (7, 0), qlda.__version__
-          assert qlda.ARCHITECTURE == 'clean-architecture', qlda.ARCHITECTURE
-          assert qlda.CLEAN_CORE is True
+          legacy = Path('src/qlda/infrastructure/legacy_adapters.py')
+          if version >= (7, 4):
+              assert qlda.LEGACY_ADAPTERS == ()
+              assert not legacy.exists()
+          else:
+              assert legacy.exists()
+              assert 'qlda.services' in legacy.read_text()
           PY

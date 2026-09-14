@@ -45,12 +45,15 @@ jobs:
           grep -q 'NativeFileAdapter' src/qlda/bootstrap.py
           grep -q 'NativeJobAdapter' src/qlda/bootstrap.py
           grep -q 'NativeSearchAdapter' src/qlda/bootstrap.py
-          ! grep -q 'LegacySessionAdapter' src/qlda/infrastructure/legacy_adapters.py
-          ! grep -q 'LegacyFileAdapter' src/qlda/infrastructure/legacy_adapters.py
-          ! grep -q 'LegacyJobAdapter' src/qlda/infrastructure/legacy_adapters.py
-          ! grep -q 'LegacySearchAdapter' src/qlda/infrastructure/legacy_adapters.py
           python - <<'PY'
           from pathlib import Path
           version = tuple(int(part) for part in Path('VERSION.txt').read_text().strip().split('.')[:2])
           assert version >= (7, 1), version
+          legacy = Path('src/qlda/infrastructure/legacy_adapters.py')
+          if version >= (7, 4):
+              assert not legacy.exists()
+          else:
+              source = legacy.read_text()
+              for name in ('LegacySessionAdapter', 'LegacyFileAdapter', 'LegacyJobAdapter', 'LegacySearchAdapter'):
+                  assert name not in source
           PY

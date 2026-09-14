@@ -33,7 +33,7 @@ jobs:
           python-version: '3.12'
       - name: Install API contract dependencies
         run: python -m pip install "fastapi>=0.115,<1" "uvicorn>=0.30,<1"
-      - name: Compile V7.2 package
+      - name: Compile V7.2+ package
         run: PYTHONPATH=src:. python -m compileall -q src/qlda
       - name: Run V7.2 native project access tests
         run: PYTHONPATH=src:. python -m unittest -v tests.test_v720_native_project_access
@@ -54,4 +54,14 @@ jobs:
           test ! -e src/qlda/services/jobs.py
           test ! -e src/qlda/services/search.py
           grep -q 'NativeProjectAccessAdapter' src/qlda/bootstrap.py
-          ! grep -q 'LegacyProjectAccessAdapter' src/qlda/infrastructure/legacy_adapters.py
+          PYTHONPATH=src:. python - <<'PY'
+          import qlda
+          from pathlib import Path
+          version = tuple(int(x) for x in qlda.__version__.split('.')[:2])
+          assert version >= (7, 2)
+          legacy = Path('src/qlda/infrastructure/legacy_adapters.py')
+          if version >= (7, 4):
+              assert not legacy.exists()
+          else:
+              assert 'LegacyProjectAccessAdapter' not in legacy.read_text()
+          PY

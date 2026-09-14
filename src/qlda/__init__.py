@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-"""QLDA V7.3 clean-architecture package.
+"""QLDA V7.4 clean-architecture package.
 
 Dependency rule:
     domain <- application <- infrastructure/presentation
 
-V7.3 adds a native AI infrastructure boundary. Session, project access, files,
-jobs, search and AI are now wired without the deprecated V6 service-layer
-facades. Only the business-heavy Excel import pipeline remains behind the
-anti-corruption adapter while it is migrated incrementally.
+V7.4 completes native application-port wiring with native Excel import
+orchestration. Root-level V6 parser/persistence engines remain lazy
+compatibility engines behind infrastructure, but no legacy application adapter
+is left in the composition root.
 """
 
-__version__ = "7.3"
+__version__ = "7.4"
 ARCHITECTURE = "clean-architecture"
 SERVICE_LAYER = "application-use-cases"
 HTTP_API = "fastapi"
 CLEAN_CORE = True
-NATIVE_ADAPTERS = ("sessions", "project-access", "files", "jobs", "search", "ai")
-LEGACY_ADAPTERS = ("excel",)
+NATIVE_ADAPTERS = (
+    "sessions",
+    "project-access",
+    "files",
+    "jobs",
+    "search",
+    "ai",
+    "excel",
+)
+LEGACY_ADAPTERS = ()

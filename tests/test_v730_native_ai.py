@@ -27,9 +27,14 @@ class V730NativeAITests(unittest.TestCase):
     def test_version_and_adapter_inventory(self):
         import qlda
 
-        self.assertEqual(qlda.__version__, "7.3")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (7, 3))
         self.assertIn("ai", qlda.NATIVE_ADAPTERS)
-        self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
+        if version >= (7, 4):
+            self.assertIn("excel", qlda.NATIVE_ADAPTERS)
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ())
+        else:
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
 
     def test_native_ai_boundary_has_no_deprecated_service_dependency(self):
         path = SRC / "qlda" / "infrastructure" / "native_ai.py"
@@ -69,12 +74,19 @@ class V730NativeAITests(unittest.TestCase):
         self.assertEqual(str(error), "Quá giới hạn")
 
     def test_legacy_ai_and_access_facades_are_removed(self):
+        import qlda
+
         service_root = SRC / "qlda" / "services"
         self.assertFalse((service_root / "ai.py").exists())
         self.assertFalse((service_root / "access.py").exists())
-        legacy = (SRC / "qlda" / "infrastructure" / "legacy_adapters.py").read_text(encoding="utf-8")
-        self.assertNotIn("LegacyAIAdapter", legacy)
-        self.assertIn("LegacyExcelImportAdapter", legacy)
+        legacy = SRC / "qlda" / "infrastructure" / "legacy_adapters.py"
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 4):
+            self.assertFalse(legacy.exists())
+        else:
+            source = legacy.read_text(encoding="utf-8")
+            self.assertNotIn("LegacyAIAdapter", source)
+            self.assertIn("LegacyExcelImportAdapter", source)
 
     def test_fastapi_ai_contract_is_unchanged(self):
         from qlda.presentation.api.app import app
