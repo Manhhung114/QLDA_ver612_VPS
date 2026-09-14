@@ -37,16 +37,27 @@ class V730NativeAITests(unittest.TestCase):
             self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
 
     def test_native_ai_boundary_has_no_deprecated_service_dependency(self):
+        import qlda
+
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         path = SRC / "qlda" / "infrastructure" / "native_ai.py"
         source = path.read_text(encoding="utf-8")
         modules = imports_of(path)
         self.assertIn("qlda.domain.errors", modules)
-        self.assertIn("qlda.runtime", modules)
+        if version >= (7, 6):
+            self.assertTrue(any(m == "qlda.runtime_core" or m.startswith("qlda.runtime_core.") for m in modules))
+            self.assertFalse(any(m == "qlda.runtime" or m.startswith("qlda.runtime.") for m in modules))
+        else:
+            self.assertIn("qlda.runtime", modules)
         for forbidden in ("qlda.services", "qlda.shared.legacy"):
             self.assertFalse(any(m == forbidden or m.startswith(forbidden + ".") for m in modules))
         self.assertNotIn("LegacyAIAdapter", source)
         self.assertNotIn("load_module(", source)
-        self.assertIn("ContextVar", (ROOT / "contractor_access_control_v622.py").read_text(encoding="utf-8"))
+        if version >= (7, 6):
+            access = SRC / "qlda" / "runtime_core" / "contractor_access_control.py"
+        else:
+            access = ROOT / "contractor_access_control_v622.py"
+        self.assertIn("ContextVar", access.read_text(encoding="utf-8"))
 
     def test_composition_wires_native_ai_without_eager_engine_bootstrap(self):
         from qlda.bootstrap import get_application, reset_application

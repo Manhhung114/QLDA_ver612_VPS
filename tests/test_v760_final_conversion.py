@@ -54,6 +54,17 @@ def test_streamlit_is_source_controlled_and_native():
     assert "build_v621_webopt" not in text
 
 
+def test_migration_pipeline_is_retired():
+    for path in (
+        "src/qlda/presentation/streamlit/materialized_app.py",
+        "tools/materialize_v760_streamlit.py",
+        "tools/package_v760_runtime.py",
+        ".github/workflows/v760-materialize-streamlit.yml",
+        ".github/workflows/v760-package-runtime.yml",
+    ):
+        assert not (ROOT / path).exists(), path
+
+
 def test_docker_systemd_and_deploy_use_packaged_entrypoints():
     docker = _text("Dockerfile")
     service = _text("vps/qlda.service")

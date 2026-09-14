@@ -77,15 +77,21 @@ class V627FastAPITests(unittest.TestCase):
         self.assertTrue((SRC / "qlda" / "application" / "services.py").exists())
 
     def test_vps_runtime_is_separate(self):
+        import qlda
+
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         service = (ROOT / "vps" / "qlda-api.service").read_text(encoding="utf-8")
         nginx = (ROOT / "vps" / "nginx.conf.template").read_text(encoding="utf-8")
-        reconcile = (ROOT / "vps" / "reconcile_api_v627.sh").read_text(encoding="utf-8")
+        reconcile_name = "reconcile_api.sh" if version >= (7, 6) else "reconcile_api_v627.sh"
+        reconcile = (ROOT / "vps" / reconcile_name).read_text(encoding="utf-8")
         self.assertIn("qlda.presentation.api.app:app", service)
         self.assertIn("--host 127.0.0.1 --port 8001", service)
         self.assertIn("location /api/", nginx)
         self.assertIn("127.0.0.1:8001", nginx)
         self.assertIn("/api/health", reconcile)
         self.assertIn("qlda-api.service", reconcile)
+        if version >= (7, 6):
+            self.assertFalse((ROOT / "vps" / "reconcile_api_v627.sh").exists())
 
 
 if __name__ == "__main__":
