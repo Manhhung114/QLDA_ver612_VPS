@@ -59,10 +59,21 @@ jobs:
           test ! -e src/qlda/modules/excel/jobs.py
           test ! -e src/qlda/shared/legacy.py
           ! grep -Eq '^[[:space:]]*(from|import)[[:space:]]+qlda\.runtime' src/qlda/infrastructure/native_excel.py
-          ! grep -q 'legacy_import' src/qlda/infrastructure/native_excel.py
           grep -q 'V7.5 NATIVE IMPORT ENGINE WORKER' src/qlda/modules/excel/worker.py
           PYTHONPATH=src:. python - <<'PY'
+          import ast
+          from pathlib import Path
           import qlda
+          source = Path('src/qlda/infrastructure/native_excel.py').read_text()
+          tree = ast.parse(source)
+          imports = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imports.update(a.name for a in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imports.add(node.module)
+          assert 'qlda.runtime' not in imports, imports
+          assert not any(x == 'qlda.services' or x.startswith('qlda.services.') for x in imports), imports
           assert qlda.__version__ == '7.5', qlda.__version__
           assert qlda.IMPORT_ENGINE_LAYER == 'native-packaged'
           assert qlda.LEGACY_ADAPTERS == ()

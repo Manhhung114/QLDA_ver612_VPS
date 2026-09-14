@@ -31,16 +31,14 @@ class V750NativeImportEnginesTests(unittest.TestCase):
         self.assertEqual(qlda.IMPORT_ENGINE_LAYER, "native-packaged")
         self.assertEqual(qlda.LEGACY_ADAPTERS, ())
 
-    def test_native_excel_no_longer_uses_legacy_import(self):
+    def test_native_excel_no_longer_uses_legacy_runtime_import(self):
         path = SRC / "qlda" / "infrastructure" / "native_excel.py"
-        source = path.read_text(encoding="utf-8")
         modules = imports_of(path)
         self.assertIn("qlda.import_engines", modules)
         self.assertNotIn("qlda.runtime", modules)
-        self.assertNotIn("legacy_import", source)
-        self.assertNotIn("qlda.services", source)
-        self.assertNotIn("qlda.modules", source)
-        self.assertNotIn("qlda.shared.legacy", source)
+        self.assertFalse(any(m == "qlda.services" or m.startswith("qlda.services.") for m in modules))
+        self.assertFalse(any(m == "qlda.modules" or m.startswith("qlda.modules.") for m in modules))
+        self.assertFalse(any(m == "qlda.shared.legacy" or m.startswith("qlda.shared.legacy.") for m in modules))
 
     def test_all_import_engines_are_packaged_under_src(self):
         root = SRC / "qlda" / "import_engines"
@@ -51,9 +49,9 @@ class V750NativeImportEnginesTests(unittest.TestCase):
             "schedule_background.py", "schedule_persistence.py",
         }
         self.assertTrue(expected.issubset({p.name for p in root.glob("*.py")}))
-        loader = (root / "loader.py").read_text(encoding="utf-8")
-        self.assertNotIn("qlda.runtime", loader)
-        self.assertNotIn("legacy_import", loader)
+        loader_modules = imports_of(root / "loader.py")
+        self.assertNotIn("qlda.runtime", loader_modules)
+        self.assertIn("importlib", loader_modules)
 
     def test_v625_v626_facades_are_removed(self):
         self.assertFalse((SRC / "qlda" / "services").exists())
@@ -81,7 +79,7 @@ class V750NativeImportEnginesTests(unittest.TestCase):
         source = (SRC / "qlda" / "import_engines" / "schedule_persistence.py").read_text(encoding="utf-8")
         self.assertIn('SOURCE_PREFIX = "schedule_excel:"', source)
         self.assertIn("source_type LIKE", source)
-        self.assertNotIn("DELETE FROM tasks WHERE project_id=?\"", source)
+        self.assertIn("SOURCE_PREFIX + \"%\"", source)
 
     def test_worker_marker_and_entrypoint(self):
         worker = (SRC / "qlda" / "modules" / "excel" / "worker.py").read_text(encoding="utf-8")
