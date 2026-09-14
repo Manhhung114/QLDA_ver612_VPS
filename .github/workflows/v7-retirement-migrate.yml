@@ -1,6 +1,7 @@
 name: V7 Repository Retirement Migration
 
-# V7-only retirement guard rerun after multiline import cleanup.
+# V7-only retirement guard. The validated retirement output is staged on a
+# temporary branch because the Actions token cannot modify workflow files.
 on:
   push:
     branches: [main]
@@ -50,14 +51,19 @@ jobs:
           docker build -t qlda-v7-retirement .
           test "$(docker image inspect qlda-v7-retirement --format '{{.Config.User}}')" = "qlda"
           docker run --rm --entrypoint python qlda-v7-retirement -c "import qlda; assert qlda.LEGACY_RUNTIME is False; print(qlda.__version__)"
-      - name: Commit V7-only repository
+      - name: Stage validated V7-only repository
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Workflow mutations are applied separately by the GitHub connector.
+          # Restore the checked-out workflow set so this temporary output branch
+          # contains only the validated source/test/Docker/lock retirement.
+          git restore --staged .github/workflows 2>/dev/null || true
+          git restore .github/workflows
           git add -A
           if git diff --cached --quiet; then
             echo 'No retirement changes.'
             exit 0
           fi
-          git commit -m 'refactor(v7): retire duplicate V6 runtime and align CI with production'
-          git push origin HEAD:main
+          git commit -m 'refactor(v7): stage validated V7-only repository retirement'
+          git push --force origin HEAD:refs/heads/v7-retirement-output
