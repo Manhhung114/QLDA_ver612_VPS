@@ -95,69 +95,6 @@ def _normalize_existing_rows(db, pid: int, rows: list[Any]) -> list[Any]:
     return list(db.documents(pid, DOC_TYPE)) if changed else rows
 
 
-def _build_ai(app_globals: dict[str, Any]):
-    settings_fn = app_globals.get("_runtime_app_settings")
-    if not callable(settings_fn):
-        raise RuntimeError("Không đọc được cấu hình AI của ứng dụng.")
-    cfg = settings_fn() or {}
-    provider = str(cfg.get("ai_provider") or "openai").lower()
-    db_path = app_globals.get("DB_PATH")
-
-    if provider == "gemini":
-        settings_cls = app_globals.get("GeminiSettings")
-        assistant_cls = app_globals.get("GeminiProjectAssistant")
-        if settings_cls is None or assistant_cls is None:
-            raise RuntimeError("Gemini chưa sẵn sàng trong runtime.")
-        settings = settings_cls(
-            api_key=str(cfg.get("gemini_api_key") or "").strip(),
-            model=str(cfg.get("gemini_model") or "auto").strip() or "auto",
-            use_web=False,
-        )
-        if not settings.api_key:
-            raise RuntimeError("Chưa cấu hình GEMINI_API_KEY.")
-        return assistant_cls(db_path, settings), "Gemini"
-
-    settings_cls = app_globals.get("AISettings")
-    assistant_cls = app_globals.get("OpenAIProjectAssistant")
-    if settings_cls is None or assistant_cls is None:
-        raise RuntimeError("OpenAI chưa sẵn sàng trong runtime.")
-    settings = settings_cls(
-        api_key=str(cfg.get("openai_api_key") or "").strip(),
-        model=str(cfg.get("openai_model") or "gpt-5-mini").strip() or "gpt-5-mini",
-        use_web=False,
-    )
-    if not settings.api_key:
-        raise RuntimeError("Chưa cấu hình OPENAI_API_KEY.")
-    return assistant_cls(db_path, settings), "OpenAI"
-
-
-def _review_prompt(record: Any) -> str:
-    return f"""Rà soát BIÊN BẢN HỌP dưới đây theo góc nhìn quản lý dự án xây dựng.
-Chỉ dựa trên nội dung biên bản; không tự bịa thêm dữ kiện. Hãy:
-1. Chỉ ra chỗ mơ hồ, mâu thuẫn, thiếu thông tin hoặc câu chữ dễ hiểu sai.
-2. Kiểm tra các kết luận/đầu việc có nêu rõ người chịu trách nhiệm, mốc thời gian, phạm vi và kết quả cần bàn giao hay chưa.
-3. Đánh dấu các số liệu, ngày tháng, tên đơn vị hoặc quyết định cần người dùng xác nhận lại.
-4. Đề xuất cách viết lại ngắn gọn, rõ nghĩa nhưng không làm thay đổi nội dung đã thống nhất.
-5. Cuối cùng lập bảng ACTION ITEMS gồm: Nội dung | Phụ trách | Thời hạn | Ghi chú. Nếu biên bản không nêu thì ghi 'Chưa xác định'.
-
-Mã biên bản: {_row(record, 'code', '')}
-Ngày họp: {_row(record, 'issue_date', '')}
-Tên cuộc họp: {_row(record, 'subject', '')}
-Đơn vị/chủ trì: {_row(record, 'contractor', '')}
-Người lập: {_row(record, 'issuer', '')}
-Thành phần tham dự: {_row(record, 'assignee', '')}
-
-NỘI DUNG BIÊN BẢN:
-{_row(record, 'description', '')}
-
-KẾT LUẬN / CÔNG VIỆC SAU HỌP:
-{_row(record, 'response', '')}
-
-GHI CHÚ:
-{_row(record, 'note', '')}
-"""
-
-
 def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> None:
     db = app_globals.get("db")
     if db is None:
@@ -175,7 +112,7 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
     except Exception:
         pass
 
-    st.caption("Biên bản họp chỉ dùng để lưu trữ và rà soát nội dung khi cần. Không có trạng thái, luồng duyệt hay theo dõi hạn.")
+    st.caption("Biên bản họp chỉ dùng để lưu trữ. Không có trạng thái, luồng duyệt hay theo dõi hạn.")
     st.metric("Số biên bản đã lưu", len(rows))
 
     options = [None] + [int(_row(r, "id", 0)) for r in rows]
@@ -247,9 +184,8 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                             },
                             selected,
                         )
-                        # Streamlit forbids changing select_key after the selectbox
-                        # has been instantiated in the current run. Defer selection
-                        # until the next rerun, exactly like the other document sheets.
+                        # Update selection on the next rerun, before Streamlit
+                        # instantiates the selectbox with this key.
                         st.session_state[pending_key] = int(saved_id)
 
                         upload_fn = app_globals.get("_prepare_inline_upload_ticket")
@@ -285,19 +221,6 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                     panel_key=panel_key,
                 )
 
-            ai_key = f"meeting_minutes_ai_review_{pid}_{selected}"
-            if st.button("🤖 Rà soát nội dung bằng AI", key=f"meeting_minutes_ai_btn_{pid}_{selected}", type="primary"):
-                try:
-                    ai, provider_name = _build_ai(app_globals)
-                    with st.spinner(f"{provider_name} đang rà soát biên bản..."):
-                        answer = ai.ask_project(int(pid), _review_prompt(current), history=[], status_date=date.today(), use_web=False)
-                    st.session_state[ai_key] = str(answer or "").strip()
-                except Exception as exc:
-                    st.error(f"Không rà soát được bằng AI: {exc}")
-            if st.session_state.get(ai_key):
-                st.markdown("#### Kết quả rà soát AI")
-                st.markdown(st.session_state[ai_key])
-
             if is_admin and st.button("🗑 Xóa biên bản này", key=f"meeting_minutes_delete_{pid}_{selected}"):
                 try:
                     trash_fn = app_globals.get("_trash_record_drive_files")
@@ -308,7 +231,6 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                             return
                     db.delete_document(int(selected))
                     st.session_state[pending_key] = None
-                    st.session_state.pop(ai_key, None)
                     st.success("Đã xóa biên bản họp.")
                     st.rerun()
                 except Exception as exc:
