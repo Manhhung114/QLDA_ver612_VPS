@@ -4,23 +4,23 @@ import os
 from pathlib import Path
 from typing import Any
 
-from qlda.runtime import legacy_import
+from qlda.runtime_core.bootstrap import initialize_database_runtime
+from qlda.runtime_core import project_store
 
 
 def make_database() -> Any:
-    """Create the PostgreSQL-backed CloudDatabase compatibility object.
+    """Create the packaged PostgreSQL-backed project database.
 
-    V7.5 removes ``qlda.shared.legacy``; the remaining compatibility runtime is
-    centralized here because AI and the proven import semantic helpers still use
-    the historical CloudDatabase API while PostgreSQL is the durable backend.
+    V7.6 removes the repository-root compatibility loader. The stable project
+    database API remains intentionally SQLite-shaped internally so proven business
+    persistence code keeps its transaction semantics while PostgreSQL is the VPS
+    durable backend.
     """
-    postgres = legacy_import("postgres_backend_v622")
-    postgres.install_postgres_backend()
-    cloud_database = legacy_import("cloud_db").CloudDatabase
+    initialize_database_runtime()
     label = Path(
         os.environ.get(
             "QLDA_WORKER_DB_LABEL",
             "/opt/qlda/shared/qlda-worker.db",
         )
     )
-    return cloud_database(label)
+    return project_store.CloudDatabase(label)
