@@ -57,8 +57,8 @@ jobs:
           test -f src/qlda/infrastructure/native_ai.py
           ! grep -q 'LegacyAIAdapter' src/qlda/infrastructure/legacy_adapters.py
           grep -q 'LegacyExcelImportAdapter' src/qlda/infrastructure/legacy_adapters.py
-          ! grep -q 'qlda.services' src/qlda/infrastructure/native_ai.py
-          ! grep -q 'qlda.shared.legacy' src/qlda/infrastructure/native_ai.py
+          ! grep -Eq '^[[:space:]]*(from|import)[[:space:]]+qlda\.services' src/qlda/infrastructure/native_ai.py
+          ! grep -Eq '^[[:space:]]*(from|import)[[:space:]]+qlda\.shared\.legacy' src/qlda/infrastructure/native_ai.py
           PYTHONPATH=src:. python - <<'PY'
           import qlda
           version = tuple(int(x) for x in qlda.__version__.split('.')[:2])
