@@ -9,44 +9,40 @@ class ModuleSpec:
     package: str
     owns: tuple[str, ...]
     dependencies: tuple[str, ...] = ()
-    migration_state: str = "boundary-created"
+    migration_state: str = "native-engine"
 
 
 MODULES: dict[str, ModuleSpec] = {
     "boq": ModuleSpec(
         name="boq",
-        package="qlda.modules.boq",
+        package="qlda.import_engines",
         owns=("BOQ parsing", "BOQ persistence", "BOQ cost components"),
         dependencies=("infrastructure",),
-        migration_state="compatibility-facade",
     ),
     "ipc": ModuleSpec(
         name="ipc",
-        package="qlda.modules.ipc",
+        package="qlda.import_engines",
         owns=("IPC/Claim parsing", "IPC revisions", "IPC persistence"),
         dependencies=("infrastructure",),
-        migration_state="compatibility-facade",
     ),
     "vo": ModuleSpec(
         name="vo",
-        package="qlda.modules.vo",
+        package="qlda.import_engines",
         owns=("VO parsing", "VO revisions", "VO persistence"),
         dependencies=("infrastructure",),
-        migration_state="compatibility-facade",
     ),
     "schedule": ModuleSpec(
         name="schedule",
-        package="qlda.modules.schedule",
+        package="qlda.import_engines",
         owns=("Schedule Excel", "schedule task persistence"),
         dependencies=("infrastructure",),
-        migration_state="compatibility-facade",
     ),
     "excel": ModuleSpec(
         name="excel",
         package="qlda.modules.excel",
-        owns=("Excel job queue", "background worker orchestration"),
+        owns=("background worker entrypoint",),
         dependencies=("boq", "ipc", "vo", "schedule", "infrastructure"),
-        migration_state="active-facade",
+        migration_state="native-entrypoint",
     ),
 }
 

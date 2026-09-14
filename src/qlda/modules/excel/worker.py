@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from qlda.bootstrap import get_application, get_database
 
-PATCH_VERSION = "V7.0 CLEAN-ARCHITECTURE EXCEL WORKER"
+PATCH_VERSION = "V7.5 NATIVE IMPORT ENGINE WORKER"
 _STOP = False
 
 
@@ -25,8 +25,6 @@ def _worker_id() -> str:
 
 
 def _make_db():
-    """Compatibility alias retained for older callers."""
-
     return get_database()
 
 
@@ -36,11 +34,7 @@ def scan_workbook_path(
     progress: Callable[[int, str, str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    return get_application().excel.scan_workbook(
-        path,
-        progress=progress,
-        cancelled=cancelled,
-    )
+    return get_application().excel.scan_workbook(path, progress=progress, cancelled=cancelled)
 
 
 def _process_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -87,10 +81,7 @@ def run_once(worker_id: str) -> bool:
 
     job_id = int(job["id"])
     services.jobs.heartbeat(worker_id, status="RUNNING", current_job_id=job_id)
-    print(
-        f"Excel job #{job_id} started type={job.get('job_type')} file={job.get('file_name')}",
-        flush=True,
-    )
+    print(f"Excel job #{job_id} started type={job.get('job_type')} file={job.get('file_name')}", flush=True)
     try:
         summary = _process_job(job)
         if services.jobs.cancel_requested(job_id) or _STOP:
@@ -116,7 +107,7 @@ def _recycle_after_job() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="QLDA V7.0 clean-architecture Excel worker")
+    parser = argparse.ArgumentParser(description="QLDA V7.5 native import-engine worker")
     parser.add_argument("--once", action="store_true", help="Process at most one job then exit")
     parser.add_argument(
         "--poll-seconds",

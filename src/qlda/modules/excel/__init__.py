@@ -1,8 +1,8 @@
-"""Excel queue/worker public boundary.
+"""Excel background-worker entrypoint for the V7 clean architecture.
 
-Submodules stay lazy so importing the queue facade does not eagerly import the
-production worker.  This keeps the V6.26 service layer acyclic:
-services.jobs -> modules.excel.jobs, while the worker may depend on services.
+Queue operations live in the native Job application port.  The only public
+module retained here is ``worker`` because systemd launches
+``python -m qlda.modules.excel.worker``.
 """
 
-__all__ = ["jobs", "worker"]
+__all__ = ["worker"]

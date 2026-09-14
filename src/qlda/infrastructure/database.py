@@ -4,19 +4,19 @@ import os
 from pathlib import Path
 from typing import Any
 
-from qlda.shared.legacy import load_module, resolve
+from qlda.runtime import legacy_import
 
 
 def make_database() -> Any:
-    """Create the PostgreSQL-backed CloudDatabase used by QLDA services.
+    """Create the PostgreSQL-backed CloudDatabase compatibility object.
 
-    The legacy adapter install is intentionally isolated here. Domain and
-    presentation code must depend on this factory instead of installing
-    PostgreSQL monkey patches themselves.
+    V7.5 removes ``qlda.shared.legacy``; the remaining compatibility runtime is
+    centralized here because AI and the proven import semantic helpers still use
+    the historical CloudDatabase API while PostgreSQL is the durable backend.
     """
-    postgres = load_module("postgres_backend_v622")
+    postgres = legacy_import("postgres_backend_v622")
     postgres.install_postgres_backend()
-    cloud_database = resolve("cloud_db", "CloudDatabase")
+    cloud_database = legacy_import("cloud_db").CloudDatabase
     label = Path(
         os.environ.get(
             "QLDA_WORKER_DB_LABEL",

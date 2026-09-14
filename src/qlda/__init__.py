@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-"""QLDA V7.4 clean-architecture package.
+"""QLDA V7.5 clean-architecture package.
 
 Dependency rule:
     domain <- application <- infrastructure/presentation
 
-V7.4 completes native application-port wiring with native Excel import
-orchestration. Root-level V6 parser/persistence engines remain lazy
-compatibility engines behind infrastructure, but no legacy application adapter
-is left in the composition root.
+V7.5 packages the BOQ/IPC/VO/Schedule import engines inside ``src/qlda`` and
+retires the V6.25/V6.26 service/module facades from the production worker path.
+All application ports remain native. Proven V6.22 semantic helpers are retained
+only below the import-engine boundary for Streamlit/AI compatibility.
 """
 
-__version__ = "7.4"
+__version__ = "7.5"
 ARCHITECTURE = "clean-architecture"
 SERVICE_LAYER = "application-use-cases"
 HTTP_API = "fastapi"
@@ -26,3 +26,4 @@ NATIVE_ADAPTERS = (
     "excel",
 )
 LEGACY_ADAPTERS = ()
+IMPORT_ENGINE_LAYER = "native-packaged"

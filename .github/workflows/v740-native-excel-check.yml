@@ -39,7 +39,7 @@ jobs:
           python-version: '3.12'
       - name: Install API contract dependencies
         run: python -m pip install "fastapi>=0.115,<1" "uvicorn>=0.30,<1"
-      - name: Compile V7.4 package
+      - name: Compile V7.4+ package
         run: PYTHONPATH=src:. python -m compileall -q src/qlda
       - name: Run V7.4 native Excel tests
         run: PYTHONPATH=src:. python -m unittest -v tests.test_v740_native_excel
@@ -62,7 +62,8 @@ jobs:
           ! grep -Eq '^[[:space:]]*(from|import)[[:space:]]+qlda\.shared\.legacy' src/qlda/infrastructure/native_excel.py
           PYTHONPATH=src:. python - <<'PY'
           import qlda
-          assert qlda.__version__ == '7.4', qlda.__version__
+          version = tuple(int(x) for x in qlda.__version__.split('.')[:2])
+          assert version >= (7, 4), qlda.__version__
           assert qlda.LEGACY_ADAPTERS == (), qlda.LEGACY_ADAPTERS
           assert 'excel' in qlda.NATIVE_ADAPTERS
           PY

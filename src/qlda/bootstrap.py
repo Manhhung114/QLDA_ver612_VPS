@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-"""QLDA V7.4 composition root.
+"""QLDA V7.5 composition root.
 
-All application ports are now wired to native V7 infrastructure adapters.
-Excel import orchestration is native as of V7.4; proven V6 parser/persistence
-engines remain lazy compatibility engines behind the native infrastructure
-boundary while they are migrated independently.
+All application ports are wired to native V7 infrastructure adapters. Excel
+imports are executed through packaged ``qlda.import_engines`` modules; the
+composition root no longer depends on V6 service/module facades.
 """
 
 from functools import lru_cache
@@ -44,12 +43,11 @@ def get_application() -> ApplicationServices:
 
 
 def reset_application() -> None:
-    """Clear the singleton composition; useful for tests/reconfiguration."""
     get_application.cache_clear()
 
 
 def get_database():
-    """Compatibility escape hatch owned by the composition root, not use cases."""
+    """Compatibility DB factory retained for the worker and AI semantic stack."""
     from qlda.infrastructure.database import make_database
 
     return make_database()
