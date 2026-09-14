@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## V6.24.3 — IPC Background Worker
+- Tải file IPC gốc thẳng xuống SSD VPS và mở workbook từ đường dẫn bằng `read_only=True`; worker không nạp toàn bộ file thành `bytes` trong tiến trình Streamlit.
+- Giữ nguyên parser nghiệp vụ IPC hiện có, gồm nhận diện form thích nghi, kỳ thanh toán, số Claim và ngữ nghĩa vật tư/nhân công.
+- Mỗi Claim/IPC tiếp tục là một hồ sơ độc lập; cùng Claim với file khác tạo revision mới, cùng SHA là idempotent và không tạo revision thừa.
+- Chi tiết GTHT được ghi PostgreSQL theo batch và đọc lại bằng `claim_id`; kết quả bắt buộc có `expected/scanned/prepared/inserted/written/failed`.
+- Chỉ trả `HOÀN TẤT` khi toàn bộ bộ đếm khớp. Sai lệch hoặc hủy giữa chừng rollback toàn transaction và giữ nguyên revision trước.
+- Giao diện IPC hiển thị hàng đợi, tiến độ, Claim/revision và bằng chứng số dòng PostgreSQL; luồng nhập nhỏ hiện hữu vẫn được giữ để tương thích.
+- GitHub Actions kiểm tra parser đường dẫn, SHA file gốc, tính độc lập Claim, idempotency/revision, rollback SQLite và ghi thực trên PostgreSQL 16.
+
 ## V6.24.2 — Xác minh số dòng BOQ PostgreSQL
 - Sau khi ghi BOQ theo batch, worker đọc lại đúng lô bằng `project_id + batch_id`; không dùng bộ đếm vòng lặp làm kết quả xác nhận.
 - Kết quả job lưu và hiển thị đủ `expected_rows`, `scanned_rows`, `prepared_rows`, `written_rows`, `failed_rows` và trạng thái `HOÀN TẤT/CHƯA ĐỦ`.

@@ -195,6 +195,83 @@ def _process_boq(
     return summary
 
 
+def _process_ipc(
+    job: dict[str, Any],
+    path: Path,
+    file_row: dict[str, Any],
+    *,
+    report: Callable[[int, str, str], None],
+    is_cancelled: Callable[[], bool],
+) -> dict[str, Any]:
+    from ipc_background_v624 import parse_ipc_path
+    from ipc_persist_v624 import save_ipc_result_batched
+
+    job_id = int(job["id"])
+    workspace_pid = int(job.get("workspace_project_id") or job.get("project_id") or 0)
+    if workspace_pid <= 0:
+        raise ValueError("Excel job IPC thiếu workspace_project_id hợp lệ.")
+
+    filename = str(file_row.get("name") or job.get("file_name") or "IPC.xlsx")
+    report(5, "Worker đã nhận IPC", "")
+    result = parse_ipc_path(
+        path,
+        filename,
+        progress=report,
+        cancelled=is_cancelled,
+    )
+    if is_cancelled():
+        raise InterruptedError("Job IPC đã được yêu cầu hủy.")
+
+    db = _make_db()
+    report(75, "Đang chuẩn bị ghi IPC vào PostgreSQL", str(result.get("claim_code") or ""))
+    stats = save_ipc_result_batched(
+        db,
+        workspace_pid,
+        result,
+        progress=report,
+        cancelled=is_cancelled,
+    )
+    if is_cancelled():
+        raise InterruptedError("Job IPC đã được yêu cầu hủy.")
+    report(98, "Đang hoàn tất IPC", str(stats.get("claim_code") or ""))
+
+    summary = {
+        "pipeline": "V6.24.3 IPC background",
+        "job_type": "IPC",
+        "workspace_project_id": workspace_pid,
+        "filename": filename,
+        "file_size": int(file_row.get("size") or path.stat().st_size),
+        "claim_id": str(stats.get("claim_id") or ""),
+        "claim_no": str(stats.get("claim_no") or ""),
+        "claim_code": str(stats.get("claim_code") or ""),
+        "revision_no": int(stats.get("revision_no") or 0),
+        "expected_rows": int(stats.get("expected_rows") or 0),
+        "scanned_rows": int(stats.get("scanned_rows") or 0),
+        "prepared_rows": int(stats.get("prepared_rows") or 0),
+        "inserted_rows": int(stats.get("inserted_rows") or 0),
+        "written_rows": int(stats.get("written_rows") or 0),
+        "failed_rows": int(stats.get("failed_rows") or 0),
+        "verification_status": str(stats.get("verification_status") or "CHƯA ĐỦ"),
+        "verified_postgresql": bool(stats.get("verified_postgresql")),
+        "requested_amount": float(stats.get("requested_amount") or 0),
+        "certified_cumulative": float(stats.get("certified_cumulative") or 0),
+        "detail_line_count": int(result.get("detail_line_count") or 0),
+        "batch_id": str(stats.get("batch_id") or result.get("batch_id") or ""),
+        "source_sha256": str(result.get("source_sha256") or ""),
+    }
+    del result
+    gc.collect()
+    print(
+        f"Excel job #{job_id} IPC PostgreSQL verification "
+        f"workspace={workspace_pid} claim={summary['claim_code']} "
+        f"expected={summary['expected_rows']} scanned={summary['scanned_rows']} "
+        f"written={summary['written_rows']} failed={summary['failed_rows']} "
+        f"status={summary['verification_status']}",
+        flush=True,
+    )
+    return summary
+
+
 def _process_job(job: dict[str, Any]) -> dict[str, Any]:
     job_id = int(job["id"])
     job_type = str(job.get("job_type") or "").strip().upper()
@@ -221,9 +298,17 @@ def _process_job(job: dict[str, Any]) -> dict[str, Any]:
             report=report,
             is_cancelled=is_cancelled,
         )
+    if job_type == "IPC":
+        return _process_ipc(
+            job,
+            path,
+            file_row,
+            report=report,
+            is_cancelled=is_cancelled,
+        )
     raise RuntimeError(
-        f"Pipeline {job_type} chưa được bật. V6.24.2 hiện chạy production BOQ; "
-        "IPC/VO/Tiến độ Excel sẽ chuyển ở các bước tiếp theo."
+        f"Pipeline {job_type} chưa được bật. V6.24.3 hiện chạy production BOQ + IPC; "
+        "VO/Tiến độ Excel sẽ chuyển ở các bước tiếp theo."
     )
 
 
@@ -271,7 +356,7 @@ def _recycle_after_job() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="QLDA V6.24.2 background Excel worker")
+    parser = argparse.ArgumentParser(description="QLDA V6.24.3 background Excel worker")
     parser.add_argument("--once", action="store_true", help="Process at most one job then exit")
     parser.add_argument("--poll-seconds", type=float, default=float(os.environ.get("QLDA_EXCEL_POLL_SECONDS", "2")))
     args = parser.parse_args()

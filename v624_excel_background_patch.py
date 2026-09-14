@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-PATCH_MARKER = "V6.24 EXCEL BACKGROUND SOURCE V1"
+PATCH_MARKER = "V6.24.3 EXCEL BACKGROUND SOURCE V2"
 
 
 def patch_excel_background_v624(source: str) -> str:
-    """Add direct-to-disk/background BOQ path without removing legacy import."""
+    """Add direct-to-disk BOQ + IPC paths without removing legacy imports."""
     if PATCH_MARKER in source:
         return source
 
@@ -13,7 +13,9 @@ def patch_excel_background_v624(source: str) -> str:
         raise RuntimeError(f"{PATCH_MARKER}: future import anchor missing")
     source = source.replace(
         future,
-        future + "from excel_background_v624 import render_boq_background_panel as _v624_render_boq_background_panel\n",
+        future
+        + "from excel_background_v624 import render_boq_background_panel as _v624_render_boq_background_panel\n"
+        + "from excel_background_v624 import render_ipc_background_panel as _v624_render_ipc_background_panel\n",
         1,
     )
 
@@ -34,6 +36,26 @@ def patch_excel_background_v624(source: str) -> str:
 
 '''
     source = source.replace(anchor, panel + anchor, 1)
+
+    ipc_anchor = (
+        "        _v622_render_ipc_claim_ui(db, pid, can_update=bool(_can_update()), "
+        "session_token=_gateway_session_token())\n"
+    )
+    ipc_count = source.count(ipc_anchor)
+    if ipc_count > 1:
+        raise RuntimeError(f"{PATCH_MARKER}: IPC renderer anchor count={ipc_count}")
+    if ipc_count == 1:
+        ipc_panel = '''        _v624_render_ipc_background_panel(
+            st,
+            db,
+            pid,
+            gateway=_drive_gateway(),
+            session_token=_gateway_session_token(),
+            can_update=bool(_can_update()),
+        )
+
+'''
+        source = source.replace(ipc_anchor, ipc_panel + ipc_anchor, 1)
     source += f"\n# {PATCH_MARKER}\n"
     compile(source, "streamlit_app_v624_excel_background.py", "exec")
     return source
