@@ -4,8 +4,8 @@ from __future__ import annotations
 
 All document sheets keep the existing upload/download implementation, but the
 visible file area is presented as VPS storage rather than Google Drive. Meeting
-minutes remain a simple archive and deliberately expose no dedicated AI action;
-AI access is centralized under Công cụ -> Trợ lý AI.
+minutes remain a simple status-free archive. AI is available only from
+Công cụ -> Trợ lý AI.
 """
 
 import inspect
@@ -32,43 +32,6 @@ def _find_app_globals() -> dict[str, Any] | None:
     return None
 
 
-def _install_meeting_minutes_without_ai(st) -> None:
-    if getattr(meeting, "_qlda_meeting_minutes_no_ai_installed", False):
-        return
-
-    original_render = meeting.render_meeting_minutes_simple
-
-    def _render_without_ai(st_obj, app_globals: dict[str, Any], pid: int):
-        # Clear stale output created by older deployments.
-        prefix = f"meeting_minutes_ai_review_{int(pid)}_"
-        for key in list(st_obj.session_state.keys()):
-            if str(key).startswith(prefix):
-                st_obj.session_state.pop(key, None)
-
-        original_button = st_obj.button
-
-        def _button(label, *args, **kwargs):
-            text = str(label or "")
-            if "Rà soát" in text and "AI" in text:
-                # Do not instantiate a button at all. The only AI entry point is
-                # now Công cụ -> Trợ lý AI.
-                return False
-            return original_button(label, *args, **kwargs)
-
-        st_obj.button = _button
-        try:
-            return original_render(st_obj, app_globals, int(pid))
-        finally:
-            st_obj.button = original_button
-
-    def _disabled_private_ai(*_args, **_kwargs):
-        raise RuntimeError("Biên bản họp không có AI riêng; hãy dùng Công cụ -> Trợ lý AI.")
-
-    meeting.render_meeting_minutes_simple = _render_without_ai
-    meeting._build_ai = _disabled_private_ai
-    meeting._qlda_meeting_minutes_no_ai_installed = True
-
-
 def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
     if app_globals.get(_PATCH_FLAG):
         return
@@ -82,8 +45,8 @@ def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
         if kind != "document":
             return original(*args, **kwargs)
 
-        # The gateway already routes local mode to Local VPS Storage. Keep the
-        # proven file actions but remove stale Google-Drive-specific UI elements.
+        # Local VPS mode already uses the same gateway API. Keep Xem/Tải/Xóa,
+        # but remove every Google-Drive-specific control from document sheets.
         original_markdown = st.markdown
         original_link_button = st.link_button
         original_checkbox = st.checkbox
@@ -99,8 +62,6 @@ def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
 
         def _link_button(label, *l_args, **l_kwargs):
             text = str(label or "")
-            # In local VPS mode there is no separate cloud-drive destination to
-            # expose. Xem/Tải remain available through signed local URLs.
             if "Google Drive" in text or text.strip() in {"☁ Drive", "Drive"}:
                 return None
             return original_link_button(label, *l_args, **l_kwargs)
@@ -151,10 +112,7 @@ def install_document_management_vps_ui() -> None:
     if getattr(st, "_qlda_document_management_vps_ui_installed", False):
         return
 
-    # Preserve the status-free meeting-minutes renderer introduced earlier, then
-    # remove its dedicated AI entry point.
     meeting.install_meeting_minutes_simple_ui()
-    _install_meeting_minutes_without_ai(st)
 
     original_segmented = st.segmented_control
 
