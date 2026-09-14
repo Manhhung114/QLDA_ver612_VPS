@@ -34,7 +34,7 @@ TABLE_ORDER = (
     "material_master",
     "procurement_schedule",
     "inventory_inspection",
-    "qlda.runtime_core.legal_documents",
+    "legal_documents",
     "legal_sync_log",
 )
 _ID_TABLES = set(TABLE_ORDER)
