@@ -47,6 +47,25 @@ find "$DATA_DIR" -type d -exec chmod 750 {} +
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install --upgrade pip wheel setuptools
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
 
+# V7.6 final-conversion preflight. A fresh VPS must never start through a root
+# compatibility entrypoint or a legacy adapter.
+runuser -u "$RUN_USER" -- env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
+runuser -u "$RUN_USER" -- env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" - <<'PY'
+from pathlib import Path
+import qlda
+from qlda.bootstrap import get_application
+root = Path("/opt/qlda/app")
+assert qlda.__version__ == "7.6"
+assert qlda.LEGACY_ADAPTERS == ()
+assert qlda.LEGACY_RUNTIME is False
+assert qlda.STREAMLIT_ENTRYPOINT == "qlda.presentation.streamlit.app"
+assert (root / "src/qlda/presentation/streamlit/app.py").is_file()
+assert (root / "src/qlda/presentation/api/app.py").is_file()
+assert (root / "src/qlda/modules/excel/worker.py").is_file()
+get_application()
+print("QLDA V7.6 packaged runtime preflight OK")
+PY
+
 if [[ ! -f "$SHARED_DIR/qlda.env" ]]; then
   cp "$APP_DIR/.env.example" "$SHARED_DIR/qlda.env"
   chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/qlda.env"
@@ -67,7 +86,7 @@ systemctl enable nginx qlda postgresql
 systemctl restart nginx postgresql
 
 echo
-echo "QLDA VPS base installation complete."
+echo "QLDA V7.6 VPS base installation complete."
 echo "1) Switch fresh LIVE data to local VPS: sudo bash $APP_DIR/vps/switch_to_local.sh $DOMAIN --fresh"
 echo "2) Edit AI/API secrets if needed: sudo nano $SHARED_DIR/qlda.env"
 echo "3) App status:   sudo systemctl status qlda --no-pager"

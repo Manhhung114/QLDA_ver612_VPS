@@ -61,6 +61,8 @@ def test_migration_pipeline_is_retired():
         "tools/package_v760_runtime.py",
         ".github/workflows/v760-materialize-streamlit.yml",
         ".github/workflows/v760-package-runtime.yml",
+        "vps/install_excel_worker_v624.sh",
+        ".github/workflows/excel-v624-check.yml",
     ):
         assert not (ROOT / path).exists(), path
 
@@ -82,5 +84,36 @@ def test_docker_systemd_and_deploy_use_packaged_entrypoints():
 def test_native_api_and_worker_entrypoints_remain_stable():
     api_service = _text("vps/qlda-api.service")
     worker_service = _text("vps/qlda-excel-worker.service")
+    upload_service = _text("vps/qlda-upload.service")
     assert "qlda.presentation.api.app:app" in api_service
     assert "qlda.modules.excel.worker" in worker_service
+    assert "qlda.presentation.upload_server" in upload_service
+    for service in (api_service, worker_service, upload_service):
+        assert "PYTHONPATH=/opt/qlda/app/src" in service
+
+
+def test_rollback_cannot_resurrect_pre_v76_runtime():
+    rollback = _text("vps/rollback.sh")
+    assert "validate_packaged_target" in rollback
+    assert 'version" != "7.6"' in rollback
+    assert "src/qlda/presentation/streamlit/app.py" in rollback
+    assert "src/qlda/presentation/api/app.py" in rollback
+    assert "src/qlda/modules/excel/worker.py" in rollback
+    assert 'PYTHONPATH="$APP_DIR/src"' in rollback
+    assert "LEGACY_ADAPTERS == ()" in rollback
+    assert "LEGACY_RUNTIME is False" in rollback
+    assert "build_v621_webopt.py" not in rollback
+    assert "_v624.py" not in rollback
+
+
+def test_fresh_install_preflights_packaged_runtime():
+    install = _text("vps/install.sh")
+    assert 'PYTHONPATH="$APP_DIR/src"' in install
+    assert 'qlda.__version__ == "7.6"' in install
+    assert "LEGACY_ADAPTERS == ()" in install
+    assert "LEGACY_RUNTIME is False" in install
+    assert "src/qlda/presentation/streamlit/app.py" in install
+    assert "src/qlda/presentation/api/app.py" in install
+    assert "src/qlda/modules/excel/worker.py" in install
+    assert "build_v621_webopt.py" not in install
+    assert "_v624.py" not in install

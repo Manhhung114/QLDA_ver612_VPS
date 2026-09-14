@@ -44,15 +44,27 @@ jobs:
           pytest -q tests/test_v730_native_ai.py
           pytest -q tests/test_v740_native_excel.py
           pytest -q tests/test_v750_native_import_engines.py
-      - name: Runtime entrypoint audit
+      - name: Shell syntax and packaged entrypoint audit
         run: |
+          bash -n vps/deploy.sh
+          bash -n vps/rollback.sh
+          bash -n vps/install.sh
+          bash -n vps/reconcile_api.sh
           grep -q '^7.6$' VERSION.txt
           ! test -e src/qlda/runtime.py
+          ! test -e vps/install_excel_worker_v624.sh
+          ! test -e .github/workflows/excel-v624-check.yml
           grep -q 'src/qlda/presentation/streamlit/app.py' Dockerfile
           grep -q 'src/qlda/presentation/streamlit/app.py' vps/qlda.service
           grep -q 'qlda.presentation.api.app:app' vps/qlda-api.service
           grep -q 'qlda.modules.excel.worker' vps/qlda-excel-worker.service
-          ! grep -q 'build_v621_webopt.py' vps/deploy.sh
-          ! grep -q '_v622.py' vps/deploy.sh
-          ! grep -q '_v624.py' vps/deploy.sh
+          grep -q 'qlda.presentation.upload_server' vps/qlda-upload.service
+          grep -q 'validate_packaged_target' vps/rollback.sh
+          grep -q 'LEGACY_ADAPTERS == ()' vps/rollback.sh
+          grep -q 'LEGACY_RUNTIME is False' vps/rollback.sh
+          grep -q 'LEGACY_ADAPTERS == ()' vps/install.sh
+          grep -q 'LEGACY_RUNTIME is False' vps/install.sh
+          ! grep -q 'build_v621_webopt.py' vps/deploy.sh vps/rollback.sh vps/install.sh
+          ! grep -q '_v622.py' vps/deploy.sh vps/rollback.sh vps/install.sh
+          ! grep -q '_v624.py' vps/deploy.sh vps/rollback.sh vps/install.sh
           grep -q 'reconcile_api.sh' vps/deploy.sh
