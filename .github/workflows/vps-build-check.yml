@@ -8,6 +8,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -78,6 +80,7 @@ jobs:
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
           grep -Fq 'Connection "upgrade"' vps/nginx.conf.template
           grep -Fq '/_stcore/health' vps/healthcheck.sh
+          test ! -e vps/install_excel_worker_v624.sh
 
       - name: Verify secrets are not committed
         run: |
