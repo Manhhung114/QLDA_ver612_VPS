@@ -1,16 +1,24 @@
-# QLDA Xây dựng V6.22 - VPS
+# QLDA Xây dựng V7.2 - VPS
 
-Đây là repository thử nghiệm VPS tách riêng từ `Manhhung114/QLDA_ver612` để chạy QLDA trên **Ubuntu 24.04 LTS** mà không ảnh hưởng bản Streamlit Community Cloud.
+Repository triển khai QLDA trên **Ubuntu 24.04 LTS** với PostgreSQL, Streamlit và FastAPI.
 
-## Kiến trúc
+## Kiến trúc hiện tại
 
-`Internet -> HTTPS/Nginx -> Streamlit 127.0.0.1:8501 -> PostgreSQL + Google Drive Gateway + AI`
+```text
+Internet -> HTTPS/Nginx
+              |-> Streamlit 127.0.0.1:8501
+              |-> FastAPI   127.0.0.1:8001
+                        |
+                 Application Use Cases
+                        |
+                     Domain
+                        |
+          Native PostgreSQL / VPS SSD adapters
+```
 
-- Streamlit chỉ lắng nghe `127.0.0.1:8501`, không mở trực tiếp ra Internet.
-- Nginx phục vụ HTTP/HTTPS và WebSocket cho Streamlit.
-- `systemd` giữ app chạy liên tục và tự khởi động lại khi VPS reboot.
-- Secrets nằm tại `/opt/qlda/shared/qlda.env`, không commit lên GitHub.
-- PostgreSQL và Google Drive vẫn dùng theo cấu hình QLDA V6.22 hiện tại.
+V7.2 đã native hóa `sessions / project-access / files / jobs / search`. Legacy
+adapter còn lại chỉ cho `AI` và pipeline `Excel import` trong thời gian tiếp tục
+migration. Secrets nằm tại `/opt/qlda/shared/qlda.env`, không commit lên GitHub.
 
 ## Cài nhanh trên Ubuntu 24.04
 
@@ -30,7 +38,7 @@ sudo systemctl status qlda --no-pager
 sudo /opt/qlda/app/vps/healthcheck.sh
 ```
 
-Nếu có domain, ví dụ `qlda.example.com`, cài bằng:
+Nếu có domain, ví dụ `qlda.example.com`:
 
 ```bash
 sudo bash vps/install.sh qlda.example.com
@@ -43,7 +51,9 @@ sudo certbot --nginx -d qlda.example.com
 sudo /opt/qlda/app/vps/deploy.sh
 ```
 
-`deploy.sh` ghi lại commit cũ, kéo `main`, cập nhật dependency, kiểm tra code, restart service và health-check. Nếu bản mới không khởi động, script tự rollback về commit trước.
+`deploy.sh` ghi lại commit cũ, kéo `main`, cập nhật dependency, kiểm tra code,
+restart service và health-check. Nếu bản mới không khởi động, script tự rollback
+về commit trước.
 
 Rollback thủ công:
 
@@ -55,11 +65,9 @@ sudo /opt/qlda/app/vps/rollback.sh
 
 ```bash
 sudo journalctl -u qlda -f
+sudo journalctl -u qlda-api -f
 sudo nginx -t
 sudo systemctl status nginx --no-pager
 curl http://127.0.0.1:8501/_stcore/health
+curl http://127.0.0.1:8001/api/health
 ```
-
-## F5 / Refresh
-
-Repo VPS giữ riêng cơ chế persistent authentication để thử nghiệm F5/Refresh trên domain/IP VPS. Các thay đổi ở repository này không ảnh hưởng `Manhhung114/QLDA_ver612` đang chạy trên Streamlit Community Cloud.

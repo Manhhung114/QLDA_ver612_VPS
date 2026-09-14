@@ -10,7 +10,7 @@ from qlda.presentation.api.routers import ai, files, health, jobs, search
 def create_app() -> FastAPI:
     application = FastAPI(
         title="QLDA API",
-        description="QLDA V6.27 HTTP adapter for jobs, files, AI and search.",
+        description="QLDA V7.2 clean-architecture HTTP adapter for jobs, files, AI and search.",
         version=qlda.__version__,
         docs_url="/api/docs",
         redoc_url="/api/redoc",

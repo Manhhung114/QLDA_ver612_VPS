@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Remaining anti-corruption adapters for QLDA V7.1.
+"""Remaining anti-corruption adapters for QLDA V7.2.
 
-V7.1 retires legacy adapters for sessions, files, jobs and search. Only the
-business-heavy compatibility areas below remain while their V6.x behavior is
-migrated incrementally: project access policy, AI context and Excel imports.
+V7.2 retires the project-access compatibility adapter. Only AI context and the
+business-heavy Excel import pipeline still depend on the deprecated V6 service
+layer while they are migrated incrementally.
 
 Domain and application packages never import this module.
 """
@@ -12,29 +12,6 @@ Domain and application packages never import this module.
 from typing import Any
 
 from qlda.domain.errors import AIApplicationError
-from qlda.domain.models import ProjectScope
-
-
-class LegacyProjectAccessAdapter:
-    @staticmethod
-    def _scope(value: Any) -> ProjectScope:
-        return ProjectScope(
-            requested_project_id=int(value.requested_project_id),
-            master_project_id=int(value.master_project_id),
-            workspace_project_id=int(value.workspace_project_id),
-            project_code=str(value.project_code or ""),
-            is_master_scope=bool(value.is_master_scope),
-        )
-
-    def require_project(self, user: dict[str, Any], project_id: int) -> ProjectScope:
-        from qlda.services.access import ProjectAccessService
-
-        return self._scope(ProjectAccessService.require_project(user, project_id))
-
-    def require_project_code(self, user: dict[str, Any], project_code: str) -> ProjectScope:
-        from qlda.services.access import ProjectAccessService
-
-        return self._scope(ProjectAccessService.require_project_code(user, project_code))
 
 
 class LegacyAIAdapter:
