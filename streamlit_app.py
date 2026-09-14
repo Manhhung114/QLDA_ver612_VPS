@@ -213,6 +213,7 @@ from v622_single_session_patch import patch_single_session
 from v622_schedule_management_patch import patch_schedule_management
 from v622_legal_qlda_patch import patch_legal_qlda
 from v622_original_import_patch import patch_original_import_storage
+from v624_excel_background_patch import patch_excel_background_v624
 from v622_ui_v7_compact_patch import patch_ui_v7_compact
 
 
@@ -257,6 +258,9 @@ def _build_compiled_vps_app():
     # as exact original files on VPS. Parsed PostgreSQL snapshots remain an
     # index/analysis layer, never the only copy of the uploaded source.
     source = patch_original_import_storage(source)
+    # V6.24.2 adds the direct-to-SSD/background BOQ path after original-file
+    # archiving hooks are in place and before the presentation-only V7 layer.
+    source = patch_excel_background_v624(source)
     # Visual/navigation-only V7 layer is deliberately last: it changes no
     # business formulas, database schema, permissions, upload or workflow logic.
     source = patch_ui_v7_compact(source)
