@@ -1,0 +1,55 @@
+name: Excel V6.24 Check
+
+on:
+  push:
+    paths:
+      - 'excel_jobs_v624.py'
+      - 'excel_worker_v624.py'
+      - 'vps/qlda-excel-worker.service'
+      - 'vps/install_excel_worker_v624.sh'
+      - '.github/workflows/excel-v624-check.yml'
+  workflow_dispatch:
+
+jobs:
+  excel-v624:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install workbook dependency
+        run: python -m pip install 'openpyxl>=3.1,<4'
+      - name: Compile V6.24 modules
+        run: python -m py_compile excel_jobs_v624.py excel_worker_v624.py
+      - name: Verify disk-stream workbook scan
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from openpyxl import Workbook
+          from excel_worker_v624 import scan_workbook_path
+
+          with TemporaryDirectory() as tmp:
+              path = Path(tmp) / 'sample.xlsx'
+              wb = Workbook()
+              ws = wb.active
+              ws.title = 'BOQ'
+              ws.append(['STT', 'Nội dung', 'Khối lượng'])
+              for i in range(1, 101):
+                  ws.append([i, f'Công việc {i}', i * 2])
+              wb.create_sheet('Tong hop').append(['Tổng', 100])
+              wb.save(path)
+              result = scan_workbook_path(path)
+              assert result['sheet_count'] == 2, result
+              assert result['file_size'] > 0, result
+              boq = next(x for x in result['sheets'] if x['name'] == 'BOQ')
+              assert boq['nonempty_rows'] == 101, boq
+              assert len(boq['sample_rows']) <= 5, boq
+              print(result)
+          PY
+      - name: Validate systemd unit syntax markers
+        run: |
+          grep -q 'MemoryMax=3G' vps/qlda-excel-worker.service
+          grep -q 'CPUQuota=250%' vps/qlda-excel-worker.service
+          grep -q 'ProtectHome=true' vps/qlda-excel-worker.service
