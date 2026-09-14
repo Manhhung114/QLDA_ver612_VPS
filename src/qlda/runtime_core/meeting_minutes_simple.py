@@ -180,6 +180,14 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
 
     options = [None] + [int(_row(r, "id", 0)) for r in rows]
     select_key = f"meeting_minutes_select_{pid}"
+    pending_key = select_key + "_pending"
+    if pending_key in st.session_state:
+        pending = st.session_state.pop(pending_key)
+        if pending in options:
+            st.session_state[select_key] = pending
+        else:
+            st.session_state.pop(select_key, None)
+
     selected = st.selectbox(
         "Chọn biên bản để xem / chỉnh sửa",
         options,
@@ -239,7 +247,10 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                             },
                             selected,
                         )
-                        st.session_state[select_key] = int(saved_id)
+                        # Streamlit forbids changing select_key after the selectbox
+                        # has been instantiated in the current run. Defer selection
+                        # until the next rerun, exactly like the other document sheets.
+                        st.session_state[pending_key] = int(saved_id)
 
                         upload_fn = app_globals.get("_prepare_inline_upload_ticket")
                         if not callable(upload_fn):
@@ -296,7 +307,7 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                             st.error("Chưa xóa được file trên kho lưu trữ: " + " | ".join(errors))
                             return
                     db.delete_document(int(selected))
-                    st.session_state.pop(select_key, None)
+                    st.session_state[pending_key] = None
                     st.session_state.pop(ai_key, None)
                     st.success("Đã xóa biên bản họp.")
                     st.rerun()
