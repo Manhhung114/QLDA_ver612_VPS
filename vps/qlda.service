@@ -1,5 +1,5 @@
 [Unit]
-Description=QLDA V6.27 Streamlit VPS
+Description=QLDA V7.6 Packaged Streamlit VPS
 After=network-online.target
 Wants=network-online.target
 
@@ -10,12 +10,16 @@ Group=qlda
 WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/qlda/app/src
+Environment=HOME=/opt/qlda/shared
+Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
+Environment=QLDA_RUNTIME_DATA_ROOT=/opt/qlda/data/runtime
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
 Environment=MKL_NUM_THREADS=1
 Environment=NUMEXPR_NUM_THREADS=1
-ExecStart=/opt/qlda/venv/bin/streamlit run /opt/qlda/app/streamlit_app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true --browser.gatherUsageStats=false
+ExecStart=/opt/qlda/venv/bin/streamlit run /opt/qlda/app/src/qlda/presentation/streamlit/app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true --browser.gatherUsageStats=false
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
@@ -23,6 +27,7 @@ KillSignal=SIGINT
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ProtectHome=true
 ReadWritePaths=/opt/qlda /var/log/qlda
 
 [Install]
