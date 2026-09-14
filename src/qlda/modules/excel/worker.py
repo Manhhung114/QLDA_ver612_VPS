@@ -9,9 +9,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from qlda.bootstrap import get_application, get_database
+from qlda.bootstrap import get_application
 
-PATCH_VERSION = "V7.5 NATIVE IMPORT ENGINE WORKER"
+PATCH_VERSION = "V7.6 PACKAGED NATIVE IMPORT WORKER"
 _STOP = False
 
 
@@ -22,10 +22,6 @@ def _stop(*_args: Any) -> None:
 
 def _worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
-
-
-def _make_db():
-    return get_database()
 
 
 def scan_workbook_path(
@@ -107,7 +103,7 @@ def _recycle_after_job() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="QLDA V7.5 native import-engine worker")
+    parser = argparse.ArgumentParser(description="QLDA V7.6 packaged native import worker")
     parser.add_argument("--once", action="store_true", help="Process at most one job then exit")
     parser.add_argument(
         "--poll-seconds",
