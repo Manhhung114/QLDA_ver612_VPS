@@ -88,12 +88,29 @@ local_storage_enabled() {
   [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^QLDA_STORAGE_BACKEND[[:space:]]*=[[:space:]]*local[[:space:]]*$' "$SHARED_DIR/qlda.env"
 }
 
+postgres_configured() {
+  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^(DATABASE_URL|QLDA_DATABASE_URL|POSTGRES_URL)=' "$SHARED_DIR/qlda.env"
+}
+
+excel_background_enabled() {
+  local_storage_enabled && postgres_configured
+}
+
 restart_local_file_service_if_enabled() {
   if local_storage_enabled; then
     install -m 0644 "$APP_DIR/vps/qlda-upload.service" /etc/systemd/system/qlda-upload.service
     systemctl daemon-reload
     systemctl enable qlda-upload.service >/dev/null 2>&1 || true
     systemctl restart qlda-upload.service
+  fi
+}
+
+restart_excel_worker_if_enabled() {
+  if excel_background_enabled; then
+    install -m 0644 "$APP_DIR/vps/qlda-excel-worker.service" /etc/systemd/system/qlda-excel-worker.service
+    systemctl daemon-reload
+    systemctl enable qlda-excel-worker.service >/dev/null 2>&1 || true
+    systemctl restart qlda-excel-worker.service
   fi
 }
 
@@ -218,7 +235,16 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/local_vps_backend_v622.py" \
   "$APP_DIR/local_file_server_v622.py" \
   "$APP_DIR/local_vps_runtime_fix_v622.py" \
-  "$APP_DIR/v622_local_vps_patch.py"
+  "$APP_DIR/v622_local_vps_patch.py" \
+  "$APP_DIR/excel_jobs_v624.py" \
+  "$APP_DIR/excel_worker_v624.py" \
+  "$APP_DIR/boq_background_v624.py" \
+  "$APP_DIR/boq_persist_v624.py" \
+  "$APP_DIR/excel_background_v624.py" \
+  "$APP_DIR/local_file_server_background.py" \
+  "$APP_DIR/v624_excel_background_patch.py" \
+  "$APP_DIR/excel_jobs.py" \
+  "$APP_DIR/excel_worker.py"
 
 run_as_app "$VENV_DIR/bin/python" - <<'PY'
 from multicore_excel_v622 import runtime_config
@@ -229,6 +255,7 @@ assert cfg["child_workers"] >= 1
 PY
 
 restart_local_file_service_if_enabled
+restart_excel_worker_if_enabled
 systemctl restart "$SERVICE"
 
 ok=0
@@ -243,6 +270,14 @@ done
 if [[ "$ok" -eq 1 ]] && local_storage_enabled; then
   if ! curl -fsS http://127.0.0.1:8502/health >/dev/null 2>&1; then
     echo "Local file service health check failed." >&2
+    ok=0
+  fi
+fi
+
+if [[ "$ok" -eq 1 ]] && excel_background_enabled; then
+  if ! systemctl is-active --quiet qlda-excel-worker.service; then
+    echo "Excel background worker is not active." >&2
+    systemctl --no-pager -l status qlda-excel-worker.service || true
     ok=0
   fi
 fi
@@ -263,6 +298,7 @@ if [[ "$CODE_CHANGED" -eq 1 ]]; then
   ensure_mpp_system_runtime
   sync_python_dependencies
   restart_local_file_service_if_enabled || true
+  restart_excel_worker_if_enabled || true
   systemctl restart "$SERVICE"
   sleep 3
   "$APP_DIR/vps/healthcheck.sh"
