@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## V6.24.5 — Schedule Excel Background Worker
+- Tải `.xlsx/.xlsm` tiến độ thẳng xuống SSD VPS, tính SHA theo chunk và quét sheet đầu tiên bằng `read_only=True`; `.xls` cũ tiếp tục dùng luồng tương thích hiện hữu.
+- Giữ bộ cột nghiệp vụ hiện hành: WBS, Công việc/Name, Bắt đầu/Start, Kết thúc/Finish, KH %, TT %, Phụ trách, Predecessor và Ghi chú.
+- Ngày báo cáo được đưa vào job để tính KH%, trạng thái và ngày cập nhật TT% nhất quán trong background worker.
+- Lần nhập mới chỉ thay thế các task từ Schedule Background trước đó; task thủ công và task đồng bộ từ MPP không bị xóa.
+- Ghi task theo batch, nhận diện batch bằng SHA và đọc lại PostgreSQL theo `project_id + source_type`; chỉ trả `HOÀN TẤT` khi đủ dòng và `failed=0`.
+- Dòng thiếu tên/ngày hoặc có ngày kết thúc trước ngày bắt đầu được bỏ qua có đếm và cảnh báo; transaction mới rollback nếu số dòng hợp lệ ghi thực tế không khớp.
+- CI kiểm tra file gốc không đổi SHA, thay thế có phạm vi, bảo toàn task thủ công, rollback batch cũ, 2.505 dòng và PostgreSQL 16 thật.
+
 ## V6.24.4 — VO Background Worker
 - Tải file VO gốc thẳng xuống SSD VPS, tính SHA theo chunk và mở đồng thời bản giá trị/công thức bằng `read_only=True`; không nạp toàn bộ workbook vào RAM Streamlit.
 - Parser chi tiết VO chuyển sang quét tuần tự từng sheet nhưng giữ nguyên quy tắc nhận diện tăng/giảm, vật tư/nhân công, thành tiền, sheet nguồn và đối chiếu tổng hợp của V6.22.

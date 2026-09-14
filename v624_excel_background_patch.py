@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-PATCH_MARKER = "V6.24.4 EXCEL BACKGROUND SOURCE V3"
+PATCH_MARKER = "V6.24.5 EXCEL BACKGROUND SOURCE V4"
 
 
 def patch_excel_background_v624(source: str) -> str:
-    """Add direct-to-disk BOQ + IPC + VO paths without removing legacy imports."""
+    """Add background BOQ + IPC + VO + Schedule paths without removing legacy imports."""
     if PATCH_MARKER in source:
         return source
 
@@ -16,7 +16,8 @@ def patch_excel_background_v624(source: str) -> str:
         future
         + "from excel_background_v624 import render_boq_background_panel as _v624_render_boq_background_panel\n"
         + "from excel_background_v624 import render_ipc_background_panel as _v624_render_ipc_background_panel\n"
-        + "from excel_background_v624 import render_vo_background_panel as _v624_render_vo_background_panel\n",
+        + "from excel_background_v624 import render_vo_background_panel as _v624_render_vo_background_panel\n"
+        + "from excel_background_v624 import render_schedule_background_panel as _v624_render_schedule_background_panel\n",
         1,
     )
 
@@ -77,6 +78,26 @@ def patch_excel_background_v624(source: str) -> str:
 
 '''
         source = source.replace(vo_anchor, vo_panel + vo_anchor, 1)
+
+    schedule_anchor = '''    rows = db.tasks(pid)
+    n = len(rows)
+'''
+    schedule_count = source.count(schedule_anchor)
+    if schedule_count > 1:
+        raise RuntimeError(f"{PATCH_MARKER}: Schedule anchor count={schedule_count}")
+    if schedule_count == 1:
+        schedule_panel = '''    _v624_render_schedule_background_panel(
+        st,
+        db,
+        pid,
+        gateway=_drive_gateway(),
+        session_token=_gateway_session_token(),
+        can_update=bool(_can_update()),
+        status_date=status_date,
+    )
+
+'''
+        source = source.replace(schedule_anchor, schedule_panel + schedule_anchor, 1)
     source += f"\n# {PATCH_MARKER}\n"
     compile(source, "streamlit_app_v624_excel_background.py", "exec")
     return source

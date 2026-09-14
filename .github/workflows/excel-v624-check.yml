@@ -14,9 +14,12 @@ on:
       - 'ipc_persist_v624.py'
       - 'vo_background_v624.py'
       - 'vo_persist_v624.py'
+      - 'schedule_background_v624.py'
+      - 'schedule_persist_v624.py'
       - 'tests/test_boq_persist_v624.py'
       - 'tests/test_ipc_background_v624.py'
       - 'tests/test_vo_background_v624.py'
+      - 'tests/test_schedule_background_v624.py'
       - 'local_file_server_background.py'
       - 'v624_excel_background_patch.py'
       - 'streamlit_app.py'
@@ -51,7 +54,7 @@ jobs:
           python-version: '3.12'
       - name: Install workbook dependency
         run: python -m pip install 'openpyxl>=3.1,<4' 'psycopg[binary]>=3.2,<4' 'psycopg-pool>=3.2,<4'
-      - name: Compile V6.24.4 modules
+      - name: Compile V6.24.5 modules
         run: |
           python -m py_compile \
             excel_jobs.py excel_jobs_v624.py \
@@ -60,6 +63,7 @@ jobs:
             boq_background_v624.py boq_persist_v624.py \
             ipc_background_v624.py ipc_persist_v624.py \
             vo_background_v624.py vo_persist_v624.py \
+            schedule_background_v624.py schedule_persist_v624.py \
             local_file_server_background.py \
             v624_excel_background_patch.py streamlit_app.py
       - name: Verify disk-stream workbook scan
@@ -124,7 +128,11 @@ jobs:
         env:
           DATABASE_URL: postgresql://qlda:qlda_test@127.0.0.1:5432/qlda_test
         run: python -m unittest -v tests.test_vo_background_v624
-      - name: Verify source patch activates BOQ IPC and VO background panels
+      - name: Confirm Schedule rows written to PostgreSQL
+        env:
+          DATABASE_URL: postgresql://qlda:qlda_test@127.0.0.1:5432/qlda_test
+        run: python -m unittest -v tests.test_schedule_background_v624
+      - name: Verify all Excel background panels
         run: |
           python - <<'PY'
           import base64
@@ -150,22 +158,27 @@ jobs:
           assert '_v624_render_boq_background_panel(' in source
           assert '_v624_render_ipc_background_panel(' in source
           assert '_v624_render_vo_background_panel(' in source
-          assert 'V6.24.4 EXCEL BACKGROUND SOURCE V3' in source
+          assert '_v624_render_schedule_background_panel(' in source
+          assert 'V6.24.5 EXCEL BACKGROUND SOURCE V4' in source
           compile(source, 'streamlit_app_v624_ci.py', 'exec')
           PY
-      - name: Verify no whole-file BOQ IPC or VO read in production worker
+      - name: Verify no whole-file reads in production Excel worker
         run: |
           ! grep -n 'path.read_bytes()' \
-            excel_worker_v624.py boq_background_v624.py ipc_background_v624.py vo_background_v624.py
+            excel_worker_v624.py boq_background_v624.py ipc_background_v624.py \
+            vo_background_v624.py schedule_background_v624.py
           grep -q 'read_only=True' boq_background_v624.py
           grep -q 'read_only=True' ipc_background_v624.py
           grep -q 'read_only=True' vo_background_v624.py
+          grep -q 'read_only=True' schedule_background_v624.py
           grep -q 'save_boq_result_batched' excel_worker_v624.py
           grep -q 'save_ipc_result_batched' excel_worker_v624.py
           grep -q 'save_vo_result_batched' excel_worker_v624.py
+          grep -q 'save_schedule_result_batched' excel_worker_v624.py
           grep -q 'executemany' boq_persist_v624.py
           grep -q 'executemany' ipc_persist_v624.py
           grep -q 'executemany' vo_persist_v624.py
+          grep -q 'executemany' schedule_persist_v624.py
       - name: Validate upload and worker systemd markers
         run: |
           grep -q 'MemoryMax=3G' vps/qlda-excel-worker.service

@@ -340,6 +340,78 @@ def _process_vo(
     return summary
 
 
+def _process_schedule_excel(
+    job: dict[str, Any],
+    path: Path,
+    file_row: dict[str, Any],
+    *,
+    report: Callable[[int, str, str], None],
+    is_cancelled: Callable[[], bool],
+) -> dict[str, Any]:
+    from schedule_background_v624 import parse_schedule_excel_path
+    from schedule_persist_v624 import save_schedule_result_batched
+
+    job_id = int(job["id"])
+    workspace_pid = int(job.get("workspace_project_id") or job.get("project_id") or 0)
+    if workspace_pid <= 0:
+        raise ValueError("Excel job tiến độ thiếu workspace_project_id hợp lệ.")
+    filename = str(file_row.get("name") or job.get("file_name") or "TienDo.xlsx")
+    options = dict(job.get("options") or {})
+    report(5, "Worker đã nhận Excel tiến độ", "")
+    result = parse_schedule_excel_path(
+        path,
+        filename,
+        status_date=options.get("status_date"),
+        progress=report,
+        cancelled=is_cancelled,
+    )
+    if is_cancelled():
+        raise InterruptedError("Job tiến độ đã được yêu cầu hủy.")
+    db = _make_db()
+    report(75, "Đang chuẩn bị ghi tiến độ vào PostgreSQL", str(result.get("sheet_name") or ""))
+    stats = save_schedule_result_batched(
+        db,
+        workspace_pid,
+        result,
+        progress=report,
+        cancelled=is_cancelled,
+    )
+    if is_cancelled():
+        raise InterruptedError("Job tiến độ đã được yêu cầu hủy.")
+    report(98, "Đang hoàn tất Excel tiến độ", str(result.get("sheet_name") or ""))
+    summary = {
+        "pipeline": "V6.24.5 Schedule Excel background",
+        "job_type": "SCHEDULE_EXCEL",
+        "workspace_project_id": workspace_pid,
+        "filename": filename,
+        "file_size": int(file_row.get("size") or path.stat().st_size),
+        "sheet_name": str(result.get("sheet_name") or ""),
+        "status_date": str(result.get("status_date") or ""),
+        "expected_rows": int(stats.get("expected_rows") or 0),
+        "scanned_rows": int(stats.get("scanned_rows") or 0),
+        "prepared_rows": int(stats.get("prepared_rows") or 0),
+        "inserted_rows": int(stats.get("inserted_rows") or 0),
+        "written_rows": int(stats.get("written_rows") or 0),
+        "failed_rows": int(stats.get("failed_rows") or 0),
+        "verification_status": str(stats.get("verification_status") or "CHƯA ĐỦ"),
+        "verified_postgresql": bool(stats.get("verified_postgresql")),
+        "source_row_count": int(stats.get("source_row_count") or 0),
+        "skipped_rows": int(stats.get("skipped_rows") or 0),
+        "batch_id": str(stats.get("batch_id") or ""),
+        "source_sha256": str(result.get("source_sha256") or ""),
+    }
+    del result
+    gc.collect()
+    print(
+        f"Excel job #{job_id} Schedule PostgreSQL verification workspace={workspace_pid} "
+        f"expected={summary['expected_rows']} scanned={summary['scanned_rows']} "
+        f"written={summary['written_rows']} failed={summary['failed_rows']} "
+        f"status={summary['verification_status']}",
+        flush=True,
+    )
+    return summary
+
+
 def _process_job(job: dict[str, Any]) -> dict[str, Any]:
     job_id = int(job["id"])
     job_type = str(job.get("job_type") or "").strip().upper()
@@ -382,9 +454,16 @@ def _process_job(job: dict[str, Any]) -> dict[str, Any]:
             report=report,
             is_cancelled=is_cancelled,
         )
+    if job_type == "SCHEDULE_EXCEL":
+        return _process_schedule_excel(
+            job,
+            path,
+            file_row,
+            report=report,
+            is_cancelled=is_cancelled,
+        )
     raise RuntimeError(
-        f"Pipeline {job_type} chưa được bật. V6.24.4 hiện chạy production BOQ + IPC + VO; "
-        "Tiến độ Excel sẽ chuyển ở bước tiếp theo."
+        f"Pipeline {job_type} chưa được bật trong V6.24.5."
     )
 
 
@@ -432,7 +511,7 @@ def _recycle_after_job() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="QLDA V6.24.4 background Excel worker")
+    parser = argparse.ArgumentParser(description="QLDA V6.24.5 background Excel worker")
     parser.add_argument("--once", action="store_true", help="Process at most one job then exit")
     parser.add_argument("--poll-seconds", type=float, default=float(os.environ.get("QLDA_EXCEL_POLL_SECONDS", "2")))
     args = parser.parse_args()
