@@ -2,13 +2,14 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src:/app \
+    PYTHONPATH=/app/src \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     OPENBLAS_NUM_THREADS=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1 \
     MALLOC_ARENA_MAX=2 \
+    QLDA_RUNTIME_DATA_ROOT=/app/data/runtime \
     QLDA_PARALLEL_EXCEL_MIN_MB=2 \
     QLDA_PARALLEL_MIN_SHEETS=2 \
     QLDA_MP_START_METHOD=forkserver
@@ -28,54 +29,12 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 RUN python -m compileall -q src/qlda \
-    && python -m py_compile \
-      streamlit_app.py \
-      build_v621_webopt.py \
-      mpp_cloud_reader.py \
-      v622_auth_refresh_v4.py \
-      v622_schedule_management_patch.py \
-      v622_legal_qlda_patch.py \
-      legal_qlda_v622.py \
-      legal_standards_backfill_v622.py \
-      legal_pccc_backfill_v622.py \
-      legal_documents.py \
-      original_import_storage_v622.py \
-      v622_original_import_patch.py \
-      v622_boq_multisheet_patch.py \
-      boq_multisheet_v622.py \
-      boq_persistence_v622.py \
-      v622_ipc_claim_patch.py \
-      ipc_claim_v622.py \
-      ipc_claim_fast_v622.py \
-      ipc_claim_summary_fix_v622.py \
-      ipc_adaptive_parser_v622.py \
-      ipc_claim_number_fix_v622.py \
-      ipc_claim_period_v622.py \
-      ipc_claim_delete_v622.py \
-      multicore_excel_v622.py \
-      v622_vo_claim_patch.py \
-      vo_claim_v622.py \
-      vo_independent_v622.py \
-      v622_report_cost_patch.py \
-      report_cost_v622.py \
-      ai_live_context_v622.py \
-      ai_claim_context_v622.py \
-      ai_vo_context_v622.py \
-      postgres_backend_v622.py \
-      vps_postgres_resilience.py \
-      streamlit_secrets_v622.py \
-      drive_gateway.py \
-      local_vps_backend_v622.py \
-      local_file_server_v622.py \
-      local_vps_runtime_fix_v622.py \
-      v622_local_vps_patch.py \
-    && python build_v621_webopt.py \
-    && python -c "import qlda; version=tuple(map(int, qlda.__version__.split('.')[:2])); assert version >= (6, 25), qlda.__version__; print('QLDA modular package OK:', qlda.__version__)" \
-    && python -c "import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
+    && python -c "import qlda; print('QLDA package OK:', qlda.__version__)" \
+    && python -c "from qlda.runtime_core import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
 
 EXPOSE 8501
 
 HEALTHCHECK --interval=30s --timeout=8s --start-period=30s --retries=3 \
   CMD curl --fail --silent --show-error --max-time 8 http://127.0.0.1:8501/_stcore/health || exit 1
 
-CMD ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+CMD ["streamlit", "run", "src/qlda/presentation/streamlit/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
