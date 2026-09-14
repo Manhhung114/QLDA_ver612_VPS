@@ -152,4 +152,10 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
         apply_streamlit_secrets_to_env()
         initialize_ai_runtime()
+
+        # V7.6: meeting minutes are a simple archive sheet. It deliberately has
+        # no approval/status lifecycle; AI review is invoked only on demand.
+        from qlda.runtime_core.meeting_minutes_simple import install_meeting_minutes_simple_ui
+        install_meeting_minutes_simple_ui()
+
         _UI_READY = True
