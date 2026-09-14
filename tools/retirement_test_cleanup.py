@@ -130,3 +130,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Guarded retirement retrigger marker: 2026-09-14.
