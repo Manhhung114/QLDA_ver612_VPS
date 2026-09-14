@@ -25,6 +25,7 @@ fi
 mkdir -p "$SHARED_DIR/config" /var/log/qlda
 chown -R "$RUN_USER:$RUN_USER" "$SHARED_DIR/config" /var/log/qlda
 
+runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/excel_jobs_v624.py" \
   "$APP_DIR/excel_worker_v624.py" \
@@ -35,16 +36,20 @@ runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/v624_excel_background_patch.py" \
   "$APP_DIR/streamlit_app.py"
 
+runuser -u "$RUN_USER" -- env \
+  PYTHONPATH="$APP_DIR/src:$APP_DIR" \
+  "$VENV_DIR/bin/python" -c "import qlda; assert qlda.__version__ == '6.25'"
+
 # Validate the generated Streamlit source before touching running services.
 runuser -u "$RUN_USER" -- env \
   HOME="$SHARED_DIR" \
   QLDA_SETTINGS_DIR="$SHARED_DIR/config" \
+  PYTHONPATH="$APP_DIR/src:$APP_DIR" \
   "$VENV_DIR/bin/python" "$APP_DIR/build_v621_webopt.py" >/dev/null
 
 install -m 0644 "$APP_DIR/vps/qlda-excel-worker.service" /etc/systemd/system/qlda-excel-worker.service
 
-# Direct-upload BOQ queue hand-off is part of V6.24.2. Update the upload unit
-# when the local VPS storage backend is enabled.
+# Direct-upload queue hand-off remains shared by V6.24 compatibility modules.
 LOCAL_STORAGE=0
 if grep -qE '^QLDA_STORAGE_BACKEND[[:space:]]*=[[:space:]]*local[[:space:]]*$' "$SHARED_DIR/qlda.env"; then
   LOCAL_STORAGE=1
@@ -59,7 +64,6 @@ if [[ "$LOCAL_STORAGE" -eq 1 ]]; then
   systemctl restart qlda-upload.service
 fi
 systemctl restart qlda-excel-worker.service
-# Restart Streamlit so the new BOQ background panel is compiled into the app.
 systemctl restart "$MAIN_SERVICE"
 sleep 3
 
@@ -89,4 +93,4 @@ if [[ "$LOCAL_STORAGE" -eq 1 ]]; then
 fi
 
 systemctl --no-pager -l status qlda-excel-worker.service
-echo "V6.24.2 BOQ background worker/upload stack installed and running."
+echo "V6.25 modular Excel worker/upload stack installed and running."

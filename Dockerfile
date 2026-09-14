@@ -2,6 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/app \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     OPENBLAS_NUM_THREADS=1 \
     OMP_NUM_THREADS=1 \
@@ -26,7 +27,8 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN python -m py_compile \
+RUN python -m compileall -q src/qlda \
+    && python -m py_compile \
       streamlit_app.py \
       build_v621_webopt.py \
       mpp_cloud_reader.py \
@@ -68,6 +70,7 @@ RUN python -m py_compile \
       local_vps_runtime_fix_v622.py \
       v622_local_vps_patch.py \
     && python build_v621_webopt.py \
+    && python -c "import qlda; assert qlda.__version__ == '6.25'; print('QLDA modular package OK')" \
     && python -c "import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
 
 EXPOSE 8501
