@@ -43,12 +43,26 @@ def _strip_top_level_function(text: str, name: str) -> str:
 
 
 def _drop_import_lines(text: str, needles: tuple[str, ...]) -> str:
-    lines = []
-    for line in text.splitlines():
-        if (line.startswith("from ") or line.startswith("import ")) and any(n in line for n in needles):
+    """Drop matching single- or multi-line import statements safely."""
+    source = text.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(source):
+        line = source[index]
+        stripped = line.lstrip()
+        is_import = stripped.startswith("from ") or stripped.startswith("import ")
+        if is_import and any(needle in line for needle in needles):
+            # Parenthesized imports leave continuation lines behind if only the
+            # first line is removed. Consume through the matching close paren.
+            balance = line.count("(") - line.count(")")
+            index += 1
+            while balance > 0 and index < len(source):
+                balance += source[index].count("(") - source[index].count(")")
+                index += 1
             continue
-        lines.append(line)
-    return "\n".join(lines).rstrip() + "\n"
+        output.append(line)
+        index += 1
+    return "\n".join(output).rstrip() + "\n"
 
 
 def _edit(name: str, *, strip_methods: tuple[str, ...] = (), drop_import_needles: tuple[str, ...] = (), strip_functions: tuple[str, ...] = (), replacements: tuple[tuple[str, str], ...] = ()) -> None:
@@ -130,5 +144,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-# Guarded retirement retrigger marker: 2026-09-14.
