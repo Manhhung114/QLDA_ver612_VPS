@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""QLDA modular monolith package introduced in V6.25."""
+"""QLDA modular monolith package.
 
-__version__ = "6.25"
+V6.25 established module boundaries. V6.26 adds an application Service Layer
+that is shared by background workers today and by HTTP adapters in V6.27.
+"""
+
+__version__ = "6.26"
 ARCHITECTURE = "modular-monolith"
+SERVICE_LAYER = "application-services"

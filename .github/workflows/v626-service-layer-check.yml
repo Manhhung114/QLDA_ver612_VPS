@@ -1,0 +1,42 @@
+name: V6.26 Service Layer Check
+
+on:
+  push:
+    paths:
+      - 'src/qlda/**'
+      - 'tests/test_v626_service_layer.py'
+      - 'docs/architecture/V6.26_SERVICE_LAYER.md'
+      - 'VERSION.txt'
+      - '.github/workflows/v626-service-layer-check.yml'
+  pull_request:
+    paths:
+      - 'src/qlda/**'
+      - 'tests/test_v626_service_layer.py'
+      - 'docs/architecture/V6.26_SERVICE_LAYER.md'
+      - 'VERSION.txt'
+      - '.github/workflows/v626-service-layer-check.yml'
+
+jobs:
+  service-layer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile service layer
+        run: |
+          python -m compileall -q src/qlda
+          python -m py_compile tests/test_v626_service_layer.py
+      - name: Run V6.26 service tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
+        run: python -m unittest discover -s tests -p 'test_v626_service_layer.py' -v
+      - name: Verify production worker boundary
+        run: |
+          grep -q 'ExcelImportService' src/qlda/modules/excel/worker.py
+          grep -q 'FileService' src/qlda/modules/excel/worker.py
+          grep -q 'JobService' src/qlda/modules/excel/worker.py
+          ! grep -q 'excel_worker_v624' src/qlda/modules/excel/worker.py
+          ! grep -q 'local_vps_backend_v622' src/qlda/modules/excel/worker.py
+          test "$(tr -d '\r\n ' < VERSION.txt)" = '6.26'

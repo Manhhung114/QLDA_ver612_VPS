@@ -48,4 +48,8 @@ jobs:
           grep -q 'PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app' vps/qlda-excel-worker.service
           grep -q -- '-m qlda.modules.excel.worker --poll-seconds 2' vps/qlda-excel-worker.service
           grep -q 'PYTHONPATH=/app/src:/app' Dockerfile
-          test "$(tr -d '\r\n ' < VERSION.txt)" = '6.25'
+          python - <<'PY'
+          from pathlib import Path
+          version = tuple(int(x) for x in Path("VERSION.txt").read_text().strip().split(".")[:2])
+          assert version >= (6, 25), version
+          PY

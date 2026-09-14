@@ -18,7 +18,8 @@ from qlda.runtime import REPO_ROOT, ensure_repo_root_on_path
 
 class ModularMonolithV625Tests(unittest.TestCase):
     def test_package_version_and_repo_root(self):
-        self.assertEqual(qlda.__version__, "6.25")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (6, 25))
         self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
         self.assertEqual(REPO_ROOT, ROOT)
         self.assertEqual(ensure_repo_root_on_path(), ROOT)
