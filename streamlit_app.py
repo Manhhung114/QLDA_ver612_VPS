@@ -258,7 +258,7 @@ def _build_compiled_vps_app():
     # as exact original files on VPS. Parsed PostgreSQL snapshots remain an
     # index/analysis layer, never the only copy of the uploaded source.
     source = patch_original_import_storage(source)
-    # V6.24.3 adds direct-to-SSD/background BOQ + IPC paths after original-file
+    # V6.24.4 adds direct-to-SSD/background BOQ + IPC + VO paths after original-file
     # archiving hooks are in place and before the presentation-only V7 layer.
     source = patch_excel_background_v624(source)
     # Visual/navigation-only V7 layer is deliberately last: it changes no

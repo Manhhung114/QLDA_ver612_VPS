@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## V6.24.4 — VO Background Worker
+- Tải file VO gốc thẳng xuống SSD VPS, tính SHA theo chunk và mở đồng thời bản giá trị/công thức bằng `read_only=True`; không nạp toàn bộ workbook vào RAM Streamlit.
+- Parser chi tiết VO chuyển sang quét tuần tự từng sheet nhưng giữ nguyên quy tắc nhận diện tăng/giảm, vật tư/nhân công, thành tiền, sheet nguồn và đối chiếu tổng hợp của V6.22.
+- Mỗi VO tiếp tục là hồ sơ độc lập; cùng SHA không tạo revision thừa, file mới cùng mã VO tạo revision và giữ nguyên giá trị duyệt, nguồn vốn, trạng thái.
+- Dòng chi tiết được ghi PostgreSQL theo batch, đọc lại bằng `vo_id` và chỉ trả `HOÀN TẤT` khi `expected/scanned/prepared/inserted/written` khớp tuyệt đối, `failed=0`.
+- Sai lệch số dòng hoặc hủy giữa chừng rollback toàn transaction, giữ nguyên revision VO trước và không cập nhật dở dang sang bảng `cost_variations`.
+- Giao diện VO có upload nền, tiến độ, hủy an toàn, VO/revision, giá trị đề xuất và bằng chứng số dòng PostgreSQL.
+- CI kiểm tra file gốc không đổi SHA, tính độc lập/idempotency/revision, rollback, batch 2.003 dòng và PostgreSQL 16 thật.
+
 ## V6.24.3 — IPC Background Worker
 - Tải file IPC gốc thẳng xuống SSD VPS và mở workbook từ đường dẫn bằng `read_only=True`; worker không nạp toàn bộ file thành `bytes` trong tiến trình Streamlit.
 - Giữ nguyên parser nghiệp vụ IPC hiện có, gồm nhận diện form thích nghi, kỳ thanh toán, số Claim và ngữ nghĩa vật tư/nhân công.

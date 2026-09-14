@@ -4,7 +4,7 @@ from typing import Any
 
 from excel_jobs_v624 import build_upload_purpose, list_jobs, request_cancel
 
-PATCH_VERSION = "V6.24.3 EXCEL BACKGROUND UI"
+PATCH_VERSION = "V6.24.4 EXCEL BACKGROUND UI"
 
 
 def _row_value(row: Any, key: str, default: Any = "") -> Any:
@@ -291,5 +291,130 @@ def render_ipc_background_panel(
                 st.caption(
                     f"{_status_label(row_status)} · Job #{row.get('id')} · {row_name}"
                     + (f" · {row_claim}" if row_claim else "")
+                    + (f" · {row_stage}" if row_stage else "")
+                )
+
+
+def render_vo_background_panel(
+    st,
+    db,
+    project_id: int,
+    *,
+    gateway,
+    session_token: str,
+    can_update: bool,
+) -> None:
+    """Direct-to-SSD VO upload, worker progress and PostgreSQL row proof."""
+    cfg = getattr(gateway, "config", None)
+    if not bool(getattr(cfg, "local", False)):
+        return
+    token = str(session_token or "").strip()
+    if not token:
+        return
+
+    pid = int(project_id)
+    st.markdown("##### ⚡ VO lớn · xử lý nền V6.24.4")
+    st.caption(
+        "Mỗi VO là một hồ sơ độc lập. File gốc được tải thẳng xuống SSD VPS; worker đọc tuần tự, "
+        "ghi chi tiết phát sinh theo lô và đối chiếu số dòng thực tế trong PostgreSQL."
+    )
+    c1, c2 = st.columns([2.2, 1.0])
+    if can_update:
+        try:
+            purpose = build_upload_purpose("VO", pid, workspace_project_id=pid)
+            upload = gateway.create_upload_ticket(
+                token,
+                project_code=_project_code(db, pid),
+                kind="source",
+                subtype="VO",
+                record_code="VO",
+                upload_purpose=purpose,
+            )
+            url = str(upload.get("url") or "").strip()
+            max_gb = float(upload.get("max_gb") or 0)
+            if url:
+                label = "⬆️ Tải VO trực tiếp lên VPS"
+                if max_gb:
+                    label += f" · tối đa {max_gb:g} GB"
+                c1.link_button(label, url, use_container_width=True)
+            else:
+                c1.info("Chưa cấu hình Public Base URL nên chưa tạo được link upload trực tiếp.")
+        except Exception as exc:
+            c1.warning(f"Chưa tạo được phiên upload VO nền: {exc}")
+    else:
+        c1.caption("Tài khoản hiện tại chỉ có quyền xem trạng thái xử lý VO.")
+
+    if c2.button("🔄 Làm mới", key=f"v624_vo_jobs_refresh_{pid}", use_container_width=True):
+        st.rerun()
+    try:
+        jobs = list_jobs(pid, job_type="VO", limit=5)
+    except Exception as exc:
+        st.warning(f"Chưa đọc được hàng đợi VO: {exc}")
+        return
+    if not jobs:
+        st.caption("Chưa có tác vụ VO nền cho nhà thầu/dự án đang chọn.")
+        return
+
+    latest = jobs[0]
+    status = str(latest.get("status") or "").upper()
+    progress = int(latest.get("progress") or 0)
+    name = str(latest.get("file_name") or latest.get("source_name") or "VO.xlsx")
+    stage = str(latest.get("stage") or latest.get("current_step") or "")
+    current_sheet = str(latest.get("current_sheet") or "")
+    job_id = int(latest.get("id") or 0)
+    st.write(f"{_status_label(status)} · **{name}** · Job #{job_id}")
+    if status in {"QUEUED", "RUNNING"}:
+        detail = stage + (f" · Sheet/VO: {current_sheet}" if current_sheet else "")
+        st.progress(max(0, min(100, progress)), text=f"{progress}% · {detail}")
+        if can_update and job_id > 0:
+            if st.button(
+                "⛔ Yêu cầu hủy tác vụ VO",
+                key=f"v624_vo_cancel_{pid}_{job_id}",
+                disabled=status not in {"QUEUED", "RUNNING"},
+            ):
+                try:
+                    request_cancel(job_id)
+                    st.warning("Đã gửi yêu cầu hủy. Worker sẽ rollback tại điểm kiểm tra an toàn gần nhất.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Không thể hủy tác vụ VO: {exc}")
+    elif status == "DONE":
+        result = dict(latest.get("result") or {})
+        expected = int(result.get("expected_rows") or 0)
+        scanned = int(result.get("scanned_rows") or result.get("detail_line_count") or 0)
+        written = int(result.get("written_rows") or 0)
+        failed = int(result.get("failed_rows") or 0)
+        verification = str(result.get("verification_status") or "").strip().upper()
+        verified = bool(result.get("verified_postgresql")) and verification == "HOÀN TẤT"
+        vo_code = str(result.get("vo_code") or "VO")
+        revision = int(result.get("revision_no") or 0)
+        if verified:
+            st.success(
+                f"{vo_code} · revision **{revision}** · PostgreSQL **HOÀN TẤT** · "
+                f"expected **{expected:,}** · scanned **{scanned:,}** · "
+                f"written **{written:,}** · failed **{failed:,}** · "
+                f"giá trị đề xuất **{float(result.get('proposed_amount') or 0):,.0f} VND**."
+            )
+        else:
+            st.warning(
+                "Job VO đã kết thúc nhưng chưa có xác nhận số dòng PostgreSQL theo chuẩn V6.24.4; "
+                "không coi là hoàn tất dữ liệu."
+            )
+    elif status == "FAILED":
+        st.error(f"Job VO thất bại: {latest.get('error_message') or stage or 'Không rõ nguyên nhân'}")
+    elif status == "CANCELLED":
+        st.info("Tác vụ VO đã được hủy; transaction đang xử lý không được ghi dở dang.")
+
+    if len(jobs) > 1:
+        with st.expander("Lịch sử 5 tác vụ VO gần nhất", expanded=False):
+            for row in jobs:
+                row_status = str(row.get("status") or "").upper()
+                row_name = str(row.get("file_name") or row.get("source_name") or "VO.xlsx")
+                row_result = dict(row.get("result") or {})
+                row_code = str(row_result.get("vo_code") or "")
+                row_stage = str(row.get("stage") or row.get("current_step") or "")
+                st.caption(
+                    f"{_status_label(row_status)} · Job #{row.get('id')} · {row_name}"
+                    + (f" · {row_code}" if row_code else "")
                     + (f" · {row_stage}" if row_stage else "")
                 )

@@ -6,7 +6,7 @@ import socket
 from datetime import datetime, timezone
 from typing import Any
 
-PATCH_VERSION = "V6.24.3 EXCEL JOB QUEUE"
+PATCH_VERSION = "V6.24.4 EXCEL JOB QUEUE"
 ACTIVE_STATES = {"QUEUED", "RUNNING"}
 FINAL_STATES = {"DONE", "FAILED", "CANCELLED"}
 ALLOWED_JOB_TYPES = {"WORKBOOK_SCAN", "BOQ", "BOQ_IMPORT", "IPC", "VO", "SCHEDULE_EXCEL"}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""V6.24.3 local file-server entrypoint with Excel queue hand-off.
+"""V6.24.4 local file-server entrypoint with Excel queue hand-off.
 
 The upload is streamed directly to SSD first. Only after the durable file row is
 registered do we enqueue a lightweight PostgreSQL job. Upload success therefore
@@ -16,7 +16,7 @@ install_local_single_session()
 import local_file_server_v622 as base  # noqa: E402
 from local_vps_backend_v622 import verify_upload_ticket  # noqa: E402
 
-SERVER_VERSION = "QLDA-Local-File-Server/6.24.3"
+SERVER_VERSION = "QLDA-Local-File-Server/6.24.4"
 _original_save_stream = base.save_stream_from_ticket
 
 
@@ -45,7 +45,7 @@ def save_stream_and_enqueue(ticket: str, *, name: str, mime_type: str, stream, c
                     "id": int(job.get("id") or 0),
                     "status": str(job.get("status") or ""),
                     "reused": bool(job.get("reused")),
-                    "version": "V6.24.3",
+                    "version": "V6.24.4",
                 }
         except Exception as exc:
             # The original file is already durable. Queue failure must not turn
