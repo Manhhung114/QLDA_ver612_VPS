@@ -139,9 +139,12 @@ def initialize_ai_runtime() -> None:
         install_ai_access_guard()
 
         # Install last so the shared assistant receives the final composed project
-        # context plus full-project PDF retrieval from every Quản lý hồ sơ sheet.
+        # context, searchable-PDF full scan and multimodal fallback for scanned PDFs
+        # from every Quản lý hồ sơ sheet that the current user is allowed to read.
         from qlda.runtime_core.ai_vps_pdf_fullscan import install_ai_vps_pdf_fullscan
+        from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
         install_ai_vps_pdf_fullscan()
+        install_ai_vps_pdf_vision()
         _AI_READY = True
 
 
