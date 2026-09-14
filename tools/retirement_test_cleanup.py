@@ -52,8 +52,6 @@ def _drop_import_lines(text: str, needles: tuple[str, ...]) -> str:
         stripped = line.lstrip()
         is_import = stripped.startswith("from ") or stripped.startswith("import ")
         if is_import and any(needle in line for needle in needles):
-            # Parenthesized imports leave continuation lines behind if only the
-            # first line is removed. Consume through the matching close paren.
             balance = line.count("(") - line.count(")")
             index += 1
             while balance > 0 and index < len(source):
@@ -110,7 +108,7 @@ def main() -> None:
         "test_original_import_storage.py",
         strip_methods=("test_production_patch_archives_all_business_import_sources",),
         strip_functions=("_raw_vps_source",),
-        drop_import_needles=("build_v621_webopt", "_patch"),
+        drop_import_needles=("build_v621_webopt", "_patch", "auth_refresh_v4"),
     )
     _edit(
         "test_vps_status.py",
