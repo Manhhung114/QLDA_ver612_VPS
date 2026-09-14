@@ -1,0 +1,38 @@
+[Unit]
+Description=QLDA V6.24 Background Excel Worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qlda
+Group=qlda
+WorkingDirectory=/opt/qlda/app
+EnvironmentFile=/opt/qlda/shared/qlda.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOME=/opt/qlda/shared
+Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=NUMEXPR_NUM_THREADS=1
+Environment=MALLOC_ARENA_MAX=2
+ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/excel_worker_v624.py --poll-seconds 2
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/qlda /var/log/qlda
+# Protect the 4-vCPU / 8-GB VPS from one Excel job exhausting the web app.
+CPUQuota=250%
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
