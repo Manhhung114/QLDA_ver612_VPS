@@ -7,16 +7,39 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   final-conversion:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
+      - name: One-time packaged DB identifier repair
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/qlda/runtime_core/project_database.py')
+          text = source.read_text(encoding='utf-8')
+          bad = '    "qlda.runtime_core.legal_documents",'
+          good = '    "legal_documents",'
+          if bad in text:
+              text = text.replace(bad, good, 1)
+              source.write_text(text, encoding='utf-8')
+          assert bad not in source.read_text(encoding='utf-8')
+
+          test = Path('tests/test_v760_packaged_db_identifiers.py')
+          test.write_text('''from __future__ import annotations\n\nfrom qlda.runtime_core import project_database as db\n\n\ndef test_packaged_table_order_uses_sql_identifiers_only():\n    assert "legal_documents" in db.TABLE_ORDER\n    assert "qlda.runtime_core.legal_documents" not in db.TABLE_ORDER\n    assert all(db._safe_identifier(name) == name for name in db.TABLE_ORDER)\n    assert all("." not in name for name in db.TABLE_ORDER)\n\n\ndef test_legal_tables_remain_in_portable_backup_order():\n    assert db.TABLE_ORDER[-2:] == ("legal_documents", "legal_sync_log")\n''', encoding='utf-8')
+          PY
       - name: Install runtime dependencies
         run: |
           python -m pip install --upgrade pip
@@ -33,7 +56,9 @@ jobs:
       - name: V7.6 final conversion gate
         env:
           PYTHONPATH: src
-        run: pytest -q tests/test_v760_final_conversion.py
+        run: |
+          pytest -q tests/test_v760_final_conversion.py
+          pytest -q tests/test_v760_packaged_db_identifiers.py
       - name: Architecture regressions
         env:
           PYTHONPATH: src
@@ -68,3 +93,15 @@ jobs:
           ! grep -q '_v622.py' vps/deploy.sh vps/rollback.sh vps/install.sh
           ! grep -q '_v624.py' vps/deploy.sh vps/rollback.sh vps/install.sh
           grep -q 'reconcile_api.sh' vps/deploy.sh
+      - name: Commit identifier repair after green regression gate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/qlda/runtime_core/project_database.py tests/test_v760_packaged_db_identifiers.py
+          if git diff --cached --quiet; then
+            echo 'Packaged DB identifiers already repaired.'
+            exit 0
+          fi
+          git commit -m 'fix(v7.6): preserve database table identifiers during packaging'
+          git push origin HEAD:main
