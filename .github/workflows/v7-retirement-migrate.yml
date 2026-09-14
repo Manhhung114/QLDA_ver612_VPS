@@ -1,5 +1,6 @@
 name: V7 Repository Retirement Migration
 
+# V7-only retirement guard rerun after multiline import cleanup.
 on:
   push:
     branches: [main]
