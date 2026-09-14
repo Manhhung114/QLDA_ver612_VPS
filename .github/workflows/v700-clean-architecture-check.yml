@@ -48,4 +48,10 @@ jobs:
           ! grep -R "qlda.shared.legacy" src/qlda/presentation/api src/qlda/application src/qlda/domain
           ! grep -R "qlda.infrastructure" src/qlda/application src/qlda/domain
           grep -q "qlda.services" src/qlda/infrastructure/legacy_adapters.py
-          test "$(cat VERSION.txt)" = "7.0"
+          PYTHONPATH=src:. python - <<'PY'
+          import qlda
+          version = tuple(int(x) for x in qlda.__version__.split('.')[:2])
+          assert version >= (7, 0), qlda.__version__
+          assert qlda.ARCHITECTURE == 'clean-architecture', qlda.ARCHITECTURE
+          assert qlda.CLEAN_CORE is True
+          PY
