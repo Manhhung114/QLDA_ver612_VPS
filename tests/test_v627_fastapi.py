@@ -49,7 +49,18 @@ class V627FastAPITests(unittest.TestCase):
         import qlda
 
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
-        if version >= (7, 2):
+        if version >= (7, 3):
+            infra = SRC / "qlda" / "infrastructure"
+            for name in (
+                "native_session.py",
+                "native_project_access.py",
+                "native_search.py",
+                "native_ai.py",
+            ):
+                self.assertTrue((infra / name).exists(), name)
+            for name in ("access.py", "ai.py"):
+                self.assertFalse((SRC / "qlda" / "services" / name).exists(), name)
+        elif version >= (7, 2):
             infra = SRC / "qlda" / "infrastructure"
             for name in (
                 "native_session.py",

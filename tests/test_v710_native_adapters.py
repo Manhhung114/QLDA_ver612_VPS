@@ -32,7 +32,13 @@ class V710NativeAdaptersTests(unittest.TestCase):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         self.assertGreaterEqual(version, (7, 1))
         self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
-        if version >= (7, 2):
+        if version >= (7, 3):
+            self.assertEqual(
+                qlda.NATIVE_ADAPTERS,
+                ("sessions", "project-access", "files", "jobs", "search", "ai"),
+            )
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
+        elif version >= (7, 2):
             self.assertEqual(
                 qlda.NATIVE_ADAPTERS,
                 ("sessions", "project-access", "files", "jobs", "search"),
@@ -53,6 +59,8 @@ class V710NativeAdaptersTests(unittest.TestCase):
         names = ["native_session.py", "native_files.py", "native_jobs.py", "native_search.py"]
         if (infrastructure / "native_project_access.py").exists():
             names.append("native_project_access.py")
+        if (infrastructure / "native_ai.py").exists():
+            names.append("native_ai.py")
         for name in names:
             source = (infrastructure / name).read_text(encoding="utf-8")
             imports = imported_modules(source)
@@ -70,7 +78,11 @@ class V710NativeAdaptersTests(unittest.TestCase):
         for retired in ("LegacySessionAdapter", "LegacyFileAdapter", "LegacyJobAdapter", "LegacySearchAdapter"):
             self.assertNotIn(retired, source)
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
-        if version >= (7, 2):
+        if version >= (7, 3):
+            self.assertNotIn("LegacyProjectAccessAdapter", source)
+            self.assertNotIn("LegacyAIAdapter", source)
+            remaining = ("LegacyExcelImportAdapter",)
+        elif version >= (7, 2):
             self.assertNotIn("LegacyProjectAccessAdapter", source)
             remaining = ("LegacyAIAdapter", "LegacyExcelImportAdapter")
         else:
@@ -90,8 +102,9 @@ class V710NativeAdaptersTests(unittest.TestCase):
         self.assertEqual(app.search._port.__class__.__name__, "NativeSearchAdapter")
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         expected_access = "NativeProjectAccessAdapter" if version >= (7, 2) else "LegacyProjectAccessAdapter"
+        expected_ai = "NativeAIAdapter" if version >= (7, 3) else "LegacyAIAdapter"
         self.assertEqual(app.access._port.__class__.__name__, expected_access)
-        self.assertEqual(app.ai._port.__class__.__name__, "LegacyAIAdapter")
+        self.assertEqual(app.ai._port.__class__.__name__, expected_ai)
         self.assertEqual(app.excel._port.__class__.__name__, "LegacyExcelImportAdapter")
 
     def test_job_upload_purpose_remains_v624_wire_compatible(self):

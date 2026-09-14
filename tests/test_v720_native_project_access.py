@@ -27,9 +27,15 @@ class V720NativeProjectAccessTests(unittest.TestCase):
     def test_version_and_adapter_inventory(self):
         import qlda
 
-        self.assertEqual(qlda.__version__, "7.2")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (7, 2))
         self.assertIn("project-access", qlda.NATIVE_ADAPTERS)
-        self.assertEqual(qlda.LEGACY_ADAPTERS, ("ai", "excel"))
+        self.assertNotIn("project-access", qlda.LEGACY_ADAPTERS)
+        if version >= (7, 3):
+            self.assertIn("ai", qlda.NATIVE_ADAPTERS)
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ("excel",))
+        else:
+            self.assertEqual(qlda.LEGACY_ADAPTERS, ("ai", "excel"))
 
     def test_project_access_adapter_is_native_and_import_clean(self):
         path = SRC / "qlda" / "infrastructure" / "native_project_access.py"
@@ -51,15 +57,28 @@ class V720NativeProjectAccessTests(unittest.TestCase):
         app = get_application()
         self.assertEqual(app.access._port.__class__.__name__, "NativeProjectAccessAdapter")
 
-    def test_legacy_adapter_surface_is_only_ai_and_excel(self):
+    def test_legacy_adapter_surface_keeps_project_access_retired(self):
+        import qlda
+
         source = (SRC / "qlda" / "infrastructure" / "legacy_adapters.py").read_text(encoding="utf-8")
         self.assertNotIn("LegacyProjectAccessAdapter", source)
-        self.assertIn("LegacyAIAdapter", source)
-        self.assertIn("LegacyExcelImportAdapter", source)
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 3):
+            self.assertNotIn("LegacyAIAdapter", source)
+            self.assertIn("LegacyExcelImportAdapter", source)
+        else:
+            self.assertIn("LegacyAIAdapter", source)
+            self.assertIn("LegacyExcelImportAdapter", source)
 
     def test_redundant_v626_native_facades_are_removed(self):
+        import qlda
+
         service_root = SRC / "qlda" / "services"
-        for name in ("auth.py", "files.py", "jobs.py", "search.py"):
+        names = ["auth.py", "files.py", "jobs.py", "search.py"]
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 3):
+            names.extend(["access.py", "ai.py"])
+        for name in names:
             self.assertFalse((service_root / name).exists(), name)
 
     def test_required_v621_build_compatibility_is_retained(self):
