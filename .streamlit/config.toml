@@ -17,6 +17,6 @@ level = "warning"
 [theme]
 base = "light"
 primaryColor = "#1D4ED8"
-backgroundColor = "#F7FAFF"
+backgroundColor = "#F4F7FC"
 secondaryBackgroundColor = "#EAF2FF"
-textColor = "#172033"
+textColor = "#14213D"
