@@ -41,7 +41,7 @@ jobs:
       - name: Run architecture boundary tests
         env:
           PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
-        run: python -m unittest -v tests.test_v625_modular_monolith
+        run: python -m unittest discover -s tests -p 'test_v625_modular_monolith.py' -v
       - name: Verify production entrypoints
         run: |
           grep -q 'PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app' vps/qlda.service

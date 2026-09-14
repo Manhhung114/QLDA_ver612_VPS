@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from qlda.runtime import legacy_import
+from qlda.shared.legacy import load_module
 
 
 def _api():
     # V6.25 is intentionally strangler-style: callers move to this stable
     # namespace first; V6.26 can replace internals without changing callers.
-    return legacy_import("excel_jobs_v624")
+    return load_module("excel_jobs_v624")
 
 
 def build_upload_purpose(job_type: str, project_id: int, **options: Any) -> str:

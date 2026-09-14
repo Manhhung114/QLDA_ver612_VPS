@@ -1,13 +1,14 @@
 # CHANGELOG
 
-## V6.25 — Modular Monolith foundation
-- Tạo namespace chuẩn `src/qlda/...` với các boundary `modules`, `infrastructure`, `presentation`, `shared`; bắt đầu loại cấu trúc phẳng theo chiến lược strangler thay vì rewrite toàn bộ một lần.
-- Khai báo module registry cho BOQ, IPC/Claim, VO, Schedule và Excel để cố định ownership/dependency trước khi V6.26 đưa Service Layer vào.
-- Chuyển entrypoint production của Excel worker sang `python -m qlda.modules.excel.worker`; implementation V6.24.5 vẫn được giữ phía sau facade nên không đổi parser, batch PostgreSQL, rollback hay cơ chế xác minh số dòng.
-- Thêm public facade `qlda.modules.excel.jobs` để code mới không phải phụ thuộc trực tiếp vào tên file versioned `excel_jobs_v624.py`.
+## V6.25 — Modular Monolith
+- Tạo namespace chuẩn `src/qlda/...` với các boundary `modules`, `infrastructure`, `presentation`, `shared`; chuyển từ cấu trúc phẳng bằng chiến lược strangler thay vì rewrite toàn bộ một lần.
+- Cố định ownership/dependency cho BOQ, IPC/Claim, VO, Schedule và Excel trong module registry.
+- Bổ sung facade ổn định `qlda.modules.{boq,ipc,vo,schedule}` với boundary `background` và `persistence`; toàn bộ truy cập implementation V6.24 được gom qua `qlda.shared.legacy`.
+- Chuyển entrypoint production của Excel worker sang `python -m qlda.modules.excel.worker`; implementation V6.24.5 vẫn ở phía sau facade nên không đổi parser, batch PostgreSQL, rollback hay cơ chế xác minh số dòng.
+- Bổ sung public facade `qlda.modules.excel.jobs`; code mới không cần phụ thuộc trực tiếp tên file versioned `excel_jobs_v624.py`.
 - Cấu hình `PYTHONPATH` cho Streamlit VPS, Excel worker và Docker để package `src/qlda` dùng thống nhất trên deploy hiện hữu.
-- Giữ nguyên schema PostgreSQL, dữ liệu, quyền, workflow, công thức BOQ/IPC/VO/Tiến độ và toàn bộ compatibility modules V6.22-V6.24.
-- Thêm CI V6.25 kiểm tra package compile, boundary không phụ thuộc Streamlit, module registry và systemd production entrypoint; CI V6.24 vẫn tương thích nhờ marker legacy.
+- Giữ nguyên schema PostgreSQL, dữ liệu, quyền, workflow, công thức BOQ/IPC/VO/Tiến độ, file gốc và toàn bộ compatibility modules V6.22-V6.24.
+- Thêm CI V6.25 kiểm tra compile, lazy facade, legacy gateway, boundary không phụ thuộc Streamlit, module registry và systemd production entrypoint; CI V6.24 vẫn tương thích nhờ marker legacy.
 
 ## V6.24.5 — Schedule Excel Background Worker
 - Tải `.xlsx/.xlsm` tiến độ thẳng xuống SSD VPS, tính SHA theo chunk và quét sheet đầu tiên bằng `read_only=True`; `.xls` cũ tiếp tục dùng luồng tương thích hiện hữu.

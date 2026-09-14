@@ -18,24 +18,28 @@ MODULES: dict[str, ModuleSpec] = {
         package="qlda.modules.boq",
         owns=("BOQ parsing", "BOQ persistence", "BOQ cost components"),
         dependencies=("infrastructure",),
+        migration_state="compatibility-facade",
     ),
     "ipc": ModuleSpec(
         name="ipc",
         package="qlda.modules.ipc",
         owns=("IPC/Claim parsing", "IPC revisions", "IPC persistence"),
         dependencies=("infrastructure",),
+        migration_state="compatibility-facade",
     ),
     "vo": ModuleSpec(
         name="vo",
         package="qlda.modules.vo",
         owns=("VO parsing", "VO revisions", "VO persistence"),
         dependencies=("infrastructure",),
+        migration_state="compatibility-facade",
     ),
     "schedule": ModuleSpec(
         name="schedule",
         package="qlda.modules.schedule",
         owns=("Schedule Excel", "schedule task persistence"),
         dependencies=("infrastructure",),
+        migration_state="compatibility-facade",
     ),
     "excel": ModuleSpec(
         name="excel",
