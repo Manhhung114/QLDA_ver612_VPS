@@ -15,37 +15,30 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-run_as_app() {
-  runuser -u "$RUN_USER" -- "$@"
+run_as_app() { runuser -u "$RUN_USER" -- "$@"; }
+git_app() { run_as_app git -C "$APP_DIR" "$@"; }
+
+local_storage_enabled() {
+  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^QLDA_STORAGE_BACKEND[[:space:]]*=[[:space:]]*local[[:space:]]*$' "$SHARED_DIR/qlda.env"
 }
 
-git_app() {
-  run_as_app git -C "$APP_DIR" "$@"
+postgres_configured() {
+  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^(DATABASE_URL|QLDA_DATABASE_URL|POSTGRES_URL)=' "$SHARED_DIR/qlda.env"
 }
 
-github_ipv4() {
-  getent ahostsv4 github.com 2>/dev/null | awk '$2 == "STREAM" {print $1; exit}'
-}
+excel_background_enabled() { local_storage_enabled && postgres_configured; }
+
+github_ipv4() { getent ahostsv4 github.com 2>/dev/null | awk '$2 == "STREAM" {print $1; exit}'; }
 
 git_fetch_command() {
-  local cmd=(
-    runuser -u "$RUN_USER" --
-    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy
-    git -C "$APP_DIR" -c http.version=HTTP/1.1 -c http.proxy=
-  )
+  local cmd=(runuser -u "$RUN_USER" -- env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy git -C "$APP_DIR" -c http.version=HTTP/1.1 -c http.proxy=)
   cmd+=(fetch --prune origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}")
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "${GIT_FETCH_TIMEOUT}s" "${cmd[@]}"
-  else
-    "${cmd[@]}"
-  fi
+  if command -v timeout >/dev/null 2>&1; then timeout "${GIT_FETCH_TIMEOUT}s" "${cmd[@]}"; else "${cmd[@]}"; fi
 }
 
 fetch_with_temporary_hosts_pin() {
-  local ip="$1"
-  local backup tmp rc=1
-  backup="$(mktemp)"
-  tmp="$(mktemp)"
+  local ip="$1" backup tmp rc=1
+  backup="$(mktemp)"; tmp="$(mktemp)"
   cp /etc/hosts "$backup"
   awk '!($2 == "github.com" || $3 == "github.com") {print}' "$backup" > "$tmp"
   printf '%s\tgithub.com\t# QLDA_TEMP_GITHUB_IPV4\n' "$ip" >> "$tmp"
@@ -62,63 +55,24 @@ fetch_origin_resilient() {
   for attempt in $(seq 1 "$GIT_FETCH_RETRIES"); do
     ip="$(github_ipv4 || true)"
     echo "GitHub fetch attempt ${attempt}/${GIT_FETCH_RETRIES} (HTTP/1.1, proxies disabled)..."
-    if [[ -n "$ip" ]]; then
-      curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" https://github.com/ >/dev/null 2>&1 || echo "Warning: direct GitHub IPv4 HTTPS preflight failed."
-    fi
+    if [[ -n "$ip" ]]; then curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" https://github.com/ >/dev/null 2>&1 || true; fi
     if git_fetch_command; then return 0; fi
-    wait_s=$((attempt * 3))
-    echo "GitHub fetch attempt ${attempt} failed; retrying in ${wait_s}s..." >&2
-    sleep "$wait_s"
+    wait_s=$((attempt * 3)); sleep "$wait_s"
   done
   ip="$(github_ipv4 || true)"
   if [[ -n "$ip" ]] && curl -4 -fsSI --connect-timeout 8 --max-time 15 --resolve "github.com:443:${ip}" https://github.com/ >/dev/null 2>&1; then
     if fetch_with_temporary_hosts_pin "$ip"; then return 0; fi
   fi
   echo "ERROR: VPS cannot fetch GitHub." >&2
-  echo "Diagnostics (no secrets):" >&2
   getent ahostsv4 github.com >&2 || true
-  runuser -u "$RUN_USER" -- env | grep -iE '(^|_)(http|https|all)_proxy=' >&2 || true
-  git_app config --show-origin --get-regexp '^(http|https)\.' >&2 || true
   curl -4 -I --connect-timeout 8 --max-time 15 https://github.com/ >&2 || true
   ip route >&2 || true
   return 1
 }
 
-local_storage_enabled() {
-  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^QLDA_STORAGE_BACKEND[[:space:]]*=[[:space:]]*local[[:space:]]*$' "$SHARED_DIR/qlda.env"
-}
-
-postgres_configured() {
-  [[ -f "$SHARED_DIR/qlda.env" ]] && grep -qE '^(DATABASE_URL|QLDA_DATABASE_URL|POSTGRES_URL)=' "$SHARED_DIR/qlda.env"
-}
-
-excel_background_enabled() {
-  local_storage_enabled && postgres_configured
-}
-
-restart_local_file_service_if_enabled() {
-  if local_storage_enabled; then
-    install -m 0644 "$APP_DIR/vps/qlda-upload.service" /etc/systemd/system/qlda-upload.service
-    systemctl daemon-reload
-    systemctl enable qlda-upload.service >/dev/null 2>&1 || true
-    systemctl restart qlda-upload.service
-  fi
-}
-
-restart_excel_worker_if_enabled() {
-  if excel_background_enabled; then
-    install -m 0644 "$APP_DIR/vps/qlda-excel-worker.service" /etc/systemd/system/qlda-excel-worker.service
-    systemctl daemon-reload
-    systemctl enable qlda-excel-worker.service >/dev/null 2>&1 || true
-    systemctl restart qlda-excel-worker.service
-  fi
-}
-
 ensure_mpp_system_runtime() {
-  if command -v java >/dev/null 2>&1; then
-    return
-  fi
-  echo "Java runtime missing; installing default-jre-headless for Microsoft Project (.mpp) support..."
+  if command -v java >/dev/null 2>&1; then return; fi
+  echo "Installing default-jre-headless for Microsoft Project (.mpp) support..."
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y default-jre-headless
 }
@@ -126,196 +80,91 @@ ensure_mpp_system_runtime() {
 sync_python_dependencies() {
   echo "Synchronizing Python dependencies from requirements.txt..."
   run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
-
-  # Runtime smoke test for modules required by PDF/AI, encrypted Admin settings,
-  # Microsoft Project (.mpp) import and the V6.27 HTTP adapter.
-  run_as_app "$VENV_DIR/bin/python" - <<'PY'
+  run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" - <<'PY'
+import qlda
 from cryptography.fernet import Fernet
 from pypdf import PdfReader, PdfWriter
-import fastapi
-import jpype
-import mpxj
-import mpp_cloud_reader
-import openai
-import uvicorn
+import fastapi, jpype, mpxj, openai, uvicorn
 from google import genai
-print("QLDA runtime OK: Admin/PDF/AI + MPP + FastAPI/Uvicorn")
+from qlda.bootstrap import get_application
+from qlda.runtime_core import mpp_cloud_reader
+assert qlda.__version__ >= "7.6"
+assert qlda.LEGACY_ADAPTERS == ()
+assert qlda.LEGACY_RUNTIME is False
+mpp_cloud_reader._ensure_jvm()
+get_application()
+print("QLDA V7.6 packaged runtime OK")
 PY
+}
+
+install_runtime_units() {
+  install -m 0644 "$APP_DIR/vps/qlda.service" /etc/systemd/system/qlda.service
+  if local_storage_enabled; then install -m 0644 "$APP_DIR/vps/qlda-upload.service" /etc/systemd/system/qlda-upload.service; fi
+  if excel_background_enabled; then
+    install -m 0644 "$APP_DIR/vps/qlda-excel-worker.service" /etc/systemd/system/qlda-excel-worker.service
+    install -m 0644 "$APP_DIR/vps/qlda-api.service" /etc/systemd/system/qlda-api.service
+  fi
+  systemctl daemon-reload
+}
+
+restart_optional_services() {
+  if local_storage_enabled; then systemctl enable qlda-upload.service >/dev/null 2>&1 || true; systemctl restart qlda-upload.service; fi
+  if excel_background_enabled; then
+    systemctl enable qlda-excel-worker.service >/dev/null 2>&1 || true
+    systemctl restart qlda-excel-worker.service
+    bash "$APP_DIR/vps/reconcile_api.sh"
+  fi
 }
 
 mkdir -p "$SHARED_DIR"
 cd "$APP_DIR"
-
 fetch_origin_resilient
 OLD_COMMIT="$(git_app rev-parse HEAD)"
 REMOTE_REF="refs/remotes/origin/${BRANCH}"
-if ! git_app show-ref --verify --quiet "$REMOTE_REF"; then
-  echo "ERROR: fetch completed but $REMOTE_REF does not exist." >&2
-  exit 1
-fi
+if ! git_app show-ref --verify --quiet "$REMOTE_REF"; then echo "ERROR: $REMOTE_REF does not exist." >&2; exit 1; fi
 NEW_COMMIT="$(git_app rev-parse --verify "${REMOTE_REF}^{commit}")"
+CODE_CHANGED=0
+if [[ "$OLD_COMMIT" != "$NEW_COMMIT" ]]; then
+  CODE_CHANGED=1
+  printf '%s\n' "$OLD_COMMIT" > "$SHARED_DIR/previous_commit"
+  chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/previous_commit"
+  git_app reset --hard "$NEW_COMMIT"
+fi
 
 echo "Local HEAD : $OLD_COMMIT"
 echo "Remote HEAD: $NEW_COMMIT"
 
-CODE_CHANGED=0
-if [[ "$OLD_COMMIT" != "$NEW_COMMIT" ]]; then
-  CODE_CHANGED=1
-  echo "$OLD_COMMIT" > "$SHARED_DIR/previous_commit"
-  chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/previous_commit"
-  git_app reset --hard "$NEW_COMMIT"
-else
-  echo "Source already up to date; repairing/verifying runtime dependencies."
-fi
-
 ensure_mpp_system_runtime
 sync_python_dependencies
-
-run_as_app "$VENV_DIR/bin/python" -m py_compile \
-  "$APP_DIR/streamlit_app.py" \
-  "$APP_DIR/mpp_cloud_reader.py" \
-  "$APP_DIR/settings_store.py" \
-  "$APP_DIR/system_settings_v622.py" \
-  "$APP_DIR/runtime_settings_bridge_v622.py" \
-  "$APP_DIR/build_v621_webopt.py" \
-  "$APP_DIR/v622_auth_refresh_v4.py" \
-  "$APP_DIR/single_session_v622.py" \
-  "$APP_DIR/v622_single_session_patch.py" \
-  "$APP_DIR/v622_schedule_management_patch.py" \
-  "$APP_DIR/original_import_storage_v622.py" \
-  "$APP_DIR/v622_original_import_patch.py" \
-  "$APP_DIR/local_file_server_single_session_v622.py" \
-  "$APP_DIR/contractor_workspace_v622.py" \
-  "$APP_DIR/contractor_sidebar_admin_v622.py" \
-  "$APP_DIR/contractor_access_control_v622.py" \
-  "$APP_DIR/contractor_ai_context_v622.py" \
-  "$APP_DIR/v622_contractor_workspace_patch.py" \
-  "$APP_DIR/v622_contractor_access_patch.py" \
-  "$APP_DIR/v622_contractor_sidebar_patch.py" \
-  "$APP_DIR/v622_boq_multisheet_patch.py" \
-  "$APP_DIR/boq_multisheet_v622.py" \
-  "$APP_DIR/boq_cost_components_v622.py" \
-  "$APP_DIR/boq_claim_terms_v622.py" \
-  "$APP_DIR/boq_claim_price_recovery_v622.py" \
-  "$APP_DIR/boq_claim_price_header_guard_v622.py" \
-  "$APP_DIR/boq_ai_fullscan_v622.py" \
-  "$APP_DIR/boq_persistence_v622.py" \
-  "$APP_DIR/v622_ipc_claim_patch.py" \
-  "$APP_DIR/ipc_claim_v622.py" \
-  "$APP_DIR/ipc_claim_fast_v622.py" \
-  "$APP_DIR/ipc_claim_summary_fix_v622.py" \
-  "$APP_DIR/ipc_adaptive_parser_v622.py" \
-  "$APP_DIR/ipc_payment_semantic_v622.py" \
-  "$APP_DIR/ipc_claim_number_fix_v622.py" \
-  "$APP_DIR/ipc_claim_period_v622.py" \
-  "$APP_DIR/ipc_claim_delete_v622.py" \
-  "$APP_DIR/claim_component_fullscan_v622.py" \
-  "$APP_DIR/claim_material_period_guard_v622.py" \
-  "$APP_DIR/project_remaining_components_v622.py" \
-  "$APP_DIR/multicore_excel_v622.py" \
-  "$APP_DIR/v622_vo_claim_patch.py" \
-  "$APP_DIR/vo_claim_v622.py" \
-  "$APP_DIR/vo_independent_v622.py" \
-  "$APP_DIR/v622_report_cost_patch.py" \
-  "$APP_DIR/report_cost_v622.py" \
-  "$APP_DIR/gemini_resilience_v622.py" \
-  "$APP_DIR/ai_live_context_v622.py" \
-  "$APP_DIR/ai_claim_context_v622.py" \
-  "$APP_DIR/ai_vo_context_v622.py" \
-  "$APP_DIR/contract_management_v622.py" \
-  "$APP_DIR/contract_duration_v622.py" \
-  "$APP_DIR/contract_ai_large_pdf_v622.py" \
-  "$APP_DIR/contract_ai_deep_scan_v622.py" \
-  "$APP_DIR/postgres_backend_v622.py" \
-  "$APP_DIR/vps_postgres_resilience.py" \
-  "$APP_DIR/streamlit_secrets_v622.py" \
-  "$APP_DIR/drive_gateway.py" \
-  "$APP_DIR/local_vps_backend_v622.py" \
-  "$APP_DIR/local_file_server_v622.py" \
-  "$APP_DIR/local_vps_runtime_fix_v622.py" \
-  "$APP_DIR/v622_local_vps_patch.py" \
-  "$APP_DIR/excel_jobs_v624.py" \
-  "$APP_DIR/excel_worker_v624.py" \
-  "$APP_DIR/boq_background_v624.py" \
-  "$APP_DIR/boq_persist_v624.py" \
-  "$APP_DIR/excel_background_v624.py" \
-  "$APP_DIR/local_file_server_background.py" \
-  "$APP_DIR/v624_excel_background_patch.py" \
-  "$APP_DIR/excel_jobs.py" \
-  "$APP_DIR/excel_worker.py"
-
-run_as_app env PYTHONPATH="$APP_DIR/src:$APP_DIR" "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
-
-run_as_app "$VENV_DIR/bin/python" - <<'PY'
-from multicore_excel_v622 import runtime_config
-cfg = runtime_config()
-print("QLDA multicore:", cfg)
-assert cfg["cpu_count"] >= 1
-assert cfg["child_workers"] >= 1
-PY
-
-restart_local_file_service_if_enabled
-restart_excel_worker_if_enabled
-
-API_RECONCILE_OK=1
-if excel_background_enabled; then
-  if ! bash "$APP_DIR/vps/reconcile_api_v627.sh"; then
-    echo "FastAPI reconcile failed; deployment will be rolled back after health checks." >&2
-    API_RECONCILE_OK=0
-  fi
-fi
-
+run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
+run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m py_compile \
+  "$APP_DIR/src/qlda/presentation/streamlit/app.py" \
+  "$APP_DIR/src/qlda/presentation/api/app.py" \
+  "$APP_DIR/src/qlda/modules/excel/worker.py"
+install_runtime_units
+restart_optional_services
+systemctl enable "$SERVICE" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE"
 
 ok=0
 for _ in $(seq 1 30); do
-  if "$APP_DIR/vps/healthcheck.sh" >/dev/null 2>&1; then
-    ok=1
-    break
-  fi
+  if "$APP_DIR/vps/healthcheck.sh" >/dev/null 2>&1; then ok=1; break; fi
   sleep 2
 done
-
-if [[ "$ok" -eq 1 ]] && local_storage_enabled; then
-  if ! curl -fsS http://127.0.0.1:8502/health >/dev/null 2>&1; then
-    echo "Local file service health check failed." >&2
-    ok=0
-  fi
-fi
-
+if [[ "$ok" -eq 1 ]] && local_storage_enabled && ! curl -fsS http://127.0.0.1:8502/health >/dev/null 2>&1; then ok=0; fi
 if [[ "$ok" -eq 1 ]] && excel_background_enabled; then
-  if ! systemctl is-active --quiet qlda-excel-worker.service; then
-    echo "Excel background worker is not active." >&2
-    systemctl --no-pager -l status qlda-excel-worker.service || true
-    ok=0
-  fi
-  if [[ "$API_RECONCILE_OK" -ne 1 ]] || ! curl -fsS http://127.0.0.1:8001/api/health >/dev/null 2>&1; then
-    echo "FastAPI service health check failed." >&2
-    systemctl --no-pager -l status qlda-api.service || true
-    ok=0
-  fi
+  systemctl is-active --quiet qlda-excel-worker.service || ok=0
+  curl -fsS http://127.0.0.1:8001/api/health >/dev/null 2>&1 || ok=0
 fi
 
 if [[ "$ok" -eq 1 ]]; then
-  if [[ "$CODE_CHANGED" -eq 1 ]]; then
-    echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
-  else
-    echo "Deploy/repair OK: source already at $NEW_COMMIT; dependencies verified."
-  fi
+  echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
   exit 0
 fi
 
 echo "Health check failed." >&2
 if [[ "$CODE_CHANGED" -eq 1 ]]; then
   echo "Rolling back to $OLD_COMMIT" >&2
-  git_app reset --hard "$OLD_COMMIT"
-  systemctl stop qlda-api.service >/dev/null 2>&1 || true
-  ensure_mpp_system_runtime
-  sync_python_dependencies
-  restart_local_file_service_if_enabled || true
-  restart_excel_worker_if_enabled || true
-  systemctl restart "$SERVICE"
-  sleep 3
-  "$APP_DIR/vps/healthcheck.sh"
+  bash "$APP_DIR/vps/rollback.sh" || true
 fi
 exit 1
