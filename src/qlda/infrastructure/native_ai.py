@@ -1,86 +1,26 @@
 from __future__ import annotations
 
-"""Native V7.3 AI infrastructure adapter.
+"""V7.6 native AI infrastructure adapter.
 
-The clean application boundary talks directly to this adapter. The adapter owns
-provider selection, AI runtime bootstrap, workspace scoping and domain error
-translation. Proven root-level AI/context engines are loaded lazily as
-compatibility engines; the deprecated ``qlda.services.ai`` and
-``qlda.services.access`` facades are no longer part of the runtime path.
+AI provider selection, workspace scoping and domain error translation are handled
+through packaged production modules under ``src/qlda``. There is no repository-root
+loader, qlda.runtime dependency or versioned module lookup in this adapter.
 """
 
 import os
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from threading import Lock
 from typing import Any, Sequence
 
 from qlda.domain.errors import AIApplicationError
-from qlda.runtime import legacy_import
-
-_BOOTSTRAP_LOCK = Lock()
-_BOOTSTRAPPED = False
-
-_AI_INSTALLERS = (
-    ("runtime_settings_bridge_v622", "install_runtime_settings_bridge"),
-    ("gemini_resilience_v622", "install_gemini_resilience"),
-    ("ai_live_context_v622", "install_ai_live_context"),
-    ("ai_claim_context_v622", "install_ai_claim_context"),
-    ("ai_vo_context_v622", "install_ai_vo_context"),
-    ("boq_cost_components_v622", "install_boq_cost_components"),
-    ("boq_claim_terms_v622", "install_boq_claim_terms"),
-    ("boq_claim_price_recovery_v622", "install_boq_claim_price_recovery"),
-    ("boq_claim_price_header_guard_v622", "install_boq_claim_price_header_guard"),
-    ("boq_ai_fullscan_v622", "install_boq_ai_fullscan"),
-    ("claim_component_fullscan_v622", "install_claim_component_fullscan"),
-    ("claim_material_period_guard_v622", "install_claim_material_period_guard"),
-    ("project_remaining_components_v622", "install_project_remaining_components"),
-)
-
-
-def _compat(module_name: str):
-    """Load one proven AI/runtime engine lazily from the repository root."""
-    return legacy_import(module_name)
-
-
-def _bootstrap_ai_runtime() -> None:
-    """Install the non-UI AI compatibility stack exactly once per process."""
-    global _BOOTSTRAPPED
-    if _BOOTSTRAPPED:
-        return
-    with _BOOTSTRAP_LOCK:
-        if _BOOTSTRAPPED:
-            return
-
-        # Preserve the proven PostgreSQL-backed CloudDatabase compatibility
-        # runtime used by the existing AI context builders. This happens only on
-        # the first AI call, never while composing/importing the application.
-        from qlda.infrastructure.database import make_database
-
-        make_database()
-
-        workspace = _compat("contractor_workspace_v622")
-        access = _compat("contractor_access_control_v622")
-        guard = _compat("default_workspace_admin_guard_v622")
-        workspace.install_contractor_workspace()
-        access.install_contractor_access_control()
-        guard.install_default_workspace_admin_guard()
-
-        for module_name, function_name in _AI_INSTALLERS:
-            getattr(_compat(module_name), function_name)()
-
-        # The order is intentional: capture the single-workspace methods before
-        # the project-wide aggregate context patch, then apply the ContextVar
-        # access guard last so contractor requests cannot leak other workspaces.
-        access.capture_single_contractor_ai_context()
-        _compat("contractor_ai_context_v622").install_contractor_ai_context()
-        access.install_ai_access_guard()
-        _BOOTSTRAPPED = True
+from qlda.runtime_core import ai_service as engine
+from qlda.runtime_core import contractor_access_control as access
+from qlda.runtime_core.bootstrap import initialize_ai_runtime
 
 
 class NativeAIAdapter:
-    """AIPort implementation with no dependency on ``qlda.services``."""
+    """AIPort implementation backed by packaged OpenAI/Gemini engines."""
 
     @staticmethod
     def _db_label() -> Path:
@@ -102,8 +42,7 @@ class NativeAIAdapter:
 
     @classmethod
     def _assistant(cls, provider: str):
-        _bootstrap_ai_runtime()
-        engine = _compat("ai_service")
+        initialize_ai_runtime()
         value = str(provider or "openai").strip().lower()
         if value in {"openai", "gpt"}:
             return engine.OpenAIProjectAssistant(cls._db_label())
@@ -114,7 +53,6 @@ class NativeAIAdapter:
     @staticmethod
     @contextmanager
     def _scope(workspace_scope: int | None):
-        access = _compat("contractor_access_control_v622")
         access.set_ai_workspace_scope(workspace_scope)
         try:
             yield
@@ -131,7 +69,6 @@ class NativeAIAdapter:
         **kwargs: Any,
     ):
         assistant = cls._assistant(provider)
-        engine = _compat("ai_service")
         try:
             with cls._scope(workspace_scope):
                 return getattr(assistant, method)(*args, **kwargs)
