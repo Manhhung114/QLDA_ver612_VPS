@@ -45,9 +45,23 @@ class V627FastAPITests(unittest.TestCase):
         self.assertNotIn("_v622", source)
         self.assertNotIn("_v624", source)
 
-    def test_service_boundaries_exist(self):
-        for name in ("auth.py", "access.py", "ai.py", "search.py"):
-            self.assertTrue((SRC / "qlda" / "services" / name).exists(), name)
+    def test_service_boundaries_exist_or_are_native(self):
+        import qlda
+
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 2):
+            infra = SRC / "qlda" / "infrastructure"
+            for name in (
+                "native_session.py",
+                "native_project_access.py",
+                "native_search.py",
+            ):
+                self.assertTrue((infra / name).exists(), name)
+            for name in ("access.py", "ai.py"):
+                self.assertTrue((SRC / "qlda" / "services" / name).exists(), name)
+        else:
+            for name in ("auth.py", "access.py", "ai.py", "search.py"):
+                self.assertTrue((SRC / "qlda" / "services" / name).exists(), name)
         self.assertTrue((SRC / "qlda" / "domain" / "ports.py").exists())
         self.assertTrue((SRC / "qlda" / "application" / "services.py").exists())
 

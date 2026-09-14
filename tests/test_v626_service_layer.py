@@ -15,9 +15,7 @@ from qlda.modules.excel import worker
 from qlda.services import (
     BOQService,
     ExcelImportService,
-    FileService,
     IPCService,
-    JobService,
     ScheduleService,
     VOService,
 )
@@ -48,19 +46,24 @@ class ServiceLayerV626Tests(unittest.TestCase):
             self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
             self.assertEqual(qlda.SERVICE_LAYER, "application-services")
 
-    def test_public_services_are_available(self):
+    def test_public_compatibility_services_are_available(self):
         for service in (
             BOQService,
             IPCService,
             VOService,
             ScheduleService,
             ExcelImportService,
-            FileService,
-            JobService,
         ):
             self.assertTrue(service)
         self.assertTrue(callable(make_database))
         self.assertTrue(callable(worker.main))
+
+    def test_native_v7_facades_are_not_duplicated_in_services(self):
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 2):
+            service_root = SRC / "qlda" / "services"
+            for name in ("auth.py", "files.py", "jobs.py", "search.py"):
+                self.assertFalse((service_root / name).exists(), name)
 
     def test_importing_services_does_not_eager_load_legacy_implementations(self):
         legacy = {
@@ -118,8 +121,6 @@ class ServiceLayerV626Tests(unittest.TestCase):
             self.assertNotIn("from qlda.infrastructure", source)
         else:
             self.assertIn("ExcelImportService", source)
-            self.assertIn("FileService", source)
-            self.assertIn("JobService", source)
         for forbidden in (
             "excel_worker_v624",
             "boq_background_v624",

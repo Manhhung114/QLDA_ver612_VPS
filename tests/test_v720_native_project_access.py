@@ -57,11 +57,22 @@ class V720NativeProjectAccessTests(unittest.TestCase):
         self.assertIn("LegacyAIAdapter", source)
         self.assertIn("LegacyExcelImportAdapter", source)
 
-    def test_v621_build_artifacts_are_removed_but_runtime_regression_is_kept(self):
-        self.assertFalse((ROOT / "build_v621_webopt.py").exists())
-        self.assertFalse((ROOT / "v621_webopt_source").exists())
+    def test_redundant_v626_native_facades_are_removed(self):
+        service_root = SRC / "qlda" / "services"
+        for name in ("auth.py", "files.py", "jobs.py", "search.py"):
+            self.assertFalse((service_root / name).exists(), name)
+
+    def test_required_v621_build_compatibility_is_retained(self):
+        self.assertTrue((ROOT / "build_v621_webopt.py").exists())
+        source_dir = ROOT / "v621_webopt_source"
+        self.assertTrue(source_dir.exists())
+        self.assertEqual(len(list(source_dir.glob("part_*.b64"))), 9)
         self.assertTrue((ROOT / "v621_webopt_runtime.py").exists())
         self.assertTrue((ROOT / "tests" / "test_v621_webopt_runtime.py").exists())
+
+    def test_generated_outputs_are_not_committed(self):
+        self.assertFalse((ROOT / "dist").exists())
+        self.assertFalse((ROOT / "__pycache__").exists())
 
     def test_fastapi_contract_is_unchanged(self):
         from qlda.presentation.api.app import app
