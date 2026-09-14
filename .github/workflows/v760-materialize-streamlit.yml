@@ -1,0 +1,44 @@
+name: V7.6 Materialize Native Streamlit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/materialize_v760_streamlit.py'
+      - 'v621_webopt_source/**'
+      - 'build_v621_webopt.py'
+      - 'v622_*_patch.py'
+      - 'v624_excel_background_patch.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Materialize current production Streamlit source
+        run: python tools/materialize_v760_streamlit.py
+      - name: Verify static source
+        run: |
+          python -m py_compile src/qlda/presentation/streamlit/materialized_app.py
+          ! grep -q 'exec(_compiled_vps_app' src/qlda/presentation/streamlit/materialized_app.py
+          test -s docs/architecture/V7.6_MATERIALIZED_STREAMLIT_IMPORTS.txt
+      - name: Commit materialized source
+        run: |
+          if git diff --quiet -- src/qlda/presentation/streamlit docs/architecture/V7.6_MATERIALIZED_STREAMLIT_IMPORTS.txt; then
+            echo 'No materialized changes.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/qlda/presentation/streamlit docs/architecture/V7.6_MATERIALIZED_STREAMLIT_IMPORTS.txt
+          git commit -m 'build(v7.6): materialize Streamlit runtime source'
+          git push origin HEAD:main
