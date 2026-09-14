@@ -1,0 +1,51 @@
+name: V7 Native Regression
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install Java runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends default-jre-headless
+      - name: Install locked dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+      - name: Compile V7 package and tests
+        run: python -m compileall -q src/qlda tests
+      - name: Enforce V7-only repository contract
+        run: python -m unittest tests.test_v7_repository_contract -v
+      - name: Run full native regression suite
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Application smoke test
+        run: |
+          python - <<'PY'
+          import qlda
+          from qlda.bootstrap import get_application
+          from qlda.presentation.api.app import app
+
+          assert qlda.__version__ == '7.6', qlda.__version__
+          assert qlda.LEGACY_ADAPTERS == (), qlda.LEGACY_ADAPTERS
+          assert qlda.LEGACY_RUNTIME is False
+          services = get_application()
+          assert services.excel is not None
+          assert services.ai is not None
+          assert services.files is not None
+          assert services.jobs is not None
+          paths = set(app.openapi().get('paths', {}))
+          assert '/api/health' in paths
+          assert '/api/v1/ai/ask' in paths
+          print('V7 native application smoke OK')
+          PY

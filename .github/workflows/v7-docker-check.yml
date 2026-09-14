@@ -1,0 +1,32 @@
+name: V7 Docker Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'requirements.lock'
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/v7-docker-check.yml'
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build V7 image
+        run: docker build -t qlda-v7 .
+      - name: Verify non-root packaged runtime
+        run: |
+          test "$(docker image inspect qlda-v7 --format '{{.Config.User}}')" = "qlda"
+          docker image inspect qlda-v7 --format '{{json .Config.Cmd}}' | grep -Fq 'src/qlda/presentation/streamlit/app.py'
+          docker run --rm --entrypoint python qlda-v7 - <<'PY'
+          import qlda
+          assert qlda.__version__ == '7.6', qlda.__version__
+          assert qlda.LEGACY_ADAPTERS == (), qlda.LEGACY_ADAPTERS
+          assert qlda.LEGACY_RUNTIME is False
+          print('V7 Docker packaged runtime OK')
+          PY

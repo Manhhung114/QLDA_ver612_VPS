@@ -78,8 +78,8 @@ ensure_mpp_system_runtime() {
 }
 
 sync_python_dependencies() {
-  echo "Synchronizing Python dependencies from requirements.txt..."
-  run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
+  echo "Synchronizing Python dependencies from requirements.lock..."
+  run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.lock"
   run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" - <<'PY'
 import qlda
 from cryptography.fernet import Fernet

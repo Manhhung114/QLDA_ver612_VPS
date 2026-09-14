@@ -45,7 +45,7 @@ chown -R "$RUN_USER:$RUN_USER" "$APP_ROOT" /var/log/qlda
 find "$DATA_DIR" -type d -exec chmod 750 {} +
 
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install --upgrade pip wheel setuptools
-runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
+runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install -r "$APP_DIR/requirements.lock"
 
 # V7.6 final-conversion preflight. A fresh VPS must never start through a root
 # compatibility entrypoint or a legacy adapter.
