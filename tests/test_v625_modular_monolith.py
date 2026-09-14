@@ -11,17 +11,18 @@ if str(SRC) not in sys.path:
 
 import qlda
 from qlda.module_registry import MODULES, module_names
-from qlda.runtime import REPO_ROOT, ensure_repo_root_on_path
 
 
 class ModularMonolithV625Tests(unittest.TestCase):
     def test_package_version_and_repo_root(self):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         self.assertGreaterEqual(version, (6, 25))
-        self.assertEqual(REPO_ROOT, ROOT)
-        self.assertEqual(ensure_repo_root_on_path(), ROOT)
+        self.assertTrue((ROOT / "src" / "qlda").is_dir())
         if version >= (7, 0):
             self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
+        if version >= (7, 6):
+            self.assertFalse((SRC / "qlda" / "runtime.py").exists())
+            self.assertFalse(qlda.LEGACY_RUNTIME)
 
     def test_business_boundaries_registered(self):
         self.assertEqual(module_names(), tuple(MODULES))
@@ -46,17 +47,21 @@ class ModularMonolithV625Tests(unittest.TestCase):
         self.assertFalse((modules_root / "excel" / "jobs.py").exists())
         self.assertTrue((modules_root / "excel" / "worker.py").exists())
 
-    def test_core_package_has_no_streamlit_dependency(self):
-        for path in (SRC / "qlda").rglob("*.py"):
-            if "presentation" in path.parts:
-                continue
-            source = path.read_text(encoding="utf-8")
-            self.assertNotIn("import streamlit", source, str(path))
-            self.assertNotIn("from streamlit", source, str(path))
+    def test_clean_core_has_no_streamlit_dependency(self):
+        for layer in ("domain", "application", "infrastructure"):
+            for path in (SRC / "qlda" / layer).rglob("*.py"):
+                source = path.read_text(encoding="utf-8")
+                self.assertNotIn("import streamlit", source, str(path))
+                self.assertNotIn("from streamlit", source, str(path))
 
-    def test_worker_systemd_uses_modular_entrypoint(self):
+    def test_worker_systemd_uses_packaged_entrypoint(self):
         service = (ROOT / "vps" / "qlda-excel-worker.service").read_text(encoding="utf-8")
-        self.assertIn("PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app", service)
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 6):
+            self.assertIn("PYTHONPATH=/opt/qlda/app/src", service)
+            self.assertNotIn("PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app", service)
+        else:
+            self.assertIn("PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app", service)
         self.assertIn("-m qlda.modules.excel.worker --poll-seconds 2", service)
 
 
