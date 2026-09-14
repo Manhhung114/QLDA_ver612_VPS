@@ -1,5 +1,5 @@
 [Unit]
-Description=QLDA V6.24.2 Local File Upload + Excel Queue Service
+Description=QLDA V7.6 Local File Upload + Excel Queue Service
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -11,11 +11,10 @@ WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
-# ProtectHome=true intentionally hides /home/qlda. Point HOME/settings at the
-# shared writable tree so settings_store never probes the protected legacy home.
+Environment=PYTHONPATH=/opt/qlda/app/src
 Environment=HOME=/opt/qlda/shared
 Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
-ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_background.py --host 127.0.0.1 --port 8502
+ExecStart=/opt/qlda/venv/bin/python -m qlda.presentation.upload_server --host 127.0.0.1 --port 8502
 Restart=always
 RestartSec=3
 TimeoutStopSec=30
@@ -24,8 +23,6 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-# Admin may choose another data/trash folder, but system_settings_v622 restricts
-# it to /opt/qlda. Keep the whole QLDA tree writable for those approved paths.
 ReadWritePaths=/opt/qlda /var/log/qlda
 
 [Install]
