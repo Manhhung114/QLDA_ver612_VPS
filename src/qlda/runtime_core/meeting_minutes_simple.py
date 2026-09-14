@@ -188,7 +188,7 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
     )
     record = db.document(selected) if selected else None
 
-    with st.expander("📝 Lưu / chỉnh sửa biên bản họp", expanded=(selected is None)):
+    with st.expander("📝 Thêm / sửa biên bản họp", expanded=(selected is None)):
         with st.form(f"meeting_minutes_form_{pid}_{selected or 'new'}"):
             c1, c2, c3 = st.columns([1.0, 2.2, 1.15])
             code = c1.text_input("Mã biên bản", value=str(_row(record, "code", "")) if record else _next_code(rows))
@@ -204,17 +204,22 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
             response = st.text_area("Kết luận / Công việc sau họp", value=str(_row(record, "response", "")), height=180)
             note = st.text_area("Ghi chú", value=str(_row(record, "note", "")), height=90)
 
-            save_clicked = st.form_submit_button("💾 Lưu biên bản", type="primary", disabled=not can_update, width="stretch")
-            if save_clicked:
+            attach_clicked = st.form_submit_button(
+                "📎 Đính kèm file",
+                disabled=not can_update,
+                width="stretch",
+            )
+            if attach_clicked:
                 if not subject.strip() or not description.strip():
                     st.error("Tên cuộc họp và Nội dung biên bản là bắt buộc.")
                 else:
                     try:
+                        effective_code = code.strip() or _next_code(rows)
                         saved_id = db.save_document(
                             pid,
                             DOC_TYPE,
                             {
-                                "code": code.strip() or _next_code(rows),
+                                "code": effective_code,
                                 "subject": subject.strip(),
                                 "discipline": "",
                                 "contractor": contractor.strip(),
@@ -235,26 +240,30 @@ def render_meeting_minutes_simple(st, app_globals: dict[str, Any], pid: int) -> 
                             selected,
                         )
                         st.session_state[select_key] = int(saved_id)
-                        st.success("Đã lưu biên bản họp.")
-                        st.rerun()
+
+                        upload_fn = app_globals.get("_prepare_inline_upload_ticket")
+                        if not callable(upload_fn):
+                            st.error("Chức năng đính kèm file chưa sẵn sàng.")
+                        else:
+                            panel_key = f"meeting_minutes_files_{pid}_{saved_id}"
+                            st.session_state.pop(panel_key + "_ticket", None)
+                            st.session_state.pop(panel_key + "_upload_open", None)
+                            upload_fn(
+                                pid,
+                                kind="document",
+                                subtype=DOC_TYPE,
+                                record_code=effective_code,
+                                panel_key=panel_key,
+                            )
+                            st.rerun()
                     except Exception as exc:
-                        st.error(f"Không lưu được biên bản: {exc}")
+                        st.error(f"Chưa mở được vùng đính kèm file: {exc}")
 
     if selected:
         current = db.document(selected)
         if current:
-            upload_fn = app_globals.get("_prepare_inline_upload_ticket")
             render_files_fn = app_globals.get("_render_inline_drive_attachments")
             panel_key = f"meeting_minutes_files_{pid}_{selected}"
-            if can_update and st.button("📎 Thêm / cập nhật file biên bản", key=f"meeting_minutes_attach_{pid}_{selected}"):
-                if callable(upload_fn):
-                    try:
-                        st.session_state.pop(panel_key + "_ticket", None)
-                        st.session_state.pop(panel_key + "_upload_open", None)
-                        upload_fn(pid, kind="document", subtype=DOC_TYPE, record_code=str(_row(current, "code", "")), panel_key=panel_key)
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Chưa mở được vùng đính kèm file: {exc}")
             if callable(render_files_fn):
                 render_files_fn(
                     pid,
