@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-import ipc_claim_v622 as ipc
-from ipc_claim_number_fix_v622 import _apply_filename_identity, claim_no_from_filename
+from qlda.runtime_core import ipc_claim as ipc
+from qlda.runtime_core.ipc_claim_number_fix import _apply_filename_identity, claim_no_from_filename
 
 
 class IPCClaimNumberTests(unittest.TestCase):
@@ -36,6 +36,9 @@ class IPCClaimNumberTests(unittest.TestCase):
         self.assertEqual(fixed["claim_no"], "3")
         self.assertEqual(fixed["claim_code"], "IPC-03")
         self.assertEqual(fixed["warnings"], [])
+
+    def test_packaged_parser_contract_remains_available(self):
+        self.assertTrue(callable(ipc.parse_ipc_workbook))
 
 
 if __name__ == "__main__":

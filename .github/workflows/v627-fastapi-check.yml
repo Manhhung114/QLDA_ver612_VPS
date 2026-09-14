@@ -9,7 +9,7 @@ on:
       - "requirements.txt"
       - "VERSION.txt"
       - "vps/qlda-api.service"
-      - "vps/reconcile_api_v627.sh"
+      - "vps/reconcile_api.sh"
       - "vps/nginx.conf.template"
       - ".github/workflows/v627-fastapi-check.yml"
   pull_request:
@@ -19,7 +19,7 @@ on:
       - "requirements.txt"
       - "VERSION.txt"
       - "vps/qlda-api.service"
-      - "vps/reconcile_api_v627.sh"
+      - "vps/reconcile_api.sh"
       - "vps/nginx.conf.template"
       - ".github/workflows/v627-fastapi-check.yml"
 
@@ -41,4 +41,4 @@ jobs:
         run: |
           grep -q "qlda.presentation.api.app:app" vps/qlda-api.service
           grep -q "location /api/" vps/nginx.conf.template
-          grep -q "/api/health" vps/reconcile_api_v627.sh
+          grep -q "/api/health" vps/reconcile_api.sh

@@ -13,15 +13,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install dependencies
+      - name: Install parser dependencies
+        run: python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
+      - name: Compile packaged IPC number modules
+        env:
+          PYTHONPATH: src
         run: |
-          python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
-      - name: Compile Claim number guard
+          python -m py_compile \
+            src/qlda/runtime_core/ipc_claim.py \
+            src/qlda/runtime_core/ipc_claim_number_fix.py
+      - name: Test IPC claim number behavior
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_ipc_claim_number_v622 -v
+      - name: Validate V7.6 packaged wiring
         run: |
-          python -m py_compile ipc_claim_v622.py ipc_claim_number_fix_v622.py streamlit_app.py
-      - name: Test Claim number detection
-        run: |
-          python -m unittest tests.test_ipc_claim_number_v622 -v
-          grep -Fq 'V6.22 IPC CLAIM NUMBER V4' ipc_claim_number_fix_v622.py
-          grep -Fq 'install_ipc_claim_number_fix()' streamlit_app.py
-          grep -Fq 'ipc_claim_number_fix_v622.py' vps/deploy.sh
+          grep -Fq 'V6.22 IPC CLAIM NUMBER V4' src/qlda/runtime_core/ipc_claim_number_fix.py
+          grep -Fq 'qlda.runtime_core.ipc_claim' src/qlda/runtime_core/ipc_claim_number_fix.py
+          grep -Fq 'src/qlda/presentation/streamlit/app.py' vps/qlda.service
+          ! grep -Fq 'ipc_claim_number_fix_v622.py' vps/deploy.sh

@@ -26,8 +26,8 @@ def imports_of(path: Path) -> set[str]:
 class V750NativeImportEnginesTests(unittest.TestCase):
     def test_version_and_import_engine_marker(self):
         import qlda
-
-        self.assertEqual(qlda.__version__, "7.5")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (7, 5))
         self.assertEqual(qlda.IMPORT_ENGINE_LAYER, "native-packaged")
         self.assertEqual(qlda.LEGACY_ADAPTERS, ())
 
@@ -82,14 +82,16 @@ class V750NativeImportEnginesTests(unittest.TestCase):
         self.assertIn("SOURCE_PREFIX + \"%\"", source)
 
     def test_worker_marker_and_entrypoint(self):
+        import qlda
         worker = (SRC / "qlda" / "modules" / "excel" / "worker.py").read_text(encoding="utf-8")
         service = (ROOT / "vps" / "qlda-excel-worker.service").read_text(encoding="utf-8")
-        self.assertIn("V7.5 NATIVE IMPORT ENGINE WORKER", worker)
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        marker = "V7.6 PACKAGED NATIVE IMPORT WORKER" if version >= (7, 6) else "V7.5 NATIVE IMPORT ENGINE WORKER"
+        self.assertIn(marker, worker)
         self.assertIn("-m qlda.modules.excel.worker --poll-seconds 2", service)
 
     def test_fastapi_contract_is_unchanged(self):
         from qlda.presentation.api.app import app
-
         paths = set(app.openapi().get("paths", {}))
         expected = {
             "/api/health", "/api/v1/jobs", "/api/v1/jobs/enqueue",

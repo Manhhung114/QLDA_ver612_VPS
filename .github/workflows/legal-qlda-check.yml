@@ -13,46 +13,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install lightweight legal dependencies
-        run: |
-          python -m pip install --disable-pip-version-check requests beautifulsoup4
-
-      - name: Detect packaged V7.6 runtime
-        id: runtime
-        shell: bash
-        run: |
-          if [[ -f src/qlda/runtime_core/legal_qlda.py && -f src/qlda/presentation/streamlit/app.py ]]; then
-            echo 'packaged=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'packaged=false' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build generated base source (legacy compatibility)
-        if: steps.runtime.outputs.packaged != 'true'
-        run: python build_v621_webopt.py
-
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
       - name: Compile packaged legal runtime
-        if: steps.runtime.outputs.packaged == 'true'
+        env:
+          PYTHONPATH: src
         run: |
-          PYTHONPATH=src python -m py_compile \
+          python -m py_compile \
             src/qlda/runtime_core/legal_documents.py \
             src/qlda/runtime_core/legal_qlda.py \
             src/qlda/runtime_core/legal_standards_backfill.py \
             src/qlda/runtime_core/legal_pccc_backfill.py \
             src/qlda/presentation/streamlit/app.py
-
-      - name: Compile legacy legal modules
-        if: steps.runtime.outputs.packaged != 'true'
-        run: |
-          python -m py_compile legal_documents.py legal_qlda_v622.py legal_standards_backfill_v622.py legal_pccc_backfill_v622.py v622_legal_qlda_patch.py streamlit_app.py
-
       - name: Test no-draft expanded QLXD and PCCC workflow
-        if: hashFiles('tests/test_legal_qlda_v622.py') != '' && hashFiles('legal_qlda_v622.py') != ''
+        env:
+          PYTHONPATH: src
         run: python -m unittest tests.test_legal_qlda_v622 -v
-
       - name: Validate V7.6 packaged production wiring
-        if: steps.runtime.outputs.packaged == 'true'
         run: |
           grep -Fq 'from qlda.runtime_core.legal_qlda' src/qlda/presentation/streamlit/app.py
           test -f src/qlda/runtime_core/legal_documents.py
@@ -62,13 +39,3 @@ jobs:
           ! grep -Fq 'python build_v621_webopt.py' Dockerfile
           ! grep -Fq 'legal_qlda_v622.py' Dockerfile
           ! grep -Fq 'v622_legal_qlda_patch.py' Dockerfile
-
-      - name: Validate legacy production wiring
-        if: steps.runtime.outputs.packaged != 'true'
-        run: |
-          grep -Fq 'from v622_legal_qlda_patch import patch_legal_qlda' streamlit_app.py
-          grep -Fq 'source = patch_legal_qlda(source)' streamlit_app.py
-          grep -Fq 'legal_qlda_v622.py' Dockerfile
-          grep -Fq 'legal_standards_backfill_v622.py' Dockerfile
-          grep -Fq 'legal_pccc_backfill_v622.py' Dockerfile
-          grep -Fq 'v622_legal_qlda_patch.py' Dockerfile

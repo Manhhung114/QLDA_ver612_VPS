@@ -4,24 +4,21 @@ import unittest
 
 from openpyxl import Workbook
 
-# Force the multicore path even for tiny synthetic workbooks in CI.
 os.environ["QLDA_CPU_WORKERS"] = "2"
 os.environ["QLDA_PARALLEL_EXCEL_MIN_MB"] = "0"
 os.environ["QLDA_PARALLEL_MIN_SHEETS"] = "2"
 os.environ["QLDA_MP_START_METHOD"] = "forkserver"
 
-from multicore_excel_v622 import install_multicore_excel, runtime_config
-import boq_multisheet_v622 as boq
-import ipc_claim_v622 as ipc
-import vo_claim_v622 as vo
-
+from qlda.runtime_core.multicore_excel import install_multicore_excel, runtime_config
+from qlda.runtime_core import boq_multisheet as boq
+from qlda.runtime_core import ipc_claim as ipc
+from qlda.runtime_core import vo_claim as vo
 
 
 def _bytes(wb: Workbook) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
-
 
 
 def _boq_bytes() -> bytes:
@@ -35,7 +32,6 @@ def _boq_bytes() -> bytes:
     return _bytes(wb)
 
 
-
 def _ipc_bytes() -> bytes:
     wb = Workbook()
     decl = wb.active
@@ -45,12 +41,10 @@ def _ipc_bytes() -> bytes:
     decl["B7"] = "Nhà thầu"
     decl["B12"] = "01"
     decl["B15"] = "HD-01"
-
     pay = wb.create_sheet("Thanh toán")
     pay["D11"] = 510_000_000_000
     pay["D14"] = 10_000_000_000
     pay["K30"] = 1_000_000_000
-
     gtht = wb.create_sheet("GTHT")
     gtht["B2"] = "Tên công tác"
     gtht["A6"] = 1
@@ -64,7 +58,6 @@ def _ipc_bytes() -> bytes:
     gtht["S6"] = 100
     gtht["T6"] = 100
     return _bytes(wb)
-
 
 
 def _vo_bytes() -> bytes:
@@ -81,7 +74,6 @@ def _vo_bytes() -> bytes:
     summary["C14"] = -10
     summary["B15"] = "TỔNG CỘNG SAU THUẾ VAT (LÀM TRÒN)"
     summary["C15"] = -110
-
     detail = wb.create_sheet("MEP VO")
     detail["A1"] = "BẢNG TỔNG HỢP KHỐI LƯỢNG PHÁT SINH TĂNG GIẢM"
     detail["A2"] = "STT"
@@ -106,7 +98,6 @@ def _vo_bytes() -> bytes:
     detail["J5"] = 80
     detail["K5"] = 20
     detail["L5"] = -300
-
     extra = wb.create_sheet("Thuyết minh")
     extra["A1"] = "VO test"
     return _bytes(wb)
