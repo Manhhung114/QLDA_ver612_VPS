@@ -153,9 +153,10 @@ def initialize_runtime() -> None:
         apply_streamlit_secrets_to_env()
         initialize_ai_runtime()
 
-        # V7.6: meeting minutes are a simple archive sheet. It deliberately has
-        # no approval/status lifecycle; AI review is invoked only on demand.
-        from qlda.runtime_core.meeting_minutes_simple import install_meeting_minutes_simple_ui
-        install_meeting_minutes_simple_ui()
+        # V7.6: Biên bản họp remains a status-free archive. When the user asks
+        # for AI review, the request is routed into the one shared Trợ lý AI in
+        # Công cụ, using its provider/configuration, project scope and chat history.
+        from qlda.runtime_core.meeting_minutes_shared_ai import install_meeting_minutes_shared_ai
+        install_meeting_minutes_shared_ai()
 
         _UI_READY = True
