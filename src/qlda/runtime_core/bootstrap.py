@@ -137,6 +137,11 @@ def initialize_ai_runtime() -> None:
         capture_single_contractor_ai_context()
         install_contractor_ai_context()
         install_ai_access_guard()
+
+        # Install last so the shared assistant receives the final composed project
+        # context plus full-project PDF retrieval from every Quản lý hồ sơ sheet.
+        from qlda.runtime_core.ai_vps_pdf_fullscan import install_ai_vps_pdf_fullscan
+        install_ai_vps_pdf_fullscan()
         _AI_READY = True
 
 
@@ -153,10 +158,9 @@ def initialize_runtime() -> None:
         apply_streamlit_secrets_to_env()
         initialize_ai_runtime()
 
-        # V7.6: Biên bản họp remains a status-free archive. When the user asks
-        # for AI review, the request is routed into the one shared Trợ lý AI in
-        # Công cụ, using its provider/configuration, project scope and chat history.
-        from qlda.runtime_core.meeting_minutes_shared_ai import install_meeting_minutes_shared_ai
-        install_meeting_minutes_shared_ai()
+        # Quản lý hồ sơ uses VPS-local attachments. Keep Biên bản họp status-free,
+        # remove its dedicated AI action and leave AI only under Công cụ -> Trợ lý AI.
+        from qlda.runtime_core.document_management_vps_ui import install_document_management_vps_ui
+        install_document_management_vps_ui()
 
         _UI_READY = True
