@@ -1,0 +1,65 @@
+name: V7.6 Package Runtime Closure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/package_v760_runtime.py'
+      - '.github/workflows/v760-package-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package root runtime closure
+        run: python tools/package_v760_runtime.py
+      - name: Verify packaged dependency boundary
+        run: |
+          PYTHONPATH=src:. python -m compileall -q src/qlda/runtime_core src/qlda/import_engines src/qlda/presentation/streamlit/app.py
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          root = Path('.')
+          local = {p.stem for p in root.glob('*.py')}
+          targets = list(Path('src/qlda/runtime_core').glob('*.py'))
+          targets += list(Path('src/qlda/import_engines').glob('*.py'))
+          targets += [Path('src/qlda/presentation/streamlit/app.py')]
+          bad = {}
+          for path in targets:
+              tree = ast.parse(path.read_text(encoding='utf-8'))
+              imports = set()
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      imports.update(a.name.split('.', 1)[0] for a in node.names)
+                  elif isinstance(node, ast.ImportFrom) and node.module:
+                      imports.add(node.module.split('.', 1)[0])
+              leftovers = sorted(imports & local)
+              if leftovers:
+                  bad[str(path)] = leftovers
+          assert not bad, bad
+          app = Path('src/qlda/presentation/streamlit/app.py').read_text(encoding='utf-8')
+          for forbidden in ('v621_webopt_source', 'base64.b64decode', 'gzip.decompress', 'compile(source', 'exec(_compiled_vps_app'):
+              assert forbidden not in app, forbidden
+          print('Packaged runtime dependency boundary OK')
+          PY
+      - name: Commit packaged runtime
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/qlda/runtime_core src/qlda/import_engines src/qlda/presentation/streamlit/app.py docs/architecture/V7.6_PACKAGED_RUNTIME_MANIFEST.txt
+          if git diff --cached --quiet; then
+            echo 'No packaged runtime changes.'
+            exit 0
+          fi
+          git commit -m 'refactor(v7.6): package production runtime closure under src/qlda'
+          git push origin HEAD:main
