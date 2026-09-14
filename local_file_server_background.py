@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-"""V6.24 local file-server entrypoint with background Excel queue hand-off.
+"""V6.24.2 local file-server entrypoint with Excel queue hand-off.
 
-It preserves the V6.22 mutable-settings + single-session hardening, streams the
-upload directly to SSD, and only then enqueues a lightweight PostgreSQL job.
+The upload is streamed directly to SSD first. Only after the durable file row is
+registered do we enqueue a lightweight PostgreSQL job. Upload success therefore
+never depends on the worker being available at that exact moment.
 """
 
 from runtime_settings_bridge_v622 import install_runtime_settings_bridge
@@ -15,7 +16,7 @@ install_local_single_session()
 import local_file_server_v622 as base  # noqa: E402
 from local_vps_backend_v622 import verify_upload_ticket  # noqa: E402
 
-SERVER_VERSION = "QLDA-Local-File-Server/6.24"
+SERVER_VERSION = "QLDA-Local-File-Server/6.24.2"
 _original_save_stream = base.save_stream_from_ticket
 
 
@@ -31,7 +32,7 @@ def save_stream_and_enqueue(ticket: str, *, name: str, mime_type: str, stream, c
     purpose = str(meta.get("upload_purpose") or "")
     if purpose.startswith("QLDA_EXCEL_JOB|"):
         try:
-            from excel_jobs import enqueue_from_upload_purpose
+            from excel_jobs_v624 import enqueue_from_upload_purpose
 
             job = enqueue_from_upload_purpose(
                 purpose,
@@ -44,10 +45,12 @@ def save_stream_and_enqueue(ticket: str, *, name: str, mime_type: str, stream, c
                     "id": int(job.get("id") or 0),
                     "status": str(job.get("status") or ""),
                     "reused": bool(job.get("reused")),
+                    "version": "V6.24.2",
                 }
         except Exception as exc:
             # The original file is already durable. Queue failure must not turn
-            # a successful disk upload into data loss.
+            # a successful disk upload into data loss. The error is returned to
+            # the upload page/API and can be retried after the queue is repaired.
             item = dict(item)
             item["excel_job_error"] = f"{type(exc).__name__}: {exc}"
     return item
