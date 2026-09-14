@@ -4,6 +4,9 @@ from __future__ import annotations
 
 Production already runs from ``src/qlda``. This migration makes repository,
 tests and CI match production, then removes obsolete root copies.
+
+The workflow is intentionally triggered only after this migration file already
+exists on ``main`` so GitHub Actions can execute the guarded retirement job.
 """
 
 import re
