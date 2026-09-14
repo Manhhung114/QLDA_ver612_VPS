@@ -14,219 +14,67 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Compile QLDA source
+      - name: Compile packaged QLDA source
         run: |
+          python -m compileall -q src/qlda
           python -m py_compile \
-            streamlit_app.py build_v621_webopt.py v622_auth_refresh_v4.py \
-            v622_boq_multisheet_patch.py boq_multisheet_v622.py boq_cost_components_v622.py boq_claim_terms_v622.py boq_claim_price_recovery_v622.py boq_persistence_v622.py \
-            v622_ipc_claim_patch.py ipc_claim_v622.py ipc_claim_fast_v622.py ipc_claim_summary_fix_v622.py \
-            ipc_adaptive_parser_v622.py ipc_claim_number_fix_v622.py ipc_claim_period_v622.py ipc_claim_delete_v622.py \
-            v622_vo_claim_patch.py vo_claim_v622.py \
-            v622_report_cost_patch.py report_cost_v622.py \
-            gemini_resilience_v622.py ai_live_context_v622.py ai_claim_context_v622.py ai_vo_context_v622.py ai_service.py \
-            postgres_backend_v622.py vps_postgres_resilience.py streamlit_secrets_v622.py \
-            v621_webopt_runtime.py cloud_db.py drive_gateway.py
-          python build_v621_webopt.py
-          python - <<'PY'
-          from pathlib import Path
-          from v622_auth_refresh_v4 import patch_auth_refresh_v4
-          from v622_boq_multisheet_patch import patch_boq_multisheet
-          from v622_ipc_claim_patch import patch_ipc_claims
-          from v622_vo_claim_patch import patch_vo_claims
-          from v622_report_cost_patch import patch_report_cost
+            src/qlda/presentation/streamlit/app.py \
+            src/qlda/presentation/upload_server.py \
+            src/qlda/modules/excel/worker.py \
+            src/qlda/infrastructure/native_ai.py \
+            src/qlda/infrastructure/database.py
 
-          p = Path('dist/streamlit_app.py')
-          source = patch_boq_multisheet(p.read_text(encoding='utf-8'))
-          source = patch_ipc_claims(source)
-          source = patch_vo_claims(source)
-          source = patch_report_cost(source)
-          source = patch_auth_refresh_v4(source)
-          compile(source, 'streamlit_app_vps.py', 'exec')
-          assert 'V6.22 AUTH REFRESH V5' in source
-          assert 'V6.22 BOQ MULTISHEET V3' in source
-          assert 'V6.22 IPC CLAIM PAYMENT V1' in source
-          assert 'V6.22 VO EXCEL V1' in source
-          assert 'V6.22 REPORT COST V1' in source
-          assert '_v622_render_ipc_claim_ui(db, pid' in source
-          assert '_v622_render_vo_ui(db, pid' in source
-          assert '_v622_render_cost_report(db, pid)' in source
-          assert 'Workbook BOQ' in source
-          assert 'Lưu BOQ + workbook nhiều sheet vào dự án' in source
-          assert 'Mở bằng tài khoản khác vẫn xem được dữ liệu này' in source
-          assert 'Phụ lục tổng hợp giá trị' in source
-          print('QLDA VPS generated source + BOQ + IPC Claim + signed VO + Cost Report patches: OK')
-          PY
-
-      - name: Test BOQ multi-sheet workflow
+      - name: Run proven BOQ IPC VO AI regression suites
         run: |
           python -m pip install --disable-pip-version-check 'openpyxl>=3.1,<4'
           python -m unittest discover -s tests -p 'test_boq*_v622.py' -v
-          grep -Fq 'AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"' boq_multisheet_v622.py
-          grep -Fq 'workbook_sheet_names' boq_multisheet_v622.py
-          grep -Fq 'detail_items' boq_multisheet_v622.py
-          grep -Fq 'c.executemany(sql, params)' boq_multisheet_v622.py
-          grep -Fq 'DELETE FROM cost_budgets WHERE project_id=? AND note LIKE ?' boq_multisheet_v622.py
-          grep -Fq 'TABLE_NAME = "boq_excel_workbooks"' boq_persistence_v622.py
-          grep -Fq 'save_saved_boq_workbook' boq_persistence_v622.py
-          grep -Fq 'load_saved_boq_workbook' boq_persistence_v622.py
-          grep -Fq 'format_table_number' boq_persistence_v622.py
-          grep -Fq 'V6.22 BOQ COST COMPONENTS V1' boq_cost_components_v622.py
-          grep -Fq 'material_unit_price' boq_cost_components_v622.py
-          grep -Fq 'labor_unit_price' boq_cost_components_v622.py
-          grep -Fq 'material_cost' boq_cost_components_v622.py
-          grep -Fq 'labor_cost' boq_cost_components_v622.py
-          grep -Fq 'V6.22 BOQ CLAIM PRICE RECOVERY V1' boq_claim_price_recovery_v622.py
-          grep -Fq 'Vật tư/Vật liệu' boq_claim_price_recovery_v622.py
-          grep -Fq '_recover_boq' boq_claim_price_recovery_v622.py
-          grep -Fq '_recover_claims' boq_claim_price_recovery_v622.py
-          grep -Fq 'install_boq_cost_components()' streamlit_app.py
-          grep -Fq 'install_boq_claim_price_recovery()' streamlit_app.py
-          grep -Fq '_v622_save_saved_boq_workbook' v622_boq_multisheet_patch.py
-          grep -Fq '_v622_load_saved_boq_workbook' v622_boq_multisheet_patch.py
-          grep -Fq '_sheet_df.map(_v622_format_table_number)' v622_boq_multisheet_patch.py
-          grep -Fq 'st.tabs(_book_names)' v622_boq_multisheet_patch.py
-          grep -Fq 'patch_boq_multisheet(source)' streamlit_app.py
-
-      - name: Test IPC Claim payment workflow
-        run: |
           python -m unittest discover -s tests -p 'test_ipc*_v622.py' -v
-          grep -Fq 'V6.22 IPC CLAIM V1' ipc_claim_v622.py
-          grep -Fq 'V6.22 IPC CLAIM PAYMENT SUMMARY FIX V2' ipc_claim_summary_fix_v622.py
-          grep -Fq 'V6.22 IPC ADAPTIVE PARSER V1' ipc_adaptive_parser_v622.py
-          grep -Fq 'Select sheet roles from content' ipc_adaptive_parser_v622.py
-          grep -Fq 'GIÁ TRỊ ĐỀ NGHỊ THANH TOÁN KỲ NÀY' ipc_adaptive_parser_v622.py
-          grep -Fq 'semantic_multirow_gtht' ipc_adaptive_parser_v622.py
-          grep -Fq 'template_signature' ipc_adaptive_parser_v622.py
-          grep -Fq 'confidence_pct' ipc_adaptive_parser_v622.py
-          grep -Fq 'install_ipc_adaptive_parser()' streamlit_app.py
-          grep -Fq 'K30 is only the 1% utility deduction' ipc_claim_summary_fix_v622.py
-          grep -Fq 'install_ipc_claim_summary_fix()' streamlit_app.py
-          grep -Fq 'payment_claims' ipc_claim_v622.py
-          grep -Fq 'payment_claim_items' ipc_claim_v622.py
-          grep -Fq 'payment_claim_workbooks' ipc_claim_v622.py
-          grep -Fq 'payment_claim_revisions' ipc_claim_v622.py
-          grep -Fq 'Claim cũ không bị ghi đè' ipc_claim_v622.py
-          grep -Fq 'st.tabs(labels)' ipc_claim_v622.py
-          grep -Fq 'Đối chiếu BOQ' ipc_claim_v622.py
-          grep -Fq 'patch_ipc_claims(source)' streamlit_app.py
-
-      - name: Test signed VO Excel workflow
-        run: |
           python -m unittest discover -s tests -p 'test_vo*_v622.py' -v
-          grep -Fq 'V6.22 VO EXCEL V2 SIGNED' vo_claim_v622.py
-          grep -Fq 'variation_orders' vo_claim_v622.py
-          grep -Fq 'variation_order_items' vo_claim_v622.py
-          grep -Fq 'variation_order_workbooks' vo_claim_v622.py
-          grep -Fq 'variation_order_revisions' vo_claim_v622.py
-          grep -Fq 'VO giảm phải nhập giá trị duyệt âm' vo_claim_v622.py
-          grep -Fq 'Giảm giá trị hợp đồng' vo_claim_v622.py
-          grep -Fq 'V6.22 VO EXCEL V1' v622_vo_claim_patch.py
-          grep -Fq 'patch_vo_claims(source)' streamlit_app.py
-          grep -Fq 'install_ai_vo_context()' streamlit_app.py
-          python - <<'PY'
-          from tests.test_vo_claim_v622 import _workbook_bytes
-          from vo_claim_v622 import parse_vo_workbook
-          r = parse_vo_workbook(_workbook_bytes(), '2025.09.29 VO-03.xlsx')
-          assert r['summary']['increase_amount'] == 200
-          assert r['summary']['decrease_amount'] == -300
-          assert r['summary']['subtotal_before_vat'] == -100
-          assert r['summary']['total_after_vat'] == -110
-          assert r['summary']['detail_discrepancy'] == 0
-          print('Signed VO arithmetic: OK')
-          PY
-
-      - name: Test live cost report
-        run: |
-          grep -Fq 'V6.22 REPORT COST V1' v622_report_cost_patch.py
-          grep -Fq 'Báo cáo chi phí' report_cost_v622.py
-          grep -Fq 'BAC / BOQ' report_cost_v622.py
-          grep -Fq 'VO được duyệt' report_cost_v622.py
-          grep -Fq 'Claim được duyệt' report_cost_v622.py
-          grep -Fq 'Đã giải ngân' report_cost_v622.py
-          grep -Fq 'payment_claims' report_cost_v622.py
-          grep -Fq 'cost_variations' report_cost_v622.py
-          grep -Fq 'revised_budget = bac + vo_approved' report_cost_v622.py
-          grep -Fq 'patch_report_cost(source)' streamlit_app.py
-
-      - name: Test AI live project snapshot
-        run: |
           python -m unittest discover -s tests -p 'test_ai_live_context_v622.py' -v
-          grep -Fq 'V6.22 AI LIVE CONTEXT V2' ai_live_context_v622.py
-          grep -Fq 'PostgreSQL LIVE' ai_live_context_v622.py
-          grep -Fq 'AI truy vấn trên toàn bộ' ai_live_context_v622.py
-          grep -Fq 'BOQ-LIVE' ai_live_context_v622.py
-          grep -Fq 'BOQ-GROUP' ai_live_context_v622.py
-          grep -Fq 'SELECT COALESCE(SUM(budget_total),0)' ai_live_context_v622.py
-          grep -Fq 'boq_excel_workbooks' ai_live_context_v622.py
-          grep -Fq 'approval_workflows' ai_live_context_v622.py
-          grep -Fq 'document_attachments' ai_live_context_v622.py
-          grep -Fq 'install_ai_live_context()' streamlit_app.py
-          grep -Fq 'V6.22 AI IPC CLAIM CONTEXT V1' ai_claim_context_v622.py
-          grep -Fq 'IPC / CLAIM THANH TOÁN LIVE' ai_claim_context_v622.py
-          grep -Fq 'install_ai_claim_context()' streamlit_app.py
-          grep -Fq 'VO / PHÁT SINH LIVE' ai_vo_context_v622.py
-          grep -Fq 'install_ai_vo_context()' streamlit_app.py
-
-      - name: Test Gemini overload resilience
-        run: |
           python -m unittest discover -s tests -p 'test_gemini_resilience_v622.py' -v
-          grep -Fq 'V6.22 GEMINI RESILIENCE V2' gemini_resilience_v622.py
-          grep -Fq 'gemini-3.6-flash' gemini_resilience_v622.py
-          grep -Fq 'gemini-2.5-flash' gemini_resilience_v622.py
-          grep -Fq 'gemini-2.5-flash-lite' gemini_resilience_v622.py
-          grep -Fq 'GEMINI_MODEL_COOLDOWN_SECONDS' gemini_resilience_v622.py
-          grep -Fq 'install_gemini_resilience()' streamlit_app.py
 
-      - name: Build Docker image
+      - name: Validate V7.6 packaged runtime boundary
         run: |
           set -euxo pipefail
-          docker build --pull -t qlda-v622-ci .
-          docker image inspect qlda-v622-ci >/dev/null
-          docker inspect --format='{{json .Config.Healthcheck.Test}}' qlda-v622-ci | grep -Fq '/_stcore/health'
-          docker inspect --format='{{json .Config.Cmd}}' qlda-v622-ci | grep -Fq 'streamlit_app.py'
+          test -f src/qlda/runtime_core/project_store.py
+          test -f src/qlda/runtime_core/project_database.py
+          test -f src/qlda/runtime_core/ai_service.py
+          test -f src/qlda/runtime_core/boq_multisheet.py
+          test -f src/qlda/runtime_core/ipc_claim.py
+          test -f src/qlda/runtime_core/vo_claim.py
+          test -f src/qlda/runtime_core/legal_qlda.py
+          grep -Fq 'from qlda.runtime_core.bootstrap import initialize_runtime' src/qlda/presentation/streamlit/app.py
+          grep -Fq 'from qlda.runtime_core import ai_service as engine' src/qlda/infrastructure/native_ai.py
+          ! grep -Fq 'legacy_import' src/qlda/infrastructure/native_ai.py
+          ! grep -Fq 'legacy_import' src/qlda/infrastructure/database.py
+          ! grep -Fq 'exec(_compiled_vps_app' src/qlda/presentation/streamlit/app.py
+          ! grep -Fq 'base64.b64decode' src/qlda/presentation/streamlit/app.py
+          ! grep -Fq 'gzip.decompress' src/qlda/presentation/streamlit/app.py
 
-      - name: Validate PostgreSQL VPS resilience hook
+      - name: Build V7.6 Docker image
         run: |
           set -euxo pipefail
-          grep -Fq 'install_vps_postgres_resilience' streamlit_app.py
-          grep -Fq 'check=ConnectionPool.check_connection' vps_postgres_resilience.py
-          grep -Fq 'keepalives_idle' vps_postgres_resilience.py
-          grep -Fq 'resilient_backup' vps_postgres_resilience.py
-          grep -Fq 'drop_pool(database_url)' vps_postgres_resilience.py
+          docker build --pull -t qlda-v760-ci .
+          docker image inspect qlda-v760-ci >/dev/null
+          docker inspect --format='{{json .Config.Healthcheck.Test}}' qlda-v760-ci | grep -Fq '/_stcore/health'
+          docker inspect --format='{{json .Config.Cmd}}' qlda-v760-ci | grep -Fq 'src/qlda/presentation/streamlit/app.py'
+          docker inspect --format='{{json .Config.Env}}' qlda-v760-ci | grep -Fq 'PYTHONPATH=/app/src'
 
-      - name: Validate VPS scripts and proxy
+      - name: Validate packaged VPS service graph
         run: |
           set -euxo pipefail
           bash -n vps/install.sh
           bash -n vps/deploy.sh
           bash -n vps/rollback.sh
           bash -n vps/healthcheck.sh
-          grep -Fq -- '--server.address=127.0.0.1' vps/qlda.service
-          grep -Fq -- '--server.port=8501' vps/qlda.service
-          grep -Fq 'EnvironmentFile=/opt/qlda/shared/qlda.env' vps/qlda.service
-          grep -Fq 'v622_boq_multisheet_patch.py' vps/deploy.sh
-          grep -Fq 'boq_multisheet_v622.py' vps/deploy.sh
-          grep -Fq 'boq_cost_components_v622.py' vps/deploy.sh
-          grep -Fq 'boq_claim_terms_v622.py' vps/deploy.sh
-          grep -Fq 'boq_claim_price_recovery_v622.py' vps/deploy.sh
-          grep -Fq 'boq_persistence_v622.py' vps/deploy.sh
-          grep -Fq 'v622_ipc_claim_patch.py' vps/deploy.sh
-          grep -Fq 'ipc_claim_v622.py' vps/deploy.sh
-          grep -Fq 'ipc_claim_fast_v622.py' vps/deploy.sh
-          grep -Fq 'ipc_claim_summary_fix_v622.py' vps/deploy.sh
-          grep -Fq 'ipc_adaptive_parser_v622.py' vps/deploy.sh
-          grep -Fq 'v622_vo_claim_patch.py' vps/deploy.sh
-          grep -Fq 'vo_claim_v622.py' vps/deploy.sh
-          grep -Fq 'gemini_resilience_v622.py' vps/deploy.sh
-          grep -Fq 'ai_vo_context_v622.py' vps/deploy.sh
-          grep -Fq 'v622_report_cost_patch.py' vps/deploy.sh
-          grep -Fq 'report_cost_v622.py' vps/deploy.sh
-          grep -Fq 'ai_live_context_v622.py' vps/deploy.sh
-          grep -Fq 'ai_claim_context_v622.py' vps/deploy.sh
-          grep -Fq '+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}' vps/deploy.sh
-          grep -Fq 'show-ref --verify --quiet "$REMOTE_REF"' vps/deploy.sh
-          grep -Fq 'Local HEAD :' vps/deploy.sh
-          grep -Fq 'Remote HEAD:' vps/deploy.sh
+          grep -Fq 'src/qlda/presentation/streamlit/app.py' vps/qlda.service
+          grep -Fq 'PYTHONPATH=/opt/qlda/app/src' vps/qlda.service
+          grep -Fq 'qlda.presentation.upload_server' vps/qlda-upload.service
+          grep -Fq 'PYTHONPATH=/opt/qlda/app/src' vps/qlda-upload.service
+          grep -Fq 'qlda.presentation.api.app:app' vps/qlda-api.service
+          grep -Fq 'PYTHONPATH=/opt/qlda/app/src' vps/qlda-api.service
+          grep -Fq 'qlda.modules.excel.worker' vps/qlda-excel-worker.service
+          grep -Fq 'PYTHONPATH=/opt/qlda/app/src' vps/qlda-excel-worker.service
           grep -Fq 'proxy_set_header Upgrade' vps/nginx.conf.template
           grep -Fq 'Connection "upgrade"' vps/nginx.conf.template
           grep -Fq '/_stcore/health' vps/healthcheck.sh
@@ -237,4 +85,4 @@ jobs:
           test ! -f .env
           test ! -f .streamlit/secrets.toml
           grep -Fq 'REPLACE_ME' .env.example
-          echo 'VPS repository validation: OK'
+          echo 'V7.6 VPS repository validation: OK'
