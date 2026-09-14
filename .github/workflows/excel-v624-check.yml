@@ -3,10 +3,20 @@ name: Excel V6.24 Check
 on:
   push:
     paths:
+      - 'excel_jobs.py'
       - 'excel_jobs_v624.py'
+      - 'excel_worker.py'
       - 'excel_worker_v624.py'
+      - 'excel_background_v624.py'
+      - 'boq_background_v624.py'
+      - 'boq_persist_v624.py'
+      - 'local_file_server_background.py'
+      - 'v624_excel_background_patch.py'
+      - 'streamlit_app.py'
+      - 'vps/qlda-upload.service'
       - 'vps/qlda-excel-worker.service'
       - 'vps/install_excel_worker_v624.sh'
+      - 'vps/deploy.sh'
       - '.github/workflows/excel-v624-check.yml'
   workflow_dispatch:
 
@@ -20,8 +30,15 @@ jobs:
           python-version: '3.12'
       - name: Install workbook dependency
         run: python -m pip install 'openpyxl>=3.1,<4'
-      - name: Compile V6.24 modules
-        run: python -m py_compile excel_jobs_v624.py excel_worker_v624.py
+      - name: Compile V6.24.2 modules
+        run: |
+          python -m py_compile \
+            excel_jobs.py excel_jobs_v624.py \
+            excel_worker.py excel_worker_v624.py \
+            excel_background_v624.py \
+            boq_background_v624.py boq_persist_v624.py \
+            local_file_server_background.py \
+            v624_excel_background_patch.py streamlit_app.py
       - name: Verify disk-stream workbook scan
         run: |
           python - <<'PY'
@@ -46,10 +63,64 @@ jobs:
               boq = next(x for x in result['sheets'] if x['name'] == 'BOQ')
               assert boq['nonempty_rows'] == 101, boq
               assert len(boq['sample_rows']) <= 5, boq
-              print(result)
           PY
-      - name: Validate systemd unit syntax markers
+      - name: Verify V6.24.2 BOQ path parser
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from openpyxl import Workbook
+          from boq_background_v624 import parse_boq_path
+
+          with TemporaryDirectory() as tmp:
+              path = Path(tmp) / 'boq.xlsx'
+              wb = Workbook()
+              ws = wb.active
+              ws.title = 'BOQ MEP'
+              ws.append(['STT', 'Nội dung công việc', 'Khối lượng', 'Đơn vị', 'Đơn giá', 'Thành tiền'])
+              for i in range(1, 21):
+                  qty = i + 1
+                  price = 1000 + i
+                  ws.append([i, f'Công việc {i}', qty, 'm', price, qty * price])
+              wb.save(path)
+              result = parse_boq_path(path, path.name)
+              assert result['detail_line_count'] == 20, result['detail_line_count']
+              assert result['detected_sheets'] == ['BOQ MEP'], result['detected_sheets']
+              assert result['source_file_size'] == path.stat().st_size
+              assert result['pipeline'].startswith('V6.24.2')
+          PY
+      - name: Verify source patch activates BOQ background panel
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          from pathlib import Path
+          from build_v621_webopt import _finalize_source
+          from v622_boq_multisheet_patch import patch_boq_multisheet
+          from v624_excel_background_patch import patch_excel_background_v624
+
+          parts = sorted(Path('v621_webopt_source').glob('part_*.b64'))
+          assert len(parts) == 9
+          encoded = ''.join(p.read_text(encoding='ascii').strip() for p in parts)
+          source = gzip.decompress(base64.b64decode(encoded)).decode('utf-8')
+          source = _finalize_source(source)
+          source = patch_boq_multisheet(source)
+          source = patch_excel_background_v624(source)
+          assert '_v624_render_boq_background_panel(' in source
+          assert 'V6.24 EXCEL BACKGROUND SOURCE V1' in source
+          compile(source, 'streamlit_app_v624_ci.py', 'exec')
+          PY
+      - name: Verify no whole-file BOQ read in production worker
+        run: |
+          ! grep -n 'path.read_bytes()' excel_worker_v624.py boq_background_v624.py
+          grep -q 'read_only=True' boq_background_v624.py
+          grep -q 'save_boq_result_batched' excel_worker_v624.py
+          grep -q 'executemany' boq_persist_v624.py
+      - name: Validate upload and worker systemd markers
         run: |
           grep -q 'MemoryMax=3G' vps/qlda-excel-worker.service
           grep -q 'CPUQuota=250%' vps/qlda-excel-worker.service
           grep -q 'ProtectHome=true' vps/qlda-excel-worker.service
+          grep -q 'local_file_server_background.py' vps/qlda-upload.service
+          grep -q 'excel_worker_v624.py' vps/qlda-excel-worker.service
+          grep -q 'restart_excel_worker_if_enabled' vps/deploy.sh
