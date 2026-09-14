@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Remaining anti-corruption adapter for QLDA V7.3.
+"""Remaining anti-corruption adapters boundary for QLDA V7.3.
 
 Session, project access, files, jobs, search and AI now have native V7
 infrastructure adapters. Only the business-heavy Excel import pipeline still
