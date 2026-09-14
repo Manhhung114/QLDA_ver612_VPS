@@ -1,5 +1,5 @@
 [Unit]
-Description=QLDA V6.22 Local File Upload Service
+Description=QLDA V6.24.2 Local File Upload + Excel Queue Service
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -15,7 +15,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 # shared writable tree so settings_store never probes the protected legacy home.
 Environment=HOME=/opt/qlda/shared
 Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
-ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_single_session_v622.py --host 127.0.0.1 --port 8502
+ExecStart=/opt/qlda/venv/bin/python /opt/qlda/app/local_file_server_background.py --host 127.0.0.1 --port 8502
 Restart=always
 RestartSec=3
 TimeoutStopSec=30
