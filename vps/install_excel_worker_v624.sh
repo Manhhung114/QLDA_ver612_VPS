@@ -34,12 +34,12 @@ systemctl daemon-reload
 systemctl enable qlda-excel-worker.service >/dev/null 2>&1 || true
 systemctl restart qlda-excel-worker.service
 sleep 2
-systemctl --no-pager -l status qlda-excel-worker.service
 
-echo "Excel worker installed. Queue health:"
-runuser -u "$RUN_USER" -- env $(grep -vE '^[[:space:]]*(#|$)' "$SHARED_DIR/qlda.env" | xargs) \
-  "$VENV_DIR/bin/python" - <<'PY'
-from excel_jobs_v624 import ensure_schema, queue_stats
-ensure_schema()
-print(queue_stats())
-PY
+if ! systemctl is-active --quiet qlda-excel-worker.service; then
+  systemctl --no-pager -l status qlda-excel-worker.service || true
+  journalctl -u qlda-excel-worker.service -n 80 --no-pager || true
+  exit 1
+fi
+
+systemctl --no-pager -l status qlda-excel-worker.service
+echo "V6.24 Excel worker installed and running."
