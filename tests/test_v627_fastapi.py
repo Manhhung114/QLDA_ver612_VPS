@@ -21,18 +21,12 @@ class V627FastAPITests(unittest.TestCase):
     def test_expected_routes_exist(self):
         from qlda.presentation.api.app import app
 
-        # Newer FastAPI/Starlette releases may expose internal router marker
-        # objects alongside real HTTP routes. Only route objects with a public
-        # ``path`` attribute participate in the endpoint contract.
-        paths = {
-            path
-            for route in app.routes
-            if (path := getattr(route, "path", None)) is not None
-        }
+        # OpenAPI is the public HTTP contract. This remains stable even when
+        # newer FastAPI/Starlette versions keep included routers as internal
+        # marker objects instead of flattening them into ``app.routes``.
+        paths = set(app.openapi().get("paths", {}))
         expected = {
             "/api/health",
-            "/api/docs",
-            "/api/openapi.json",
             "/api/v1/jobs",
             "/api/v1/jobs/enqueue",
             "/api/v1/files",
@@ -42,6 +36,8 @@ class V627FastAPITests(unittest.TestCase):
             "/api/v1/search",
         }
         self.assertTrue(expected.issubset(paths), expected - paths)
+        self.assertEqual(app.docs_url, "/api/docs")
+        self.assertEqual(app.openapi_url, "/api/openapi.json")
 
     def test_http_adapter_has_no_streamlit_or_direct_legacy_imports(self):
         api_root = SRC / "qlda" / "presentation" / "api"
