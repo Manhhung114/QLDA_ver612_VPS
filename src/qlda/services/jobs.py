@@ -13,6 +13,14 @@ class JobService:
         jobs.ensure_schema()
 
     @staticmethod
+    def build_upload_purpose(job_type: str, project_id: int, **options: Any) -> str:
+        return jobs.build_upload_purpose(job_type, project_id, **options)
+
+    @staticmethod
+    def parse_upload_purpose(value: str):
+        return jobs.parse_upload_purpose(value)
+
+    @staticmethod
     def enqueue(**kwargs: Any):
         return jobs.enqueue_job(**kwargs)
 

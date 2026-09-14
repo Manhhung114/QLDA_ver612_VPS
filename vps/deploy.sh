@@ -128,17 +128,18 @@ sync_python_dependencies() {
   run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.txt"
 
   # Runtime smoke test for modules required by PDF/AI, encrypted Admin settings,
-  # and Microsoft Project (.mpp) import. This catches code-current / stale-venv
-  # mismatches before services restart.
+  # Microsoft Project (.mpp) import and the V6.27 HTTP adapter.
   run_as_app "$VENV_DIR/bin/python" - <<'PY'
 from cryptography.fernet import Fernet
 from pypdf import PdfReader, PdfWriter
+import fastapi
 import jpype
 import mpxj
 import mpp_cloud_reader
 import openai
+import uvicorn
 from google import genai
-print("QLDA runtime OK: Admin/PDF/AI + MPP (JPype/MPXJ/mpp_cloud_reader)")
+print("QLDA runtime OK: Admin/PDF/AI + MPP + FastAPI/Uvicorn")
 PY
 }
 
@@ -164,9 +165,6 @@ if [[ "$OLD_COMMIT" != "$NEW_COMMIT" ]]; then
   chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/previous_commit"
   git_app reset --hard "$NEW_COMMIT"
 else
-  # Do NOT exit here. The source may already be current while the virtualenv is
-  # stale (for example a new package was added to requirements.txt). Re-sync the
-  # venv and restart/health-check the service on every deploy invocation.
   echo "Source already up to date; repairing/verifying runtime dependencies."
 fi
 
@@ -246,6 +244,8 @@ run_as_app "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/excel_jobs.py" \
   "$APP_DIR/excel_worker.py"
 
+run_as_app env PYTHONPATH="$APP_DIR/src:$APP_DIR" "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
+
 run_as_app "$VENV_DIR/bin/python" - <<'PY'
 from multicore_excel_v622 import runtime_config
 cfg = runtime_config()
@@ -256,6 +256,15 @@ PY
 
 restart_local_file_service_if_enabled
 restart_excel_worker_if_enabled
+
+API_RECONCILE_OK=1
+if excel_background_enabled; then
+  if ! bash "$APP_DIR/vps/reconcile_api_v627.sh"; then
+    echo "FastAPI reconcile failed; deployment will be rolled back after health checks." >&2
+    API_RECONCILE_OK=0
+  fi
+fi
+
 systemctl restart "$SERVICE"
 
 ok=0
@@ -280,6 +289,11 @@ if [[ "$ok" -eq 1 ]] && excel_background_enabled; then
     systemctl --no-pager -l status qlda-excel-worker.service || true
     ok=0
   fi
+  if [[ "$API_RECONCILE_OK" -ne 1 ]] || ! curl -fsS http://127.0.0.1:8001/api/health >/dev/null 2>&1; then
+    echo "FastAPI service health check failed." >&2
+    systemctl --no-pager -l status qlda-api.service || true
+    ok=0
+  fi
 fi
 
 if [[ "$ok" -eq 1 ]]; then
@@ -295,6 +309,7 @@ echo "Health check failed." >&2
 if [[ "$CODE_CHANGED" -eq 1 ]]; then
   echo "Rolling back to $OLD_COMMIT" >&2
   git_app reset --hard "$OLD_COMMIT"
+  systemctl stop qlda-api.service >/dev/null 2>&1 || true
   ensure_mpp_system_runtime
   sync_python_dependencies
   restart_local_file_service_if_enabled || true

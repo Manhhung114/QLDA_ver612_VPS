@@ -14,3 +14,5 @@ psycopg-pool>=3.2,<4
 pypdf>=5,<7
 cryptography>=45,<47
 streamlit-cookies-controller==0.0.4
+fastapi>=0.115,<1
+uvicorn>=0.30,<1

@@ -39,4 +39,8 @@ jobs:
           grep -q 'JobService' src/qlda/modules/excel/worker.py
           ! grep -q 'excel_worker_v624' src/qlda/modules/excel/worker.py
           ! grep -q 'local_vps_backend_v622' src/qlda/modules/excel/worker.py
-          test "$(tr -d '\r\n ' < VERSION.txt)" = '6.26'
+          python - <<'PY'
+          from pathlib import Path
+          version = tuple(int(x) for x in Path("VERSION.txt").read_text().strip().split(".")[:2])
+          assert version >= (6, 26), version
+          PY

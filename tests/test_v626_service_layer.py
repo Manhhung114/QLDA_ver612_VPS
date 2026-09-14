@@ -39,7 +39,8 @@ class _FakeDomainService:
 
 class ServiceLayerV626Tests(unittest.TestCase):
     def test_version_and_service_layer_marker(self):
-        self.assertEqual(qlda.__version__, "6.26")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (6, 26))
         self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
         self.assertEqual(qlda.SERVICE_LAYER, "application-services")
 
