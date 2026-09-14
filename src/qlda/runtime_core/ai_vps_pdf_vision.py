@@ -20,7 +20,7 @@ from typing import Any
 from qlda.runtime_core import ai_vps_pdf_fullscan as fullscan
 
 
-PATCH_MARKER = "V7.6 VPS PDF VISION V2"
+PATCH_MARKER = "V7.6 VPS PDF VISION V3"
 VISION_MAX_FILES = max(1, min(12, int(os.environ.get("QLDA_AI_PDF_VISION_MAX_FILES", "6"))))
 VISION_FILE_CONTEXT_CHARS = max(
     20_000,
@@ -134,7 +134,7 @@ def _cache_path(row: dict[str, Any]) -> Path | None:
     try:
         from qlda.runtime_core import local_vps_backend as local
 
-        root = local.storage_root() / ".ai_cache" / "pdf_vision_v2"
+        root = local.storage_root() / ".ai_cache" / "pdf_vision_v3"
         root.mkdir(parents=True, exist_ok=True)
         identity = str(row.get("sha256") or row.get("id") or "pdf")
         identity = re.sub(r"[^A-Za-z0-9_.-]+", "_", identity)[:160]
@@ -199,7 +199,7 @@ def _extract_with_provider(row: dict[str, Any]) -> str:
 
     try:
         from qlda.runtime_core.settings_store import get_ai_runtime_settings
-        from qlda.runtime_core.contract_ai_deep_scan import _scan_provider_file
+        from qlda.runtime_core.document_pdf_vision_provider import scan_document_pdf
         from qlda.runtime_core.contract_ai_large_pdf import split_large_pdf
 
         settings = dict(get_ai_runtime_settings() or {})
@@ -223,7 +223,7 @@ def _extract_with_provider(row: dict[str, Any]) -> str:
         for index, (part_name, part_bytes) in enumerate(parts, start=1):
             prompt = _vision_prompt(name, subtype, record_code, part_name)
             try:
-                text = _scan_provider_file(provider, settings, part_name, bytes(part_bytes), prompt)
+                text = scan_document_pdf(provider, settings, part_name, bytes(part_bytes), prompt)
             except Exception as exc:
                 text = f"[PHẦN {index} - LỖI ĐỌC VISION: {exc}]"
             if text and text.strip():
