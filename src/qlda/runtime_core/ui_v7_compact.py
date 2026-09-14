@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import time as _time
 from datetime import date, datetime
@@ -9,9 +10,32 @@ from typing import Any, Callable
 from qlda.runtime_core.vn_datetime import format_tabular_vn, install_work_task_vn_display
 
 
-PATCH_MARKER = "V7 COMPACT UI RUNTIME V4 UNIFIED COLOR THEME"
+PATCH_MARKER = "V7 COMPACT UI RUNTIME V5 UNIFIED COLOR + MEETING MINUTES"
 _CAPTION_STATE_KEY = "qlda_v7_show_captions"
 _CAPTION_ADMIN_KEY = "qlda_v7_caption_admin_authorized"
+_MEETING_DOC_TYPE = "BBHOP"
+_MEETING_DOC_LABEL = "Biên bản họp"
+_MEETING_DOC_CONFIG = {
+    "title": "Biên bản họp",
+    "statuses": [
+        "Soạn thảo",
+        "Đã phát hành",
+        "Chờ xác nhận",
+        "Yêu cầu chỉnh sửa",
+        "Đã xác nhận",
+        "Đóng",
+        "Hủy",
+    ],
+    "done_statuses": ["Đã xác nhận", "Đóng", "Hủy"],
+    "subject": "Tên cuộc họp / Nội dung chính",
+    "code_label": "Mã biên bản họp *",
+    "issuer_label": "Người / Đơn vị lập biên bản",
+    "assignee_label": "Người / Đơn vị tham dự / xác nhận",
+    "issue_date_label": "Ngày họp / phát hành",
+    "due_date_label": "Hạn xác nhận",
+    "closed_date_label": "Ngày xác nhận / đóng",
+    "response_label": "Kết luận / Ý kiến / Hành động sau họp",
+}
 
 
 def _rowdict(row: Any) -> dict[str, Any]:
@@ -49,13 +73,74 @@ def _safe_date(value: Any):
     return None
 
 
-def install_caption_policy_v7(st) -> None:
-    """Hide user-facing Streamlit captions by default across the whole app.
+def _find_app_globals() -> dict[str, Any] | None:
+    """Locate the running Streamlit app globals without importing the app again."""
+    frame = inspect.currentframe()
+    try:
+        frame = frame.f_back if frame else None
+        while frame is not None:
+            glob = frame.f_globals
+            cfg = glob.get("DOC_CONFIG")
+            if isinstance(cfg, dict) and "NCR" in cfg and "BBHT" in cfg:
+                return glob
+            frame = frame.f_back
+    finally:
+        del frame
+    return None
 
-    The original ``st.caption`` remains available behind an Admin-controlled
-    session flag. This is presentation-only: warnings, errors, success/status
-    messages and business data are not suppressed.
+
+def install_meeting_minutes_sheet_v7(st) -> None:
+    """Add the meeting-minutes document sheet to the existing document UI.
+
+    The production app still owns the generic document renderer and persistence.
+    This presentation extension registers one additional document type and makes
+    it available in the existing ``Loại hồ sơ`` segmented control. Because the
+    generic documents table stores ``doc_type`` as text, no database migration is
+    required and attachments continue to use the normal document attachment flow.
     """
+    app_globals = _find_app_globals()
+    if app_globals is not None:
+        doc_config = app_globals.get("DOC_CONFIG")
+        if isinstance(doc_config, dict):
+            doc_config.setdefault(_MEETING_DOC_TYPE, dict(_MEETING_DOC_CONFIG))
+
+    if getattr(st, "_qlda_v7_meeting_minutes_sheet_installed", False):
+        return
+
+    original_segmented_control = st.segmented_control
+
+    def _segmented_control_with_meeting_minutes(label, options, *args, **kwargs):
+        try:
+            values = list(options)
+        except Exception:
+            values = options
+
+        if str(label or "").strip() == "Loại hồ sơ" and isinstance(values, list):
+            known = {str(v) for v in values}
+            if {"NCR", "RFA", "RFI", "BBHT"}.issubset(known):
+                if _MEETING_DOC_TYPE not in known:
+                    values.append(_MEETING_DOC_TYPE)
+
+                base_format = kwargs.get("format_func")
+
+                def _format(value):
+                    if value == _MEETING_DOC_TYPE:
+                        return _MEETING_DOC_LABEL
+                    if callable(base_format):
+                        return base_format(value)
+                    return str(value)
+
+                kwargs["format_func"] = _format
+
+        return original_segmented_control(label, values, *args, **kwargs)
+
+    st._qlda_v7_original_segmented_control = original_segmented_control
+    st.segmented_control = _segmented_control_with_meeting_minutes
+    st._qlda_v7_meeting_minutes_sheet_installed = True
+
+
+def install_caption_policy_v7(st) -> None:
+    """Hide user-facing Streamlit captions by default across the whole app."""
     if getattr(st, "_qlda_v7_caption_policy_installed", False):
         return
 
@@ -74,13 +159,7 @@ def install_caption_policy_v7(st) -> None:
 
 
 def install_vn_datetime_policy_v7(st) -> None:
-    """Use Vietnam wall-clock time consistently in read-only app tables.
-
-    Storage is deliberately untouched: TIMESTAMPTZ/UTC values stay authoritative
-    in PostgreSQL. Only presentation is converted. The process timezone is also
-    set to Asia/Ho_Chi_Minh so future legacy ``date.today()/datetime.now()`` calls
-    inside the application follow the project's operating timezone.
-    """
+    """Use Vietnam wall-clock time consistently in read-only app tables."""
     if getattr(st, "_qlda_v7_vn_datetime_policy_installed", False):
         return
 
@@ -104,10 +183,6 @@ def install_vn_datetime_policy_v7(st) -> None:
     st.dataframe = _dataframe_vn
     st.table = _table_vn
 
-    # Containers/columns are DeltaGenerator instances and may call their own
-    # dataframe/table methods instead of the module-level shortcuts. Wrap those
-    # read-only renderers too; data_editor is intentionally not touched so date
-    # editing widgets retain their native value types.
     try:
         from streamlit.delta_generator import DeltaGenerator
 
@@ -127,8 +202,6 @@ def install_vn_datetime_policy_v7(st) -> None:
     except Exception:
         pass
 
-    # Work Tasks comments are rendered as Markdown rather than a dataframe, so
-    # format their read-only activity rows explicitly as part of the UI policy.
     install_work_task_vn_display()
     st._qlda_v7_vn_datetime_policy_installed = True
 
@@ -139,8 +212,6 @@ def render_admin_caption_toggle_v7(st, is_admin: bool) -> None:
     st.session_state[_CAPTION_ADMIN_KEY] = authorized
 
     if not authorized:
-        # A reused browser session must never carry the Admin preference into a
-        # non-Admin account.
         st.session_state[_CAPTION_STATE_KEY] = False
         return
 
@@ -154,289 +225,68 @@ def render_admin_caption_toggle_v7(st, is_admin: bool) -> None:
 
 
 def install_theme_v7(st) -> None:
-    """Render the unified V7 visual layer; no business or persistence logic."""
+    """Render the unified V7 visual layer and register presentation extensions."""
+    install_meeting_minutes_sheet_v7(st)
     st.markdown(
         """
 <style>
 :root {
-  --qlda-navy: #0f2747;
-  --qlda-navy-2: #173b6b;
-  --qlda-blue: #1d4ed8;
-  --qlda-blue-strong: #1746b5;
-  --qlda-blue-soft: #eaf2ff;
-  --qlda-cyan: #0ea5e9;
-  --qlda-indigo: #4f46e5;
-  --qlda-bg: #f4f7fc;
-  --qlda-card: #ffffff;
-  --qlda-card-soft: #f8fbff;
-  --qlda-border: #d6e2f0;
-  --qlda-border-strong: #b9cce5;
-  --qlda-text: #14213d;
-  --qlda-muted: #64748b;
-  --qlda-good: #15803d;
-  --qlda-good-soft: #ecfdf3;
-  --qlda-warn: #b45309;
-  --qlda-warn-soft: #fff7ed;
-  --qlda-bad: #b91c1c;
-  --qlda-bad-soft: #fef2f2;
-  --qlda-shadow: 0 8px 24px rgba(15,39,71,.08);
-  --qlda-shadow-sm: 0 2px 8px rgba(15,39,71,.07);
+  --qlda-navy:#0f2747; --qlda-navy-2:#173b6b; --qlda-blue:#1d4ed8;
+  --qlda-blue-strong:#1746b5; --qlda-blue-soft:#eaf2ff; --qlda-cyan:#0ea5e9;
+  --qlda-indigo:#4f46e5; --qlda-bg:#f4f7fc; --qlda-card:#ffffff;
+  --qlda-card-soft:#f8fbff; --qlda-border:#d6e2f0; --qlda-border-strong:#b9cce5;
+  --qlda-text:#14213d; --qlda-muted:#64748b; --qlda-good:#15803d;
+  --qlda-good-soft:#ecfdf3; --qlda-warn:#b45309; --qlda-warn-soft:#fff7ed;
+  --qlda-bad:#b91c1c; --qlda-bad-soft:#fef2f2;
+  --qlda-shadow:0 8px 24px rgba(15,39,71,.08);
+  --qlda-shadow-sm:0 2px 8px rgba(15,39,71,.07);
 }
-html, body, [class*="css"] { color: var(--qlda-text); }
-.stApp {
-  color: var(--qlda-text);
-  background:
-    radial-gradient(circle at 100% 0%, rgba(29,78,216,.055), transparent 28rem),
-    linear-gradient(180deg,#f8fbff 0%,var(--qlda-bg) 52%,#f7f9fd 100%);
-}
-.block-container {
-  max-width: 1680px;
-  padding-top: .65rem;
-  padding-bottom: 3.2rem;
-}
-h1, h2, h3, h4, h5, h6 { color: var(--qlda-navy) !important; letter-spacing: -.012em; }
-a { color: var(--qlda-blue); }
-a:hover { color: var(--qlda-blue-strong); }
-label, [data-testid="stWidgetLabel"] { color: var(--qlda-text) !important; font-weight: 570; }
-
-/* Sidebar */
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg,#f7faff 0%,#edf4ff 100%);
-  border-right: 1px solid var(--qlda-border);
-  box-shadow: 6px 0 24px rgba(15,39,71,.035);
-}
-[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .55rem; }
-[data-testid="stSidebar"] hr { border-color: #cbd9ea !important; }
-
-/* Tabs: same navigation language everywhere */
-[data-baseweb="tab-list"] {
-  gap: 4px;
-  padding: 4px;
-  background: var(--qlda-blue-soft);
-  border: 1px solid #d5e3fa;
-  border-radius: 12px;
-  overflow-x: auto;
-}
-[data-baseweb="tab"] {
-  min-height: 2.55rem;
-  border-radius: 9px;
-  color: #40516a !important;
-  font-weight: 650;
-  padding-left: 14px !important;
-  padding-right: 14px !important;
-}
-[data-baseweb="tab"]:hover {
-  color: var(--qlda-blue) !important;
-  background: rgba(255,255,255,.62);
-}
-[data-baseweb="tab"][aria-selected="true"] {
-  color: var(--qlda-blue) !important;
-  background: var(--qlda-card);
-  box-shadow: var(--qlda-shadow-sm);
-}
-[data-baseweb="tab-highlight"] { background-color: var(--qlda-blue) !important; height: 3px !important; }
-[data-baseweb="tab-border"] { background-color: transparent !important; }
-
-/* Cards, metrics, expanders and forms */
-[data-testid="stMetric"] {
-  position: relative;
-  background: linear-gradient(145deg,#ffffff 0%,#f8fbff 100%);
-  border: 1px solid var(--qlda-border);
-  border-left: 4px solid var(--qlda-blue);
-  border-radius: 14px;
-  padding: 12px 14px;
-  box-shadow: var(--qlda-shadow-sm);
-}
-[data-testid="stMetricLabel"] { color: var(--qlda-muted); }
-[data-testid="stMetricValue"] { color: var(--qlda-navy); font-weight: 760; }
-[data-testid="stMetricDelta"] { font-weight: 650; }
-[data-testid="stExpander"] {
-  background: var(--qlda-card);
-  border: 1px solid var(--qlda-border);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 1px 4px rgba(15,39,71,.035);
-}
-[data-testid="stExpander"] details > summary:hover { background: #f6f9ff; }
-[data-testid="stForm"] {
-  background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
-  border: 1px solid var(--qlda-border);
-  border-radius: 14px;
-  padding: 14px 16px 8px;
-  box-shadow: 0 2px 10px rgba(15,39,71,.045);
-}
-
-/* Buttons: secondary stays clean; primary actions are unmistakable */
-.stButton > button, .stDownloadButton > button, .stLinkButton > a {
-  border-radius: 10px !important;
-  min-height: 2.45rem;
-  border: 1px solid var(--qlda-border-strong) !important;
-  background: linear-gradient(180deg,#ffffff 0%,#f7faff 100%) !important;
-  color: var(--qlda-navy) !important;
-  font-weight: 650 !important;
-  box-shadow: 0 1px 3px rgba(15,39,71,.05);
-  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
-}
-.stButton > button:hover, .stDownloadButton > button:hover, .stLinkButton > a:hover {
-  border-color: var(--qlda-blue) !important;
-  color: var(--qlda-blue) !important;
-  box-shadow: 0 4px 12px rgba(29,78,216,.12);
-  transform: translateY(-1px);
-}
-.stButton > button[kind="primary"],
-.stDownloadButton > button[kind="primary"] {
-  border-color: var(--qlda-blue) !important;
-  background: linear-gradient(135deg,var(--qlda-blue-strong) 0%,#2563eb 65%,var(--qlda-cyan) 145%) !important;
-  color: #ffffff !important;
-  box-shadow: 0 5px 14px rgba(29,78,216,.22);
-}
-.stButton > button[kind="primary"]:hover,
-.stDownloadButton > button[kind="primary"]:hover {
-  color: #ffffff !important;
-  border-color: #123f9f !important;
-  box-shadow: 0 7px 18px rgba(29,78,216,.29);
-}
-.stButton > button:disabled, .stDownloadButton > button:disabled {
-  opacity: .58;
-  box-shadow: none;
-  transform: none;
-}
-
-/* Inputs and selectors */
-[data-baseweb="input"] > div,
-[data-baseweb="textarea"],
-[data-baseweb="select"] > div,
-[data-baseweb="base-input"] {
-  background-color: #ffffff !important;
-  border-color: var(--qlda-border-strong) !important;
-  border-radius: 10px !important;
-}
-[data-baseweb="input"] > div:focus-within,
-[data-baseweb="textarea"]:focus-within,
-[data-baseweb="select"] > div:focus-within {
-  border-color: var(--qlda-blue) !important;
-  box-shadow: 0 0 0 2px rgba(29,78,216,.10) !important;
-}
-[data-baseweb="tag"] {
-  background: var(--qlda-blue-soft) !important;
-  color: var(--qlda-blue-strong) !important;
-  border: 1px solid #cbdcf8;
-}
-
-/* Uploaders */
-[data-testid="stFileUploaderDropzone"] {
-  background: linear-gradient(135deg,#f7faff 0%,#edf5ff 100%);
-  border: 1.5px dashed #9eb9df;
-  border-radius: 14px;
-}
-[data-testid="stFileUploaderDropzone"]:hover {
-  border-color: var(--qlda-blue);
-  background: #eaf2ff;
-}
-[data-testid="stFileUploaderDropzoneInstructions"] { color: var(--qlda-muted); }
-
-/* Tables and editors */
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
-  border: 1px solid var(--qlda-border);
-  border-top: 3px solid var(--qlda-blue);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--qlda-card);
-  box-shadow: 0 2px 10px rgba(15,39,71,.045);
-}
-
-/* Alerts, status, progress and separators */
-[data-testid="stAlert"] {
-  border-radius: 12px;
-  border-width: 1px;
-  box-shadow: 0 1px 4px rgba(15,39,71,.04);
-}
-[data-testid="stProgressBar"] > div > div > div > div {
-  background: linear-gradient(90deg,var(--qlda-blue) 0%,var(--qlda-cyan) 100%) !important;
-}
-hr { border-color: var(--qlda-border) !important; }
-
-/* Streamlit running-status control: retain its Stop action but replace the
-   misleading accessibility-looking glyph with a rotating globe. */
-@keyframes qlda-v7-globe-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-[data-testid="stStatusWidget"] svg,
-[data-testid="stStatusWidget"] [data-testid="stIconMaterial"] {
-  display:none !important;
-}
-[data-testid="stStatusWidget"]::before {
-  content:"🌍";
-  display:inline-block;
-  margin-right:7px;
-  font-size:20px;
-  line-height:1;
-  transform-origin:center;
-  animation:qlda-v7-globe-spin 1.35s linear infinite;
-  vertical-align:middle;
-}
-
-/* QLDA branded surfaces */
-.qlda-v7-hero {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:16px;
-  background:
-    radial-gradient(circle at 92% 15%,rgba(255,255,255,.20),transparent 9rem),
-    linear-gradient(135deg,var(--qlda-navy) 0%,#16477d 48%,var(--qlda-blue) 100%);
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:17px;
-  padding:16px 19px;
-  margin:.1rem 0 .9rem 0;
-  box-shadow:0 10px 28px rgba(15,39,71,.16);
-}
-.qlda-v7-title { font-size:1.42rem; font-weight:800; color:#ffffff; line-height:1.15; letter-spacing:.01em; }
-.qlda-v7-project { font-size:.99rem; font-weight:680; color:#f8fbff; margin-top:5px; }
-.qlda-v7-contractor { font-size:.85rem; color:#dce9fb; margin-top:3px; }
-.qlda-v7-user { text-align:right; font-size:.82rem; color:#e8f1ff; white-space:nowrap; }
-.qlda-v7-badge {
-  display:inline-block; padding:4px 10px; border-radius:999px;
-  background:rgba(255,255,255,.94); color:var(--qlda-blue-strong); font-size:.76rem; font-weight:750;
-  box-shadow:0 2px 8px rgba(4,20,47,.12);
-}
-.qlda-v7-actions {
-  background:linear-gradient(135deg,#fffdf9 0%,var(--qlda-warn-soft) 100%);
-  border:1px solid #f2d4ad; border-left:4px solid #f59e0b; border-radius:14px;
-  padding:12px 14px; margin:.7rem 0 .8rem 0;
-  box-shadow:0 2px 10px rgba(180,83,9,.06);
-}
-.qlda-v7-actions-title { font-weight:760; color:#7c3b08; margin-bottom:7px; }
-.qlda-v7-action-row { display:flex; gap:7px; flex-wrap:wrap; }
-.qlda-v7-chip {
-  border:1px solid #f0c38c; background:#fff8ed; color:#92400e;
-  border-radius:999px; padding:5px 10px; font-size:.82rem; font-weight:620;
-}
-.qlda-v7-chip.good { border-color:#bde3ca; background:var(--qlda-good-soft); color:#166534; }
-.qlda-v7-section-title {
-  font-size:1.02rem; font-weight:780; color:var(--qlda-navy); margin:.35rem 0 .48rem;
-  padding-left:9px; border-left:4px solid var(--qlda-blue);
-}
-.qlda-v7-credit {
-  position:fixed; right:16px; bottom:8px; z-index:999999;
-  font-size:10.5px; letter-spacing:.1px; color:#27405f;
-  background:rgba(255,255,255,.94); border:1px solid rgba(185,204,229,.86);
-  border-radius:999px; padding:3px 8px; pointer-events:none; backdrop-filter:blur(5px);
-  box-shadow:0 2px 8px rgba(15,39,71,.08);
-}
-
-@media (max-width: 760px) {
-  .block-container { padding-left:.75rem; padding-right:.75rem; padding-top:.45rem; }
-  [data-baseweb="tab-list"] { padding:3px; border-radius:10px; }
-  [data-baseweb="tab"] { padding-left:10px !important; padding-right:10px !important; min-height:2.35rem; }
-  .qlda-v7-hero { align-items:flex-start; padding:13px 14px; border-radius:15px; }
-  .qlda-v7-title { font-size:1.18rem; }
-  .qlda-v7-project { font-size:.9rem; }
-  .qlda-v7-user { display:none; }
-  .qlda-v7-credit { right:8px; bottom:5px; font-size:9px; }
-  [data-testid="stMetric"] { padding:10px 11px; }
-}
+html,body,[class*="css"]{color:var(--qlda-text)}
+.stApp{color:var(--qlda-text);background:radial-gradient(circle at 100% 0%,rgba(29,78,216,.055),transparent 28rem),linear-gradient(180deg,#f8fbff 0%,var(--qlda-bg) 52%,#f7f9fd 100%)}
+.block-container{max-width:1680px;padding-top:.65rem;padding-bottom:3.2rem}
+h1,h2,h3,h4,h5,h6{color:var(--qlda-navy)!important;letter-spacing:-.012em}
+a{color:var(--qlda-blue)} a:hover{color:var(--qlda-blue-strong)}
+label,[data-testid="stWidgetLabel"]{color:var(--qlda-text)!important;font-weight:570}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#f7faff 0%,#edf4ff 100%);border-right:1px solid var(--qlda-border);box-shadow:6px 0 24px rgba(15,39,71,.035)}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:.55rem}
+[data-testid="stSidebar"] hr{border-color:#cbd9ea!important}
+[data-baseweb="tab-list"]{gap:4px;padding:4px;background:var(--qlda-blue-soft);border:1px solid #d5e3fa;border-radius:12px;overflow-x:auto}
+[data-baseweb="tab"]{min-height:2.55rem;border-radius:9px;color:#40516a!important;font-weight:650;padding-left:14px!important;padding-right:14px!important}
+[data-baseweb="tab"]:hover{color:var(--qlda-blue)!important;background:rgba(255,255,255,.62)}
+[data-baseweb="tab"][aria-selected="true"]{color:var(--qlda-blue)!important;background:var(--qlda-card);box-shadow:var(--qlda-shadow-sm)}
+[data-baseweb="tab-highlight"]{background-color:var(--qlda-blue)!important;height:3px!important}
+[data-baseweb="tab-border"]{background-color:transparent!important}
+[data-testid="stMetric"]{position:relative;background:linear-gradient(145deg,#fff 0%,#f8fbff 100%);border:1px solid var(--qlda-border);border-left:4px solid var(--qlda-blue);border-radius:14px;padding:12px 14px;box-shadow:var(--qlda-shadow-sm)}
+[data-testid="stMetricLabel"]{color:var(--qlda-muted)} [data-testid="stMetricValue"]{color:var(--qlda-navy);font-weight:760} [data-testid="stMetricDelta"]{font-weight:650}
+[data-testid="stExpander"]{background:var(--qlda-card);border:1px solid var(--qlda-border);border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(15,39,71,.035)}
+[data-testid="stExpander"] details>summary:hover{background:#f6f9ff}
+[data-testid="stForm"]{background:linear-gradient(180deg,#fff 0%,#fbfdff 100%);border:1px solid var(--qlda-border);border-radius:14px;padding:14px 16px 8px;box-shadow:0 2px 10px rgba(15,39,71,.045)}
+.stButton>button,.stDownloadButton>button,.stLinkButton>a{border-radius:10px!important;min-height:2.45rem;border:1px solid var(--qlda-border-strong)!important;background:linear-gradient(180deg,#fff 0%,#f7faff 100%)!important;color:var(--qlda-navy)!important;font-weight:650!important;box-shadow:0 1px 3px rgba(15,39,71,.05);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
+.stButton>button:hover,.stDownloadButton>button:hover,.stLinkButton>a:hover{border-color:var(--qlda-blue)!important;color:var(--qlda-blue)!important;box-shadow:0 4px 12px rgba(29,78,216,.12);transform:translateY(-1px)}
+.stButton>button[kind="primary"],.stDownloadButton>button[kind="primary"]{border-color:var(--qlda-blue)!important;background:linear-gradient(135deg,var(--qlda-blue-strong) 0%,#2563eb 65%,var(--qlda-cyan) 145%)!important;color:#fff!important;box-shadow:0 5px 14px rgba(29,78,216,.22)}
+.stButton>button[kind="primary"]:hover,.stDownloadButton>button[kind="primary"]:hover{color:#fff!important;border-color:#123f9f!important;box-shadow:0 7px 18px rgba(29,78,216,.29)}
+.stButton>button:disabled,.stDownloadButton>button:disabled{opacity:.58;box-shadow:none;transform:none}
+[data-baseweb="input"]>div,[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-baseweb="base-input"]{background-color:#fff!important;border-color:var(--qlda-border-strong)!important;border-radius:10px!important}
+[data-baseweb="input"]>div:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]>div:focus-within{border-color:var(--qlda-blue)!important;box-shadow:0 0 0 2px rgba(29,78,216,.10)!important}
+[data-baseweb="tag"]{background:var(--qlda-blue-soft)!important;color:var(--qlda-blue-strong)!important;border:1px solid #cbdcf8}
+[data-testid="stFileUploaderDropzone"]{background:linear-gradient(135deg,#f7faff 0%,#edf5ff 100%);border:1.5px dashed #9eb9df;border-radius:14px}
+[data-testid="stFileUploaderDropzone"]:hover{border-color:var(--qlda-blue);background:#eaf2ff}
+[data-testid="stFileUploaderDropzoneInstructions"]{color:var(--qlda-muted)}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"]{border:1px solid var(--qlda-border);border-top:3px solid var(--qlda-blue);border-radius:12px;overflow:hidden;background:var(--qlda-card);box-shadow:0 2px 10px rgba(15,39,71,.045)}
+[data-testid="stAlert"]{border-radius:12px;border-width:1px;box-shadow:0 1px 4px rgba(15,39,71,.04)}
+[data-testid="stProgressBar"]>div>div>div>div{background:linear-gradient(90deg,var(--qlda-blue) 0%,var(--qlda-cyan) 100%)!important}
+hr{border-color:var(--qlda-border)!important}
+@keyframes qlda-v7-globe-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+[data-testid="stStatusWidget"] svg,[data-testid="stStatusWidget"] [data-testid="stIconMaterial"]{display:none!important}
+[data-testid="stStatusWidget"]::before{content:"🌍";display:inline-block;margin-right:7px;font-size:20px;line-height:1;transform-origin:center;animation:qlda-v7-globe-spin 1.35s linear infinite;vertical-align:middle}
+.qlda-v7-hero{display:flex;align-items:center;justify-content:space-between;gap:16px;background:radial-gradient(circle at 92% 15%,rgba(255,255,255,.20),transparent 9rem),linear-gradient(135deg,var(--qlda-navy) 0%,#16477d 48%,var(--qlda-blue) 100%);border:1px solid rgba(255,255,255,.12);border-radius:17px;padding:16px 19px;margin:.1rem 0 .9rem 0;box-shadow:0 10px 28px rgba(15,39,71,.16)}
+.qlda-v7-title{font-size:1.42rem;font-weight:800;color:#fff;line-height:1.15;letter-spacing:.01em}.qlda-v7-project{font-size:.99rem;font-weight:680;color:#f8fbff;margin-top:5px}.qlda-v7-contractor{font-size:.85rem;color:#dce9fb;margin-top:3px}.qlda-v7-user{text-align:right;font-size:.82rem;color:#e8f1ff;white-space:nowrap}
+.qlda-v7-badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.94);color:var(--qlda-blue-strong);font-size:.76rem;font-weight:750;box-shadow:0 2px 8px rgba(4,20,47,.12)}
+.qlda-v7-actions{background:linear-gradient(135deg,#fffdf9 0%,var(--qlda-warn-soft) 100%);border:1px solid #f2d4ad;border-left:4px solid #f59e0b;border-radius:14px;padding:12px 14px;margin:.7rem 0 .8rem 0;box-shadow:0 2px 10px rgba(180,83,9,.06)}
+.qlda-v7-actions-title{font-weight:760;color:#7c3b08;margin-bottom:7px}.qlda-v7-action-row{display:flex;gap:7px;flex-wrap:wrap}.qlda-v7-chip{border:1px solid #f0c38c;background:#fff8ed;color:#92400e;border-radius:999px;padding:5px 10px;font-size:.82rem;font-weight:620}.qlda-v7-chip.good{border-color:#bde3ca;background:var(--qlda-good-soft);color:#166534}
+.qlda-v7-section-title{font-size:1.02rem;font-weight:780;color:var(--qlda-navy);margin:.35rem 0 .48rem;padding-left:9px;border-left:4px solid var(--qlda-blue)}
+.qlda-v7-credit{position:fixed;right:16px;bottom:8px;z-index:999999;font-size:10.5px;letter-spacing:.1px;color:#27405f;background:rgba(255,255,255,.94);border:1px solid rgba(185,204,229,.86);border-radius:999px;padding:3px 8px;pointer-events:none;backdrop-filter:blur(5px);box-shadow:0 2px 8px rgba(15,39,71,.08)}
+@media(max-width:760px){.block-container{padding-left:.75rem;padding-right:.75rem;padding-top:.45rem}[data-baseweb="tab-list"]{padding:3px;border-radius:10px}[data-baseweb="tab"]{padding-left:10px!important;padding-right:10px!important;min-height:2.35rem}.qlda-v7-hero{align-items:flex-start;padding:13px 14px;border-radius:15px}.qlda-v7-title{font-size:1.18rem}.qlda-v7-project{font-size:.9rem}.qlda-v7-user{display:none}.qlda-v7-credit{right:8px;bottom:5px;font-size:9px}[data-testid="stMetric"]{padding:10px 11px}}
 </style>
 <div class="qlda-v7-credit">by: Hoàng Mạnh Hùng &amp; AI</div>
         """,
