@@ -41,8 +41,12 @@ class ServiceLayerV626Tests(unittest.TestCase):
     def test_version_and_service_layer_marker(self):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         self.assertGreaterEqual(version, (6, 26))
-        self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
-        self.assertEqual(qlda.SERVICE_LAYER, "application-services")
+        if version >= (7, 0):
+            self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
+            self.assertEqual(qlda.SERVICE_LAYER, "application-use-cases")
+        else:
+            self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
+            self.assertEqual(qlda.SERVICE_LAYER, "application-services")
 
     def test_public_services_are_available(self):
         for service in (
@@ -105,11 +109,17 @@ class ServiceLayerV626Tests(unittest.TestCase):
             self.assertEqual(output["workspace_project_id"], 9)
             self.assertEqual(fake.calls[-1][0], 9)
 
-    def test_production_worker_depends_on_services_not_versioned_domain_files(self):
+    def test_production_worker_keeps_v626_or_stronger_boundary(self):
         source = (SRC / "qlda" / "modules" / "excel" / "worker.py").read_text(encoding="utf-8")
-        self.assertIn("ExcelImportService", source)
-        self.assertIn("FileService", source)
-        self.assertIn("JobService", source)
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        if version >= (7, 0):
+            self.assertIn("get_application", source)
+            self.assertNotIn("from qlda.services", source)
+            self.assertNotIn("from qlda.infrastructure", source)
+        else:
+            self.assertIn("ExcelImportService", source)
+            self.assertIn("FileService", source)
+            self.assertIn("JobService", source)
         for forbidden in (
             "excel_worker_v624",
             "boq_background_v624",

@@ -20,7 +20,9 @@ class ModularMonolithV625Tests(unittest.TestCase):
     def test_package_version_and_repo_root(self):
         version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
         self.assertGreaterEqual(version, (6, 25))
-        self.assertEqual(qlda.ARCHITECTURE, "modular-monolith")
+        self.assertIn(qlda.ARCHITECTURE, {"modular-monolith", "clean-architecture"})
+        if version >= (7, 0):
+            self.assertEqual(qlda.ARCHITECTURE, "clean-architecture")
         self.assertEqual(REPO_ROOT, ROOT)
         self.assertEqual(ensure_repo_root_on_path(), ROOT)
 

@@ -15,15 +15,13 @@ class V627FastAPITests(unittest.TestCase):
     def test_version_and_api_marker(self):
         import qlda
 
-        self.assertEqual(qlda.__version__, "6.27")
+        version = tuple(int(x) for x in qlda.__version__.split(".")[:2])
+        self.assertGreaterEqual(version, (6, 27))
         self.assertEqual(qlda.HTTP_API, "fastapi")
 
     def test_expected_routes_exist(self):
         from qlda.presentation.api.app import app
 
-        # OpenAPI is the public HTTP contract. This remains stable even when
-        # newer FastAPI/Starlette versions keep included routers as internal
-        # marker objects instead of flattening them into ``app.routes``.
         paths = set(app.openapi().get("paths", {}))
         expected = {
             "/api/health",
@@ -50,6 +48,8 @@ class V627FastAPITests(unittest.TestCase):
     def test_service_boundaries_exist(self):
         for name in ("auth.py", "access.py", "ai.py", "search.py"):
             self.assertTrue((SRC / "qlda" / "services" / name).exists(), name)
+        self.assertTrue((SRC / "qlda" / "domain" / "ports.py").exists())
+        self.assertTrue((SRC / "qlda" / "application" / "services.py").exists())
 
     def test_vps_runtime_is_separate(self):
         service = (ROOT / "vps" / "qlda-api.service").read_text(encoding="utf-8")
