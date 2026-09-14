@@ -21,7 +21,14 @@ class V627FastAPITests(unittest.TestCase):
     def test_expected_routes_exist(self):
         from qlda.presentation.api.app import app
 
-        paths = {route.path for route in app.routes}
+        # Newer FastAPI/Starlette releases may expose internal router marker
+        # objects alongside real HTTP routes. Only route objects with a public
+        # ``path`` attribute participate in the endpoint contract.
+        paths = {
+            path
+            for route in app.routes
+            if (path := getattr(route, "path", None)) is not None
+        }
         expected = {
             "/api/health",
             "/api/docs",
