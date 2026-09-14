@@ -3,7 +3,12 @@ from __future__ import annotations
 import ast
 import base64
 import gzip
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from build_v621_webopt import _finalize_source
 from v622_auth_refresh_v4 import patch_auth_refresh_v4
@@ -22,7 +27,6 @@ from v622_original_import_patch import patch_original_import_storage
 from v624_excel_background_patch import patch_excel_background_v624
 from v622_ui_v7_compact_patch import patch_ui_v7_compact
 
-ROOT = Path(__file__).resolve().parents[1]
 PARTS = ROOT / "v621_webopt_source"
 OUT = ROOT / "src/qlda/presentation/streamlit/materialized_app.py"
 MANIFEST = ROOT / "docs/architecture/V7.6_MATERIALIZED_STREAMLIT_IMPORTS.txt"
@@ -92,6 +96,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Intentional V7.6 trigger marker: once materialized source is committed,
-    # this one-time migration utility will be removed before the final release.
     main()
