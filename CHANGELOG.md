@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## V6.26 — Service Layer
+- Bổ sung application layer `qlda.services` cho BOQ, IPC/Claim, VO, Schedule, Files, Jobs và Excel dispatch; adapter giao diện/worker có một boundary ổn định để gọi nghiệp vụ.
+- Chuyển Excel worker production sang `ExcelImportService`, `FileService` và `JobService`; worker không còn import trực tiếp các implementation versioned `*_v624.py` hoặc `local_vps_backend_v622.py`.
+- Gom khởi tạo `CloudDatabase` và PostgreSQL compatibility patch vào `qlda.infrastructure.database.make_database()` để giảm dần monkey patch rải rác.
+- `BOQService`, `IPCService`, `VOService` và `ScheduleService` đóng gói parse + persistence + kết quả xác minh PostgreSQL, nhưng vẫn giữ nguyên parser, transaction, revision, rollback và công thức nghiệp vụ V6.24.
+- `ExcelImportService` trở thành boundary dùng chung cho `BOQ`, `BOQ_IMPORT`, `IPC`, `VO`, `SCHEDULE_EXCEL` và `WORKBOOK_SCAN`, sẵn sàng tái sử dụng ở V6.27 FastAPI.
+- Bổ sung tài liệu kiến trúc `docs/architecture/V6.26_SERVICE_LAYER.md`, test boundary và workflow `V6.26 Service Layer Check`; CI V6.25 được giữ làm regression check cho Modular Monolith.
+- Không thay đổi schema PostgreSQL, dữ liệu dự án, quyền, workflow phê duyệt, file gốc hoặc cơ chế xác minh số dòng của các pipeline hiện hữu.
+
 ## V6.25 — Modular Monolith
 - Tạo namespace chuẩn `src/qlda/...` với các boundary `modules`, `infrastructure`, `presentation`, `shared`; chuyển từ cấu trúc phẳng bằng chiến lược strangler thay vì rewrite toàn bộ một lần.
 - Cố định ownership/dependency cho BOQ, IPC/Claim, VO, Schedule và Excel trong module registry.
