@@ -1,5 +1,5 @@
 [Unit]
-Description=QLDA V6.27 FastAPI
+Description=QLDA V7.6 FastAPI
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,10 @@ Group=qlda
 WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/qlda/app/src
+Environment=HOME=/opt/qlda/shared
+Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
 Environment=MKL_NUM_THREADS=1
@@ -23,6 +26,7 @@ KillSignal=SIGINT
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ProtectHome=true
 ReadWritePaths=/opt/qlda /var/log/qlda
 MemoryHigh=1200M
 MemoryMax=1800M
