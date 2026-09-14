@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import sys
 import unittest
@@ -11,6 +12,17 @@ SRC = ROOT / "src"
 for path in (str(SRC), str(ROOT)):
     if path not in sys.path:
         sys.path.insert(0, path)
+
+
+def imported_modules(source: str) -> set[str]:
+    tree = ast.parse(source)
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
 
 
 class V710NativeAdaptersTests(unittest.TestCase):
@@ -30,20 +42,21 @@ class V710NativeAdaptersTests(unittest.TestCase):
 
     def test_native_adapters_have_no_service_or_legacy_module_dependency(self):
         infrastructure = SRC / "qlda" / "infrastructure"
+        forbidden_prefixes = (
+            "qlda.services",
+            "qlda.shared.legacy",
+            "local_vps_backend_v622",
+            "excel_jobs_v624",
+        )
         for name in ("native_session.py", "native_files.py", "native_jobs.py", "native_search.py"):
             source = (infrastructure / name).read_text(encoding="utf-8")
-            for forbidden_import in (
-                "from qlda.services",
-                "import qlda.services",
-                "from qlda.shared.legacy",
-                "import qlda.shared.legacy",
-                "load_module(",
-                "from local_vps_backend_v622",
-                "import local_vps_backend_v622",
-                "from excel_jobs_v624",
-                "import excel_jobs_v624",
-            ):
-                self.assertNotIn(forbidden_import, source, name)
+            imports = imported_modules(source)
+            for module in imports:
+                self.assertFalse(
+                    any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden_prefixes),
+                    f"{name}: forbidden import {module}",
+                )
+            self.assertNotIn("load_module(", source, name)
 
     def test_legacy_adapter_surface_is_reduced_to_three_business_heavy_areas(self):
         source = (
