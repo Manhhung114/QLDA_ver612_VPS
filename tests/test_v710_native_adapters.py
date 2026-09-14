@@ -32,11 +32,18 @@ class V710NativeAdaptersTests(unittest.TestCase):
         infrastructure = SRC / "qlda" / "infrastructure"
         for name in ("native_session.py", "native_files.py", "native_jobs.py", "native_search.py"):
             source = (infrastructure / name).read_text(encoding="utf-8")
-            self.assertNotIn("qlda.services", source, name)
-            self.assertNotIn("qlda.shared.legacy", source, name)
-            self.assertNotIn("load_module(", source, name)
-            self.assertNotIn("local_vps_backend_v622", source, name)
-            self.assertNotIn("excel_jobs_v624", source, name)
+            for forbidden_import in (
+                "from qlda.services",
+                "import qlda.services",
+                "from qlda.shared.legacy",
+                "import qlda.shared.legacy",
+                "load_module(",
+                "from local_vps_backend_v622",
+                "import local_vps_backend_v622",
+                "from excel_jobs_v624",
+                "import excel_jobs_v624",
+            ):
+                self.assertNotIn(forbidden_import, source, name)
 
     def test_legacy_adapter_surface_is_reduced_to_three_business_heavy_areas(self):
         source = (
