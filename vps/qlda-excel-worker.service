@@ -1,5 +1,5 @@
 [Unit]
-Description=QLDA V6.25 Modular Excel Worker
+Description=QLDA V7.6 Packaged Excel Worker
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -11,7 +11,7 @@ WorkingDirectory=/opt/qlda/app
 EnvironmentFile=/opt/qlda/shared/qlda.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=PYTHONPATH=/opt/qlda/app/src:/opt/qlda/app
+Environment=PYTHONPATH=/opt/qlda/app/src
 Environment=HOME=/opt/qlda/shared
 Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
 Environment=OPENBLAS_NUM_THREADS=1
@@ -19,7 +19,6 @@ Environment=OMP_NUM_THREADS=1
 Environment=MKL_NUM_THREADS=1
 Environment=NUMEXPR_NUM_THREADS=1
 Environment=MALLOC_ARENA_MAX=2
-# V6.24 compatibility marker: proven implementation remains excel_worker_v624.py behind the V6.25 facade.
 ExecStart=/opt/qlda/venv/bin/python -m qlda.modules.excel.worker --poll-seconds 2
 Restart=always
 RestartSec=5
@@ -30,7 +29,6 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/opt/qlda /var/log/qlda
-# Protect the 4-vCPU / 8-GB VPS from one Excel job exhausting the web app.
 CPUQuota=250%
 MemoryHigh=2G
 MemoryMax=3G
