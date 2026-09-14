@@ -70,7 +70,7 @@ RUN python -m compileall -q src/qlda \
       local_vps_runtime_fix_v622.py \
       v622_local_vps_patch.py \
     && python build_v621_webopt.py \
-    && python -c "import qlda; assert qlda.__version__ == '6.25'; print('QLDA modular package OK')" \
+    && python -c "import qlda; version=tuple(map(int, qlda.__version__.split('.')[:2])); assert version >= (6, 25), qlda.__version__; print('QLDA modular package OK:', qlda.__version__)" \
     && python -c "import mpp_cloud_reader; mpp_cloud_reader._ensure_jvm(); print('MPP runtime OK')"
 
 EXPOSE 8501
