@@ -178,8 +178,11 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
-        # Cashflow V1 is additive to Quản lý chi phí and forecasts from live Claim/Payment data.
+        # Cashflow V1 preserves live Claim/Payment behavior; V2 layers BOQ + schedule
+        # future cashflow on top without replacing or rewriting the Claim source data.
         from qlda.runtime_core.cashflow_forecast_v1 import install_cashflow_forecast_v1
+        from qlda.runtime_core.cashflow_forecast_v2 import install_cashflow_forecast_v2
         install_cashflow_forecast_v1()
+        install_cashflow_forecast_v2()
 
         _UI_READY = True
