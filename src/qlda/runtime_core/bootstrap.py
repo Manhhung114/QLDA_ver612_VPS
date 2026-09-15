@@ -172,4 +172,9 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.document_management_vps_ui import install_document_management_vps_ui
         install_document_management_vps_ui()
 
+        # ERP vật tư CĐT cấp is additive to the existing Vật tư & thiết bị screen.
+        # It keeps owner stock, contractor custody, installed quantity and reconciliation separate.
+        from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
+        install_owner_supplied_material_erp()
+
         _UI_READY = True
