@@ -71,9 +71,11 @@ def initialize_business_runtime() -> None:
 
         from qlda.runtime_core.work_tasks_v1 import install_work_tasks_v1
         from qlda.runtime_core.work_task_email_notification import install_work_task_email_notification
+        from qlda.runtime_core.work_task_delete import install_work_task_delete
         from qlda.runtime_core.contract_duration import install_contract_duration_v622
         install_work_tasks_v1()
         install_work_task_email_notification()
+        install_work_task_delete()
         install_contract_duration_v622()
 
         # Keep BOQ/IPC parser behavior identical for Streamlit and worker paths.
