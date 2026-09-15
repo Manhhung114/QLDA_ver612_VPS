@@ -189,4 +189,10 @@ def initialize_runtime() -> None:
         install_cashflow_forecast_v2()
         install_cashflow_forecast_v3()
 
+        # Final UI policy: every Streamlit expander starts closed. Legacy modules
+        # that requested expanded=True are normalized to collapsed and open only
+        # after the user clicks the section header.
+        from qlda.runtime_core.ui_expander_default_collapsed import install_expanders_default_collapsed
+        install_expanders_default_collapsed()
+
         _UI_READY = True
