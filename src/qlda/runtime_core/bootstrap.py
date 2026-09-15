@@ -145,13 +145,15 @@ def initialize_ai_runtime() -> None:
         install_ai_access_guard()
 
         # Shared assistant reads the final composed project context, searchable PDFs,
-        # scanned PDFs and the live ERP ledger for owner-supplied materials.
+        # scanned PDFs, owner-supplied materials and live V3 cashflow forecast.
         from qlda.runtime_core.ai_vps_pdf_fullscan import install_ai_vps_pdf_fullscan
         from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
         from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
+        from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
         install_ai_vps_pdf_fullscan()
         install_ai_vps_pdf_vision()
         install_owner_material_ai_context()
+        install_cashflow_ai_context()
         _AI_READY = True
 
 
@@ -178,11 +180,13 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
-        # Cashflow V1 preserves live Claim/Payment behavior; V2 layers BOQ + schedule
-        # future cashflow on top without replacing or rewriting the Claim source data.
+        # Cashflow V1 keeps Claim/Payment, V2 adds BOQ + schedule and V3 adds
+        # scenario comparison, alerts, delay simulation and shared-AI analysis.
         from qlda.runtime_core.cashflow_forecast_v1 import install_cashflow_forecast_v1
         from qlda.runtime_core.cashflow_forecast_v2 import install_cashflow_forecast_v2
+        from qlda.runtime_core.cashflow_forecast_v3 import install_cashflow_forecast_v3
         install_cashflow_forecast_v1()
         install_cashflow_forecast_v2()
+        install_cashflow_forecast_v3()
 
         _UI_READY = True
