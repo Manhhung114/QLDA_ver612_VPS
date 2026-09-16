@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-"""Preserve signed contract appendices and VO reductions in Project Cost Management.
+"""Preserve signed contract appendices and approved VO reductions in Project Cost Management.
 
-Phụ lục/VO có thể tăng hoặc giảm giá trị hợp đồng; không được ép số âm về 0.
+Phụ lục/VO có thể tăng hoặc giảm giá trị; không được ép số âm về 0. Independent
+VO records in variation_orders are authoritative for VO proposal/approval values.
 """
 
 from typing import Any
 
-PATCH_MARKER = "V7.6 PROJECT COST SIGNED ADJUSTMENTS V1"
+PATCH_MARKER = "V7.6 PROJECT COST SIGNED ADJUSTMENTS V2 VO APPROVAL"
 
 
 def _text(value: Any) -> str:
@@ -51,14 +52,35 @@ def install_project_cost_signed_adjustments() -> None:
         }
 
     def vo_summary(db, pid: int) -> dict[str, float]:
-        proposed = approved = 0.0
+        # New independent VO storage is authoritative. Only explicit Đã duyệt
+        # records contribute to approved VO. Signed reductions remain negative.
         with db.connect() as connection:
+            if pcm._table_exists(connection, "variation_orders"):
+                try:
+                    rows = connection.execute(
+                        "SELECT proposed_amount,approved_amount,status FROM variation_orders WHERE project_id=? ORDER BY vo_no",
+                        (int(pid),),
+                    ).fetchall()
+                except Exception:
+                    rows = []
+                if rows:
+                    proposed = 0.0
+                    approved = 0.0
+                    for raw in rows:
+                        row = pcm._rowdict(raw)
+                        proposed += _float(row.get("proposed_amount"))
+                        if _text(row.get("status")) == "Đã duyệt":
+                            approved += _float(row.get("approved_amount"))
+                    return {"proposed": proposed, "approved": approved}
+
+            # Legacy/manual fallback.
             if not pcm._table_exists(connection, "cost_variations"):
                 return {"proposed": 0.0, "approved": 0.0}
             try:
                 rows = connection.execute("SELECT * FROM cost_variations WHERE project_id=?", (int(pid),)).fetchall()
             except Exception:
                 rows = []
+        proposed = approved = 0.0
         for raw in rows:
             row = pcm._rowdict(raw)
             proposed += _float(row.get("proposed_amount"))
