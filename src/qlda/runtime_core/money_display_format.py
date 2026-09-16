@@ -13,7 +13,7 @@ import re
 import unicodedata
 from typing import Any
 
-PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V2"
+PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V3"
 
 
 def _norm(value: Any) -> str:
@@ -24,63 +24,24 @@ def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# Deliberately conservative: format monetary/value columns, not generic IDs,
-# quantities, dates, percentages or progress columns.
 _MONEY_TERMS = (
-    "gia tri",
-    "thanh tien",
-    "don gia",
-    "chi phi",
-    "ngan sach",
-    "baseline",
-    "budget",
-    "amount",
-    "cost",
-    "committed",
-    "thanh toan",
-    "giai ngan",
-    "con phai",
-    "de nghi",
-    "duoc duyet",
-    "chung nhan",
-    "nghiem thu",
-    "tam ung",
-    "thu hoi",
-    "giu lai",
-    "khau tru",
-    "du phong",
-    "doanh thu",
-    "forecast",
-    "expected",
-    "actual cost",
-    "planned amount",
-    "approved amount",
-    "paid amount",
-    "outstanding",
-    "certified",
-    "proposed amount",
+    "gia tri", "thanh tien", "don gia", "chi phi", "ngan sach",
+    "baseline", "budget", "amount", "cost", "committed", "thanh toan",
+    "giai ngan", "con phai", "de nghi", "duoc duyet", "chung nhan",
+    "nghiem thu", "tam ung", "thu hoi", "giu lai", "khau tru", "du phong",
+    "doanh thu", "forecast", "expected", "actual cost", "planned amount",
+    "approved amount", "paid amount", "outstanding", "certified", "proposed amount",
 )
 _EXCLUDE_TERMS = (
-    "%",
-    "phan tram",
-    "ty le",
-    "cpi",
-    "spi",
-    "tcpi",
-    "so ngay",
-    "ngay",
-    "so luong",
-    "quantity",
-    "progress",
+    "%", "phan tram", "ty le", "cpi", "spi", "tcpi", "so ngay", "ngay",
+    "so luong", "quantity", "progress",
 )
 
 
 def _is_money_column(name: Any) -> bool:
     raw = str(name or "")
     n = _norm(raw)
-    if not n:
-        return False
-    if "%" in raw:
+    if not n or "%" in raw:
         return False
     if any(term in n for term in _EXCLUDE_TERMS if term != "%"):
         return False
@@ -88,7 +49,6 @@ def _is_money_column(name: Any) -> bool:
 
 
 def _currency_string(text: str) -> tuple[str, str] | None:
-    """Split a simple numeric currency string into numeric part + suffix."""
     match = re.fullmatch(r"\s*([-+]?\d[\d.,]*)\s*(VND|USD|EUR|Đ|đ)\s*", text, flags=re.IGNORECASE)
     if not match:
         return None
@@ -99,13 +59,11 @@ def _parse_display_number(text: str) -> float | None:
     raw = text.strip()
     if not raw:
         return None
-    # Existing QLDA contract formatter used dots as thousands separators.
     if re.fullmatch(r"[-+]?\d{1,3}(?:\.\d{3})+", raw):
         raw = raw.replace(".", "")
     elif re.fullmatch(r"[-+]?\d{1,3}(?:,\d{3})+", raw):
         raw = raw.replace(",", "")
     else:
-        # A single dot is treated as a decimal separator; commas are thousands.
         raw = raw.replace(",", "")
     if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", raw):
         return None
@@ -136,7 +94,6 @@ def _format_number(value: Any) -> Any:
                 return value
             suffix = cur[1].upper() if cur[1].lower() != "đ" else "đ"
             return f"{_render_number(number)} {suffix}"
-        # Keep human-readable compact values such as 1.25 tỷ / 500 triệu.
         low = text.lower()
         if any(unit in low for unit in (" tỷ", " ty", " triệu", " trieu")):
             return value
@@ -150,7 +107,6 @@ def _format_number(value: Any) -> Any:
             number = float(value)
         except Exception:
             return value
-
     if not math.isfinite(number):
         return value
     return _render_number(number)
@@ -163,7 +119,6 @@ def format_money_columns(data: Any) -> Any:
     except Exception:
         return data
 
-    # Do not rewrite pandas Styler objects; callers may have explicit formatting.
     if data.__class__.__name__ == "Styler":
         return data
 
@@ -196,6 +151,27 @@ def format_money_columns(data: Any) -> Any:
     return frame if changed else data
 
 
+def _patch_contract_amount_formatter() -> None:
+    """Keep Contract/Hồ sơ detail views consistent with comma separators."""
+    try:
+        import qlda.runtime_core.contract_management as cm
+
+        def _format_amount_comma(value: Any, currency: str = "VND") -> str:
+            try:
+                amount = float(value or 0)
+            except Exception:
+                amount = 0.0
+            if not amount:
+                return "—"
+            cur = str(currency or "VND").strip().upper() or "VND"
+            return f"{_render_number(amount)} {cur}"
+
+        cm._format_amount = _format_amount_comma
+        cm._qlda_money_display_format_marker = PATCH_MARKER
+    except Exception:
+        pass
+
+
 def install_money_display_format() -> None:
     import streamlit as st
 
@@ -215,6 +191,7 @@ def install_money_display_format() -> None:
 
     st.dataframe = dataframe_with_money_format
     st.table = table_with_money_format
+    _patch_contract_amount_formatter()
     st._qlda_money_display_format_installed = True
     st._qlda_money_display_format_marker = PATCH_MARKER
 
