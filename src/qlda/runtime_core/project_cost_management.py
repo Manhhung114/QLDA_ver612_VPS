@@ -16,6 +16,13 @@ from functools import wraps
 import inspect
 from typing import Any
 
+from qlda.runtime_core.finance_common import (
+    actual_progress as _actual_progress,
+    planned_progress as _planned_progress,
+    resolve_scope as _shared_resolve_scope,
+    task_ref as _task_ref,
+)
+
 PATCH_MARKER = "V7.6 PROJECT COST MANAGEMENT PMBOK V1"
 SETTINGS_TABLE = "project_cost_settings"
 SNAPSHOTS_TABLE = "project_cost_control_snapshots"
@@ -86,11 +93,7 @@ def _table_exists(connection, table: str) -> bool:
 
 
 def _resolve_scope(db, pid: int) -> dict[str, Any]:
-    try:
-        from qlda.runtime_core.cashflow_forecast_v1 import _resolve_scope as resolve
-        return resolve(db, int(pid))
-    except Exception:
-        return {"master_project_id": int(pid), "workspace_project_id": int(pid)}
+    return _shared_resolve_scope(db, int(pid))
 
 
 def ensure_schema(db) -> None:
@@ -303,10 +306,6 @@ def _ipc_summary(db, pid: int) -> dict[str, float]:
 
 
 def _evm_progress(db, pid: int, on_date: date) -> dict[str, float]:
-    try:
-        import qlda.runtime_core.cashflow_forecast_v2 as v2
-    except Exception:
-        v2 = None
     with db.connect() as connection:
         try:
             budgets = [_rowdict(r) for r in connection.execute(
@@ -320,15 +319,16 @@ def _evm_progress(db, pid: int, on_date: date) -> dict[str, float]:
             ).fetchall()]
         except Exception:
             tasks = []
-    task_map = {}
+
+    task_map: dict[str, dict[str, Any]] = {}
     for task in tasks:
-        if v2 is not None:
-            try:
-                task_map[v2._task_ref(task)] = task
-            except Exception:
-                pass
+        try:
+            task_map[_task_ref(task)] = task
+        except Exception:
+            pass
         if _text(task.get("wbs")):
             task_map.setdefault(_text(task.get("wbs")), task)
+
     pv = ev = linked = unlinked = 0.0
     for row in budgets:
         budget = max(0.0, _float(row.get("budget_total")))
@@ -337,14 +337,10 @@ def _evm_progress(db, pid: int, on_date: date) -> dict[str, float]:
             unlinked += budget
             continue
         linked += budget
-        if v2 is not None:
-            try:
-                planned = v2._planned_progress(task, on_date)
-                actual = v2._actual_progress(task)
-            except Exception:
-                planned = _float(task.get("planned_progress"))
-                actual = _float(task.get("actual_progress"))
-        else:
+        try:
+            planned = _planned_progress(task, on_date)
+            actual = _actual_progress(task)
+        except Exception:
             planned = _float(task.get("planned_progress"))
             actual = _float(task.get("actual_progress"))
         pv += budget * max(0.0, min(100.0, planned)) / 100.0
