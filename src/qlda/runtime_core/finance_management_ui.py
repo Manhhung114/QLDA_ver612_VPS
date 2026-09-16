@@ -4,11 +4,12 @@ from __future__ import annotations
 
 Dự trù dòng tiền chỉ phản ánh các IPC đã tồn tại và còn số dư chưa thanh toán.
 Không dùng dự báo BOQ/tiến độ, xác suất, kịch bản hay mô phỏng tương lai.
+
+Cleanup V2.2: module này chỉ còn dữ liệu + renderer của sheet Dự trù dòng tiền.
+Navigation/tiêu đề Tài chính do project_cost_management và finance_title_policy sở hữu.
 """
 
 from datetime import date, datetime
-from functools import wraps
-import inspect
 import re
 import unicodedata
 from typing import Any
@@ -19,7 +20,7 @@ from qlda.runtime_core.finance_common import (
     scope_label as _shared_scope_label,
 )
 
-PATCH_MARKER = "V7.6 FINANCE IPC UNPAID CASH PLAN V2"
+PATCH_MARKER = "V7.6 FINANCE IPC UNPAID CASH PLAN V3 CLEANUP V2.2"
 
 
 def _text(value: Any) -> str:
@@ -198,7 +199,11 @@ def load_unpaid_ipcs(db, project_id: int) -> list[dict[str, Any]]:
                 "note": _text(claim.get("note") or payment.get("note")),
             })
 
-    rows.sort(key=lambda row: (row.get("due_date") is None, row.get("due_date") or date.max, _text(row.get("claim_code"))))
+    rows.sort(key=lambda row: (
+        row.get("due_date") is None,
+        row.get("due_date") or date.max,
+        _text(row.get("claim_code")),
+    ))
     return rows
 
 
@@ -225,7 +230,10 @@ def _render_due_month_summary(st, rows: list[dict[str, Any]]) -> None:
         buckets.items(),
         key=lambda item: datetime.strptime(item[0], "%m/%Y"),
     )
-    frame = pd.DataFrame([{"Tháng đến hạn": key, "Cần thanh toán": value} for key, value in ordered])
+    frame = pd.DataFrame([
+        {"Tháng đến hạn": key, "Cần thanh toán": value}
+        for key, value in ordered
+    ])
     st.markdown("#### Dòng tiền theo hạn thanh toán IPC")
     st.bar_chart(frame.set_index("Tháng đến hạn"), use_container_width=True)
     st.dataframe(frame, hide_index=True, use_container_width=True)
@@ -349,67 +357,4 @@ def render_cashflow_finance_sheet(
         )
 
 
-def install_finance_management_ui() -> None:
-    """Legacy compatibility installer; Cleanup V2 no longer composes it at startup."""
-    import streamlit as st
-
-    if getattr(st, "_qlda_finance_management_ui_installed", False):
-        return
-
-    previous_subheader = st.subheader
-    previous_tabs = st.tabs
-
-    @wraps(previous_subheader)
-    def finance_subheader(body, *args, **kwargs):
-        if _text(body) == "💰 Quản lý chi phí":
-            body = "💰 Quản lý Tài chính"
-        return previous_subheader(body, *args, **kwargs)
-
-    @wraps(previous_tabs)
-    def finance_tabs(labels, *args, **kwargs):
-        label_list = list(labels) if isinstance(labels, (list, tuple)) else labels
-        frame = inspect.currentframe()
-        caller = frame.f_back if frame else None
-        try:
-            is_cost_screen = (
-                caller is not None
-                and caller.f_code.co_name == "render_cost_management"
-                and isinstance(label_list, list)
-                and label_list == ["Chi phí dự toán (BOQ)", "Thanh toán & giải ngân", "Chi phí phát sinh (VO)"]
-            )
-            if not is_cost_screen:
-                return previous_tabs(labels, *args, **kwargs)
-
-            all_tabs = previous_tabs(
-                ["Chi phí dự toán (BOQ)", "Thanh toán & giải ngân", "Chi phí phát sinh (VO)", "Dự trù dòng tiền"],
-                *args,
-                **kwargs,
-            )
-            glb, loc = caller.f_globals, caller.f_locals
-            db = glb.get("db")
-            pid = _int(loc.get("pid"))
-            if db is not None and pid > 0:
-                can_update_fn = glb.get("_can_update")
-                is_admin_fn = glb.get("_is_admin")
-                identity_fn = glb.get("_cloud_identity")
-                with all_tabs[3]:
-                    render_cashflow_finance_sheet(
-                        st,
-                        db,
-                        pid,
-                        identity=identity_fn() if callable(identity_fn) else None,
-                        can_update=bool(can_update_fn()) if callable(can_update_fn) else False,
-                        is_admin=bool(is_admin_fn()) if callable(is_admin_fn) else False,
-                    )
-            return all_tabs[:3]
-        finally:
-            del caller
-            del frame
-
-    st.subheader = finance_subheader
-    st.tabs = finance_tabs
-    st._qlda_finance_management_ui_installed = True
-    st._qlda_finance_management_ui_marker = PATCH_MARKER
-
-
-__all__ = ["load_unpaid_ipcs", "render_cashflow_finance_sheet", "install_finance_management_ui"]
+__all__ = ["load_unpaid_ipcs", "render_cashflow_finance_sheet"]
