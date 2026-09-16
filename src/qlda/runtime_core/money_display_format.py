@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-"""Global display policy for monetary columns in QLDA tables.
+"""Global display policy for monetary columns and finance wording in QLDA.
 
 Only presentation is changed. Database values and calculation data stay numeric.
 Money-like columns shown through ``st.dataframe``/``st.table`` are rendered with
 comma thousands separators, e.g. 510000000000 -> 510,000,000,000.
+The user-facing finance term ``Committed Cost`` is localized as
+``Chi phí đã cam kết`` throughout Streamlit output.
 """
 
 from functools import wraps
@@ -13,7 +15,7 @@ import re
 import unicodedata
 from typing import Any
 
-PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V3"
+PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V4"
 
 
 def _norm(value: Any) -> str:
@@ -36,6 +38,13 @@ _EXCLUDE_TERMS = (
     "%", "phan tram", "ty le", "cpi", "spi", "tcpi", "so ngay", "ngay",
     "so luong", "quantity", "progress",
 )
+
+
+def _translate_finance_text(value: Any) -> Any:
+    """Translate the remaining user-facing English finance term without touching keys/data."""
+    if not isinstance(value, str):
+        return value
+    return value.replace("Committed Cost", "Chi phí đã cam kết")
 
 
 def _is_money_column(name: Any) -> bool:
@@ -113,7 +122,7 @@ def _format_number(value: Any) -> Any:
 
 
 def format_money_columns(data: Any) -> Any:
-    """Return a display copy with money-like columns formatted as strings."""
+    """Return a display copy with localized wording and formatted money columns."""
     try:
         import pandas as pd
     except Exception:
@@ -140,6 +149,17 @@ def format_money_columns(data: Any) -> Any:
         return data
 
     changed = False
+
+    # Localize text cells such as the "Phân lớp chi phí" table.
+    for col in frame.columns:
+        try:
+            translated = frame[col].map(_translate_finance_text)
+            if not translated.equals(frame[col]):
+                frame[col] = translated
+                changed = True
+        except Exception:
+            pass
+
     for col in frame.columns:
         if not _is_money_column(col):
             continue
@@ -180,6 +200,12 @@ def install_money_display_format() -> None:
 
     original_dataframe = st.dataframe
     original_table = st.table
+    original_metric = st.metric
+    original_caption = st.caption
+    original_warning = st.warning
+    original_info = st.info
+    original_success = st.success
+    original_error = st.error
 
     @wraps(original_dataframe)
     def dataframe_with_money_format(data=None, *args, **kwargs):
@@ -189,8 +215,38 @@ def install_money_display_format() -> None:
     def table_with_money_format(data=None, *args, **kwargs):
         return original_table(format_money_columns(data), *args, **kwargs)
 
+    @wraps(original_metric)
+    def metric_with_vn_terms(label, value, *args, **kwargs):
+        return original_metric(_translate_finance_text(label), value, *args, **kwargs)
+
+    @wraps(original_caption)
+    def caption_with_vn_terms(body, *args, **kwargs):
+        return original_caption(_translate_finance_text(body), *args, **kwargs)
+
+    @wraps(original_warning)
+    def warning_with_vn_terms(body, *args, **kwargs):
+        return original_warning(_translate_finance_text(body), *args, **kwargs)
+
+    @wraps(original_info)
+    def info_with_vn_terms(body, *args, **kwargs):
+        return original_info(_translate_finance_text(body), *args, **kwargs)
+
+    @wraps(original_success)
+    def success_with_vn_terms(body, *args, **kwargs):
+        return original_success(_translate_finance_text(body), *args, **kwargs)
+
+    @wraps(original_error)
+    def error_with_vn_terms(body, *args, **kwargs):
+        return original_error(_translate_finance_text(body), *args, **kwargs)
+
     st.dataframe = dataframe_with_money_format
     st.table = table_with_money_format
+    st.metric = metric_with_vn_terms
+    st.caption = caption_with_vn_terms
+    st.warning = warning_with_vn_terms
+    st.info = info_with_vn_terms
+    st.success = success_with_vn_terms
+    st.error = error_with_vn_terms
     _patch_contract_amount_formatter()
     st._qlda_money_display_format_installed = True
     st._qlda_money_display_format_marker = PATCH_MARKER
