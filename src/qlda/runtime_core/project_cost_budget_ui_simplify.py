@@ -1,25 +1,123 @@
 from __future__ import annotations
 
-"""Simplify the budget/baseline KPI area in Project Cost Management.
+"""Simplify finance budget cards and align the executive overview with current commitments.
 
-Keep only the three decision-level figures at the top of the sheet:
-- BOQ hiện tại
-- Đường cơ sở chi phí
-- Tổng ngân sách dự án
+Budget/Baseline sheet:
+- keep only BOQ hiện tại, Đường cơ sở chi phí and Tổng ngân sách dự án;
+- keep reserve/baseline inputs inside the collapsed settings expander.
 
-Detailed components (baseline work cost, contingency reserve, management reserve,
-tolerance and threshold) remain editable inside the existing collapsed settings
-expander, so no financial capability is removed.
+Executive overview:
+- replace the legacy BOQ card with Ngân sách điều chỉnh;
+- Ngân sách điều chỉnh uses the same ``committed_cost`` source as Kiểm soát chi phí;
+- show the increase/decrease versus the current after-tax BOQ as the metric delta.
 """
 
 from datetime import date, datetime
+from functools import wraps
+import inspect
 from typing import Any
 
-PATCH_MARKER = "V7.6 PROJECT COST BUDGET UI SIMPLIFY V1"
+PATCH_MARKER = "V7.6 PROJECT COST BUDGET UI SIMPLIFY V2"
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _compact_money(value: Any, *, signed: bool = False) -> str:
+    number = _number(value)
+    sign = ""
+    if signed:
+        sign = "+" if number > 0 else ("-" if number < 0 else "")
+    elif number < 0:
+        sign = "-"
+    number = abs(number)
+    if number >= 1_000_000_000:
+        return f"{sign}{number / 1_000_000_000:,.2f} tỷ"
+    if number >= 1_000_000:
+        return f"{sign}{number / 1_000_000:,.1f} triệu"
+    return f"{sign}{number:,.0f} đ"
+
+
+def _overview_context() -> tuple[Any, int] | None:
+    """Return db/project only while the V7 executive overview is rendering."""
+    frame = inspect.currentframe()
+    current = frame.f_back if frame else None
+    try:
+        for _ in range(16):
+            if current is None:
+                break
+            if (
+                current.f_code.co_name == "render_overview_v7"
+                and current.f_globals.get("__name__") == "qlda.runtime_core.ui_v7_compact"
+            ):
+                db = current.f_locals.get("db")
+                pid = current.f_locals.get("pid")
+                if db is not None and pid not in (None, ""):
+                    try:
+                        return db, int(pid)
+                    except Exception:
+                        return None
+            current = current.f_back
+    finally:
+        del frame
+        del current
+    return None
+
+
+def _install_overview_adjusted_budget_metric(pcm) -> None:
+    """Replace only the BOQ KPI inside ``render_overview_v7``.
+
+    The overview calls ``c5.metric`` on a Streamlit DeltaGenerator, so patching
+    ``st.metric`` alone would not affect it.  This wrapper is deliberately scoped
+    by both the exact label and the render_overview_v7 call stack, leaving every
+    other metric in the application unchanged.
+    """
+    try:
+        from streamlit.delta_generator import DeltaGenerator
+    except Exception:
+        return
+
+    if getattr(DeltaGenerator, "_qlda_overview_adjusted_budget_installed", False):
+        return
+
+    original_metric = DeltaGenerator.metric
+
+    @wraps(original_metric)
+    def metric_with_adjusted_budget(self, label, value, *args, **kwargs):
+        if str(label or "").strip() == "BOQ":
+            context = _overview_context()
+            if context is not None:
+                db, pid = context
+                try:
+                    snap = pcm.build_cost_snapshot(db, int(pid)) or {}
+                    adjusted = max(0.0, _number(snap.get("committed_cost")))
+                    boq = max(0.0, _number(snap.get("boq_estimate")))
+                    label = "Ngân sách điều chỉnh"
+                    value = _compact_money(adjusted)
+                    # render_overview_v7 currently passes only label/value.  Add a
+                    # comparison delta only when the caller has not supplied one.
+                    if not args and "delta" not in kwargs:
+                        kwargs["delta"] = f"{_compact_money(adjusted - boq, signed=True)} so BOQ"
+                except Exception:
+                    # Keep the legacy card if the finance snapshot cannot be read.
+                    pass
+        return original_metric(self, label, value, *args, **kwargs)
+
+    DeltaGenerator.metric = metric_with_adjusted_budget
+    DeltaGenerator._qlda_overview_adjusted_budget_installed = True
+    DeltaGenerator._qlda_overview_adjusted_budget_marker = PATCH_MARKER
 
 
 def install_project_cost_budget_ui_simplify() -> None:
     import qlda.runtime_core.project_cost_management as pcm
+
+    # Install the executive overview patch independently so a hot-reloaded process
+    # that already installed V1 can still receive the new overview behavior.
+    _install_overview_adjusted_budget_metric(pcm)
 
     if getattr(pcm, "_qlda_project_cost_budget_ui_simplify_installed", False):
         return
