@@ -151,12 +151,14 @@ def initialize_ai_runtime() -> None:
         from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
         from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
         from qlda.runtime_core.project_cost_signed_adjustments import install_project_cost_signed_adjustments
+        from qlda.runtime_core.vo_value_consistency import install_vo_value_consistency
         from qlda.runtime_core.project_cost_ai_context import install_project_cost_ai_context
         install_ai_vps_pdf_fullscan()
         install_ai_vps_pdf_vision()
         install_owner_material_ai_context()
         install_cashflow_ai_context()
         install_project_cost_signed_adjustments()
+        install_vo_value_consistency()
         install_project_cost_ai_context()
         _AI_READY = True
 
@@ -213,6 +215,11 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.boq_after_tax_budget import install_boq_after_tax_budget_policy
         install_boq_after_tax_budget_policy()
 
+        # Keep the approved simplified finance presentation as a composed policy
+        # instead of leaving the module orphaned after a cold restart.
+        from qlda.runtime_core.project_cost_budget_ui_simplify import install_project_cost_budget_ui_simplify
+        install_project_cost_budget_ui_simplify()
+
         # Global money-display policy: monetary/value columns keep numeric database
         # values but render with comma thousands separators throughout QLDA tables.
         from qlda.runtime_core.money_display_format import install_money_display_format
@@ -225,7 +232,9 @@ def initialize_runtime() -> None:
 
         # A single checked document/drawing row should behave like choosing it in
         # the upper "Chọn ... để sửa / cập nhật" selector: load the record, open
-        # the edit panel and reveal the existing attachment viewer.
+        # the edit panel and reveal the existing attachment viewer. The installer
+        # also composes the uniform meeting-minutes interaction policy for all
+        # Quản lý hồ sơ sheets.
         from qlda.runtime_core.document_selection_autopen import install_document_selection_autopen
         install_document_selection_autopen()
 
