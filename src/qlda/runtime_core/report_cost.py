@@ -51,6 +51,38 @@ def _table_exists(c, name: str) -> bool:
         return False
 
 
+def _load_vo_rows(c, pid: int) -> list[dict[str, Any]]:
+    """Use independent VO records as the authoritative VO source.
+
+    variation_orders stores the Excel proposal plus the newly editable approval
+    value/status. cost_variations remains only a fallback for legacy/manual data.
+    Signed amounts are intentionally preserved so approved decreases remain negative.
+    """
+    if _table_exists(c, "variation_orders"):
+        try:
+            rows = c.execute(
+                """SELECT vo_code,'' AS task_ref,filename AS description,
+                          proposed_amount,approved_amount,funding_source,status,vo_date,note
+                   FROM variation_orders WHERE project_id=? ORDER BY vo_no""",
+                (int(pid),),
+            ).fetchall()
+            independent = [_rowdict(r) for r in rows]
+            if independent:
+                return independent
+        except Exception:
+            pass
+    if _table_exists(c, "cost_variations"):
+        try:
+            return [_rowdict(r) for r in c.execute(
+                "SELECT vo_code,task_ref,description,proposed_amount,approved_amount,funding_source,status,vo_date,note "
+                "FROM cost_variations WHERE project_id=? ORDER BY vo_date,id",
+                (int(pid),),
+            ).fetchall()]
+        except Exception:
+            pass
+    return []
+
+
 def render_cost_report(db, project_id: int) -> None:
     import pandas as pd
     import streamlit as st
@@ -66,11 +98,7 @@ def render_cost_report(db, project_id: int) -> None:
             "FROM cost_budgets WHERE project_id=? ORDER BY id",
             (pid,),
         ).fetchall()]
-        vo = [_rowdict(r) for r in c.execute(
-            "SELECT vo_code,task_ref,description,proposed_amount,approved_amount,funding_source,status,vo_date,note "
-            "FROM cost_variations WHERE project_id=? ORDER BY vo_date,id",
-            (pid,),
-        ).fetchall()]
+        vo = _load_vo_rows(c, pid)
         docs_cost = c.execute(
             "SELECT COALESCE(SUM(cost_impact),0) AS total FROM documents WHERE project_id=?",
             (pid,),
@@ -106,8 +134,14 @@ def render_cost_report(db, project_id: int) -> None:
     summary_vat = _num(saved_boq.get("vat_total"), max(0.0, bac - summary_before_tax))
     detail_summary_gap = detail_boq - summary_before_tax
 
-    vo_proposed = sum(float(r.get("proposed_amount") or 0) for r in vo)
-    vo_approved = sum(float(r.get("approved_amount") or 0) for r in vo)
+    # Independent VO values are signed. Only records explicitly marked Đã duyệt
+    # contribute to the approved total.
+    vo_proposed = sum(_num(r.get("proposed_amount")) for r in vo)
+    vo_approved = sum(
+        _num(r.get("approved_amount"))
+        for r in vo
+        if str(r.get("status") or "").strip() == "Đã duyệt"
+    )
 
     # Ngân sách điều chỉnh trong Báo cáo Tổng quan phải cùng nguồn với màn hình
     # Kiểm soát chi phí: Chi phí đã cam kết = Hợp đồng + Phụ lục hợp đồng.
@@ -131,8 +165,8 @@ def render_cost_report(db, project_id: int) -> None:
     st.markdown("### 💰 Báo cáo Chi phí")
     st.caption(
         "Dữ liệu LIVE theo dự án: BOQ/BAC, VO, IPC và giải ngân. "
-        "BAC dùng giá trị BOQ sau thuế; Ngân sách điều chỉnh lấy trực tiếp từ Chi phí đã cam kết "
-        "trong Kiểm soát chi phí."
+        "BAC dùng giá trị BOQ sau thuế; VO được duyệt lấy từ trạng thái phê duyệt của từng VO; "
+        "Ngân sách điều chỉnh lấy trực tiếp từ Chi phí đã cam kết trong Kiểm soát chi phí."
     )
 
     a, b, c, d, e, f = st.columns(6)
@@ -212,7 +246,8 @@ def render_cost_report(db, project_id: int) -> None:
                 "funding_source": "Nguồn vốn", "status": "Trạng thái", "vo_date": "Ngày", "note": "Ghi chú",
             })
             for col in ("Đề xuất", "Được duyệt"):
-                vo_df[col] = vo_df[col].map(_fmt)
+                if col in vo_df.columns:
+                    vo_df[col] = vo_df[col].map(_fmt)
             st.dataframe(vo_df, hide_index=True, width="stretch")
         else:
             st.info("Chưa có VO.")
