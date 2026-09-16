@@ -19,7 +19,7 @@ from functools import wraps
 import inspect
 from typing import Any
 
-PATCH_MARKER = "V7.6 DOCUMENT GRID AUTO OPEN V1"
+PATCH_MARKER = "V7.6 DOCUMENT GRID AUTO OPEN V2"
 
 
 def _renderer_context() -> tuple[str, int, str, Any] | None:
@@ -69,6 +69,12 @@ def install_document_selection_autopen() -> None:
     import streamlit as st
 
     if getattr(st, "_qlda_document_selection_autopen_installed", False):
+        # Uniform interaction is idempotent and may have been added after an older
+        # hot-reloaded auto-open patch was already active.
+        from qlda.runtime_core.document_management_uniform_interaction import (
+            install_document_management_uniform_interaction,
+        )
+        install_document_management_uniform_interaction()
         return
 
     original_data_editor = st.data_editor
@@ -115,6 +121,14 @@ def install_document_selection_autopen() -> None:
     st.data_editor = data_editor_autopen
     st._qlda_document_selection_autopen_installed = True
     st._qlda_document_selection_autopen_marker = PATCH_MARKER
+
+    # Apply the same meeting-minutes interaction model to all document sheets:
+    # deterministic selector, auto-open existing records, immediate file viewer,
+    # and no redundant extra "Mở / xử lý" step for single-row selection.
+    from qlda.runtime_core.document_management_uniform_interaction import (
+        install_document_management_uniform_interaction,
+    )
+    install_document_management_uniform_interaction()
 
 
 __all__ = ["install_document_selection_autopen"]
