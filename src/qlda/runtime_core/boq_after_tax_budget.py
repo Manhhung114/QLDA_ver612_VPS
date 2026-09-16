@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-"""Use the persisted BOQ workbook after-tax total as the project BAC/BOQ value.
+"""Use the persisted BOQ workbook after-tax total as the authoritative BAC.
 
-The detailed BOQ rows in ``cost_budgets`` are pre-tax work items. When a saved
-multi-sheet BOQ workbook contains a summary sheet with VAT and an after-tax
-total, the financial budget shown to users must use that after-tax amount.
-Manual BOQ projects without a saved workbook keep the historical detail-sum
-fallback.
+The detailed BOQ rows in ``cost_budgets`` are work-item values before VAT.  A
+saved multi-sheet BOQ workbook can also contain the contractual summary values
+before tax, VAT and after tax.  For projects that have such a workbook, finance
+screens use the after-tax amount as the BOQ/BAC basis.
+
+V2 also repairs legacy cost-baseline settings that were auto-created before the
+after-tax policy existed.  Those rows stored the detail BOQ sum (pre-tax) in
+``baseline_work_cost`` and therefore continued to show the old 472.xx value
+even after ``BOQ hiện tại`` correctly changed to 510.xx.  We migrate only a
+baseline that still matches the detail-row total; a deliberately changed
+baseline remains untouched.
 """
 
+from datetime import datetime
 from functools import wraps
 import inspect
 import math
 from typing import Any
 
-PATCH_MARKER = "V7.6 BOQ AFTER TAX BAC V1"
+PATCH_MARKER = "V7.6 BOQ AFTER TAX BAC V2"
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -25,8 +32,16 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _close_money(a: Any, b: Any) -> bool:
+    """Money-safe comparison for legacy values originating from Excel/SQL sums."""
+    left = _float(a)
+    right = _float(b)
+    tolerance = max(1.0, abs(right) * 1e-9)
+    return abs(left - right) <= tolerance
+
+
 def saved_after_tax_total(db, project_id: int) -> float | None:
-    """Return the saved workbook after-tax total when it is available."""
+    """Return the persisted workbook after-tax total when available."""
     try:
         from qlda.runtime_core.boq_persistence import load_saved_boq_workbook
 
@@ -36,7 +51,7 @@ def saved_after_tax_total(db, project_id: int) -> float | None:
     if not isinstance(result, dict):
         return None
 
-    # Parser persists after_tax_total and also mirrors it to grand_total.
+    # Parser persists after_tax_total and mirrors it to grand_total.
     for key in ("after_tax_total", "grand_total"):
         raw = result.get(key)
         if raw in (None, ""):
@@ -48,7 +63,7 @@ def saved_after_tax_total(db, project_id: int) -> float | None:
 
 
 def detail_boq_total(db, project_id: int) -> float:
-    """Historical fallback for manual BOQ/no persisted workbook."""
+    """Historical detail-row total; normally the BOQ value before VAT."""
     pid = int(project_id)
     try:
         with db.connect() as connection:
@@ -77,12 +92,49 @@ def boq_budget_total(db, project_id: int) -> float:
     return detail_boq_total(db, int(project_id))
 
 
+def _migrate_legacy_baseline(db, project_id: int, settings: dict[str, Any]) -> dict[str, Any]:
+    """Convert an old auto-derived pre-tax baseline to the after-tax BAC basis.
+
+    Safety rule: migration occurs only when the stored baseline still equals the
+    current detail BOQ total.  A baseline that differs from that value is treated
+    as an intentional user baseline and is preserved.
+    """
+    pid = int(project_id)
+    after_tax = saved_after_tax_total(db, pid)
+    if after_tax is None or after_tax <= 0:
+        return settings
+
+    detail_total = detail_boq_total(db, pid)
+    baseline = _float(settings.get("baseline_work_cost"))
+    if detail_total <= 0 or _close_money(after_tax, detail_total):
+        return settings
+    if not _close_money(baseline, detail_total):
+        return settings
+
+    try:
+        with db.connect() as connection:
+            connection.execute(
+                "UPDATE project_cost_settings SET baseline_work_cost=?,updated_at=? "
+                "WHERE workspace_project_id=?",
+                (float(after_tax), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pid),
+            )
+    except Exception:
+        # Even if persistence is temporarily unavailable, use the corrected value
+        # for this render so BAC/Cost Baseline is not shown on a mixed tax basis.
+        pass
+
+    migrated = dict(settings)
+    migrated["baseline_work_cost"] = float(after_tax)
+    migrated["_qlda_after_tax_baseline_migrated"] = True
+    return migrated
+
+
 def _find_db_pid_from_stack() -> tuple[Any | None, int | None]:
     """Find the current finance renderer's db/project id without changing app.py."""
     frame = inspect.currentframe()
     current = frame.f_back if frame else None
     try:
-        for _ in range(12):
+        for _ in range(14):
             if current is None:
                 break
             loc = current.f_locals
@@ -101,14 +153,48 @@ def _find_db_pid_from_stack() -> tuple[Any | None, int | None]:
 
 
 def _patch_project_cost_management() -> None:
-    """Make Cost Baseline/EVM/AI use the same after-tax BOQ budget."""
+    """Keep Cost Baseline, EVM and AI on the same after-tax budget basis."""
     try:
         import qlda.runtime_core.project_cost_management as pcm
-
-        pcm._boq_total = boq_budget_total
-        pcm._qlda_boq_after_tax_budget_marker = PATCH_MARKER
     except Exception:
-        pass
+        return
+
+    if getattr(pcm, "_qlda_boq_after_tax_budget_v2_installed", False):
+        return
+
+    original_get_settings = pcm.get_settings
+    original_evm_progress = pcm._evm_progress
+
+    # build_cost_snapshot resolves this module global at runtime.
+    pcm._boq_total = boq_budget_total
+
+    @wraps(original_get_settings)
+    def get_settings_after_tax(db, pid: int):
+        settings = original_get_settings(db, int(pid))
+        try:
+            return _migrate_legacy_baseline(db, int(pid), dict(settings or {}))
+        except Exception:
+            return settings
+
+    @wraps(original_evm_progress)
+    def evm_progress_after_tax(db, pid: int, on_date):
+        progress = dict(original_evm_progress(db, int(pid), on_date) or {})
+        after_tax = saved_after_tax_total(db, int(pid))
+        detail_total = detail_boq_total(db, int(pid))
+        if after_tax is None or after_tax <= 0 or detail_total <= 0:
+            return progress
+        ratio = float(after_tax) / float(detail_total)
+        if not math.isfinite(ratio) or ratio <= 0 or abs(ratio - 1.0) < 1e-12:
+            return progress
+        for key in ("pv", "ev", "linked_boq", "unlinked_boq"):
+            progress[key] = max(0.0, _float(progress.get(key))) * ratio
+        progress["tax_basis_ratio"] = ratio
+        return progress
+
+    pcm.get_settings = get_settings_after_tax
+    pcm._evm_progress = evm_progress_after_tax
+    pcm._qlda_boq_after_tax_budget_v2_installed = True
+    pcm._qlda_boq_after_tax_budget_marker = PATCH_MARKER
 
 
 def _patch_top_bac_metric() -> None:
