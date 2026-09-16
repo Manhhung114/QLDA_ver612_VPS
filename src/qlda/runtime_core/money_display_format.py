@@ -13,7 +13,7 @@ import re
 import unicodedata
 from typing import Any
 
-PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V1"
+PATCH_MARKER = "V7.6 MONEY DISPLAY THOUSANDS COMMA V2"
 
 
 def _norm(value: Any) -> str:
@@ -80,11 +80,46 @@ def _is_money_column(name: Any) -> bool:
     n = _norm(raw)
     if not n:
         return False
-    if any(term in raw.lower() for term in _EXCLUDE_TERMS if term == "%"):
+    if "%" in raw:
         return False
     if any(term in n for term in _EXCLUDE_TERMS if term != "%"):
         return False
     return any(term in n for term in _MONEY_TERMS)
+
+
+def _currency_string(text: str) -> tuple[str, str] | None:
+    """Split a simple numeric currency string into numeric part + suffix."""
+    match = re.fullmatch(r"\s*([-+]?\d[\d.,]*)\s*(VND|USD|EUR|Đ|đ)\s*", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _parse_display_number(text: str) -> float | None:
+    raw = text.strip()
+    if not raw:
+        return None
+    # Existing QLDA contract formatter used dots as thousands separators.
+    if re.fullmatch(r"[-+]?\d{1,3}(?:\.\d{3})+", raw):
+        raw = raw.replace(".", "")
+    elif re.fullmatch(r"[-+]?\d{1,3}(?:,\d{3})+", raw):
+        raw = raw.replace(",", "")
+    else:
+        # A single dot is treated as a decimal separator; commas are thousands.
+        raw = raw.replace(",", "")
+    if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", raw):
+        return None
+    try:
+        number = float(raw)
+        return number if math.isfinite(number) else None
+    except Exception:
+        return None
+
+
+def _render_number(number: float) -> str:
+    if abs(number - round(number)) < 1e-9:
+        return f"{number:,.0f}"
+    return f"{number:,.2f}".rstrip("0").rstrip(".")
 
 
 def _format_number(value: Any) -> Any:
@@ -94,16 +129,19 @@ def _format_number(value: Any) -> Any:
         text = value.strip()
         if not text:
             return value
-        # Keep values already carrying units/currency or already formatted.
+        cur = _currency_string(text)
+        if cur:
+            number = _parse_display_number(cur[0])
+            if number is None:
+                return value
+            suffix = cur[1].upper() if cur[1].lower() != "đ" else "đ"
+            return f"{_render_number(number)} {suffix}"
+        # Keep human-readable compact values such as 1.25 tỷ / 500 triệu.
         low = text.lower()
-        if any(unit in low for unit in (" vnd", " usd", " eur", " tỷ", " ty", " triệu", " trieu", " đ")):
+        if any(unit in low for unit in (" tỷ", " ty", " triệu", " trieu")):
             return value
-        cleaned = text.replace(",", "")
-        if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", cleaned):
-            return value
-        try:
-            number = float(cleaned)
-        except Exception:
+        number = _parse_display_number(text)
+        if number is None:
             return value
     elif isinstance(value, (int, float)):
         number = float(value)
@@ -115,10 +153,7 @@ def _format_number(value: Any) -> Any:
 
     if not math.isfinite(number):
         return value
-    if abs(number - round(number)) < 1e-9:
-        return f"{number:,.0f}"
-    # Preserve useful cents/decimal values while still inserting separators.
-    return f"{number:,.2f}".rstrip("0").rstrip(".")
+    return _render_number(number)
 
 
 def format_money_columns(data: Any) -> Any:
@@ -133,8 +168,7 @@ def format_money_columns(data: Any) -> Any:
         return data
 
     frame = None
-    original_was_df = isinstance(data, pd.DataFrame)
-    if original_was_df:
+    if isinstance(data, pd.DataFrame):
         frame = data.copy()
     elif isinstance(data, (list, tuple)) and data and all(isinstance(row, dict) for row in data):
         try:
