@@ -192,21 +192,15 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
-        # Legacy cashflow calculation modules remain installed for compatibility with
-        # stored settings/helpers; the visible finance sheet is restricted to unpaid IPCs.
-        from qlda.runtime_core.cashflow_forecast_v1 import install_cashflow_forecast_v1
-        from qlda.runtime_core.cashflow_forecast_v2 import install_cashflow_forecast_v2
-        from qlda.runtime_core.cashflow_forecast_v3 import install_cashflow_forecast_v3
-        install_cashflow_forecast_v1()
-        install_cashflow_forecast_v2()
-        install_cashflow_forecast_v3()
+        # Cleanup V2: old V1/V2/V3 cashflow forecast panels are no longer installed.
+        # The approved finance sheet is the unpaid-IPC cash plan rendered by
+        # project_cost_management; historical forecast modules/data remain untouched
+        # for compatibility and can be removed only after a dependency audit.
+        from qlda.runtime_core.finance_title_policy import install_finance_title_policy
+        install_finance_title_policy()
 
-        # Finance UI: dedicated cash-plan sheet reads only unpaid IPC obligations.
-        from qlda.runtime_core.finance_management_ui import install_finance_management_ui
-        install_finance_management_ui()
-
-        # PMBOK-oriented project cost management: baseline/budget and EVM control.
-        # Contract/appendix values are read from Hồ sơ Hợp đồng; no duplicate contract sheet.
+        # PMBOK-oriented project cost management owns the six-sheet finance
+        # navigation, including the unpaid-IPC cash-plan renderer.
         from qlda.runtime_core.project_cost_management import install_project_cost_management
         install_project_cost_management()
 
