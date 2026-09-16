@@ -150,11 +150,13 @@ def initialize_ai_runtime() -> None:
         from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
         from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
         from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
+        from qlda.runtime_core.project_cost_signed_adjustments import install_project_cost_signed_adjustments
         from qlda.runtime_core.project_cost_ai_context import install_project_cost_ai_context
         install_ai_vps_pdf_fullscan()
         install_ai_vps_pdf_vision()
         install_owner_material_ai_context()
         install_cashflow_ai_context()
+        install_project_cost_signed_adjustments()
         install_project_cost_ai_context()
         _AI_READY = True
 
