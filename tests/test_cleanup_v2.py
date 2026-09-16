@@ -22,8 +22,10 @@ class CleanupV2Tests(unittest.TestCase):
 
         self.assertIn("install_finance_title_policy", bootstrap)
         self.assertIn("install_project_cost_management", bootstrap)
-        # Title policy may rename the heading only; it must not add another tab wrapper.
-        self.assertNotIn("st.tabs", title_policy)
+        # Title policy may mention tabs in documentation, but must never assign or
+        # call Streamlit tabs. Project Cost remains the single navigation owner.
+        self.assertNotIn("st.tabs =", title_policy)
+        self.assertNotIn("st.tabs(", title_policy)
         self.assertIn("render_cashflow_finance_sheet", project_cost)
         self.assertIn('"Dự trù dòng tiền"', project_cost)
         self.assertIn('"Kiểm soát chi phí"', project_cost)
