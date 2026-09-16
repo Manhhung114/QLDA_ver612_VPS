@@ -57,6 +57,7 @@ def render_cost_report(db, project_id: int) -> None:
 
     from qlda.runtime_core.boq_after_tax_budget import boq_budget_total, saved_after_tax_total
     from qlda.runtime_core.boq_persistence import load_saved_boq_workbook
+    from qlda.runtime_core.project_cost_management import build_cost_snapshot
 
     pid = int(project_id)
     with db.connect() as c:
@@ -107,7 +108,18 @@ def render_cost_report(db, project_id: int) -> None:
 
     vo_proposed = sum(float(r.get("proposed_amount") or 0) for r in vo)
     vo_approved = sum(float(r.get("approved_amount") or 0) for r in vo)
-    revised_budget = bac + vo_approved
+
+    # Ngân sách điều chỉnh trong Báo cáo Tổng quan phải cùng nguồn với màn hình
+    # Kiểm soát chi phí: Chi phí đã cam kết = Hợp đồng + Phụ lục hợp đồng.
+    # Không tự cộng VO tại đây để tránh cộng trùng khi VO đã được hợp thức hóa
+    # thành Phụ lục hợp đồng.
+    try:
+        cost_snapshot = build_cost_snapshot(db, pid) or {}
+    except Exception:
+        cost_snapshot = {}
+    committed_cost = max(0.0, _num(cost_snapshot.get("committed_cost")))
+    revised_budget = committed_cost
+
     claim_requested = sum(float(r.get("requested_amount") or 0) for r in claims)
     claim_approved = sum(float(r.get("approved_amount") or 0) for r in claims)
     disbursed = sum(float(r.get("disbursed_amount") or 0) for r in claims)
@@ -117,7 +129,11 @@ def render_cost_report(db, project_id: int) -> None:
 
     st.markdown("---")
     st.markdown("### 💰 Báo cáo Chi phí")
-    st.caption("Dữ liệu LIVE theo dự án: BOQ/BAC, VO, IPC và giải ngân. BAC dùng giá trị BOQ sau thuế khi workbook có tổng hợp VAT.")
+    st.caption(
+        "Dữ liệu LIVE theo dự án: BOQ/BAC, VO, IPC và giải ngân. "
+        "BAC dùng giá trị BOQ sau thuế; Ngân sách điều chỉnh lấy trực tiếp từ Chi phí đã cam kết "
+        "trong Kiểm soát chi phí."
+    )
 
     a, b, c, d, e, f = st.columns(6)
     a.metric("BAC / BOQ sau thuế", _metric_money(bac))
@@ -141,6 +157,7 @@ def render_cost_report(db, project_id: int) -> None:
         summary_rows += [
             {"Chỉ tiêu": "VO đề xuất", "Giá trị (VND)": vo_proposed},
             {"Chỉ tiêu": "VO được duyệt", "Giá trị (VND)": vo_approved},
+            {"Chỉ tiêu": "Chi phí đã cam kết", "Giá trị (VND)": committed_cost},
             {"Chỉ tiêu": "Ngân sách điều chỉnh", "Giá trị (VND)": revised_budget},
             {"Chỉ tiêu": "IPC đề nghị", "Giá trị (VND)": claim_requested},
             {"Chỉ tiêu": "IPC được duyệt", "Giá trị (VND)": claim_approved},
