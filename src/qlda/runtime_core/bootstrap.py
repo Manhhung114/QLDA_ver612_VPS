@@ -174,6 +174,12 @@ def initialize_runtime() -> None:
         apply_streamlit_secrets_to_env()
         initialize_ai_runtime()
 
+        # Upload/UI policy: use the standard 200 MB Streamlit file size and hide
+        # legacy V6.24 multi-GB BOQ/IPC/VO/Schedule background-upload banners.
+        # This runs before app.py imports the background-panel functions as aliases.
+        from qlda.runtime_core.upload_ui_200mb_policy import install_upload_ui_200mb_policy
+        install_upload_ui_200mb_policy()
+
         # Quản lý hồ sơ uses VPS-local attachments. Keep Biên bản họp status-free,
         # remove its dedicated AI action and leave AI only under Công cụ -> Trợ lý AI.
         from qlda.runtime_core.document_management_vps_ui import install_document_management_vps_ui
