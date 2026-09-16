@@ -249,11 +249,8 @@ def install_money_display_format() -> None:
     st.error = error_with_vn_terms
     _patch_contract_amount_formatter()
 
-    # Simplify the Budget/Baseline overview after the project-cost and after-tax
-    # policies are installed. Detailed reserve/baseline inputs remain in settings.
-    from qlda.runtime_core.project_cost_budget_ui_simplify import install_project_cost_budget_ui_simplify
-    install_project_cost_budget_ui_simplify()
-
+    # Finance consistency UI is composed once by runtime bootstrap. This display
+    # policy intentionally does not install or own any finance navigation/UI rules.
     st._qlda_money_display_format_installed = True
     st._qlda_money_display_format_marker = PATCH_MARKER
 
