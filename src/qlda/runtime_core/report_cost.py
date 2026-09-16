@@ -24,6 +24,21 @@ def _fmt(value: Any) -> str:
         return "0"
 
 
+def _metric_money(value: Any) -> str:
+    """Compact money text for metric cards so large VND values do not truncate."""
+    try:
+        number = float(value or 0)
+    except Exception:
+        number = 0.0
+    sign = "-" if number < 0 else ""
+    number = abs(number)
+    if number >= 1_000_000_000:
+        return f"{sign}{number / 1_000_000_000:,.2f} tỷ"
+    if number >= 1_000_000:
+        return f"{sign}{number / 1_000_000:,.1f} triệu"
+    return f"{sign}{number:,.0f} VND"
+
+
 def _table_exists(c, name: str) -> bool:
     try:
         c.execute(f"SELECT 1 FROM {name} LIMIT 1")
@@ -35,6 +50,8 @@ def _table_exists(c, name: str) -> bool:
 def render_cost_report(db, project_id: int) -> None:
     import pandas as pd
     import streamlit as st
+
+    from qlda.runtime_core.boq_after_tax_budget import boq_budget_total, saved_after_tax_total
 
     pid = int(project_id)
     with db.connect() as c:
@@ -71,7 +88,12 @@ def render_cost_report(db, project_id: int) -> None:
                 (pid,),
             ).fetchall()]
 
-    bac = sum(float(r.get("budget_total") or 0) for r in boq)
+    # BAC used by the overview must be the same authoritative value as Finance:
+    # saved BOQ after-tax total when available, otherwise manual/detail BOQ sum.
+    bac = float(boq_budget_total(db, pid) or 0)
+    detail_boq = sum(float(r.get("budget_total") or 0) for r in boq)
+    after_tax = saved_after_tax_total(db, pid)
+
     vo_proposed = sum(float(r.get("proposed_amount") or 0) for r in vo)
     vo_approved = sum(float(r.get("approved_amount") or 0) for r in vo)
     revised_budget = bac + vo_approved
@@ -83,31 +105,39 @@ def render_cost_report(db, project_id: int) -> None:
     disbursed_pct = (disbursed / revised_budget * 100) if revised_budget else 0
 
     st.markdown("---")
-    st.markdown("### 💰 Báo cáo chi phí")
-    st.caption("Dữ liệu LIVE theo dự án: BOQ/BAC, VO, IPC/Claim và giải ngân.")
+    st.markdown("### 💰 Báo cáo Chi phí")
+    st.caption("Dữ liệu LIVE theo dự án: BOQ/BAC, VO, IPC và giải ngân. BAC dùng giá trị BOQ sau thuế khi workbook có tổng hợp VAT.")
 
     a, b, c, d, e, f = st.columns(6)
-    a.metric("BAC / BOQ", f"{_fmt(bac)} VND")
-    b.metric("VO được duyệt", f"{_fmt(vo_approved)} VND")
-    c.metric("Ngân sách điều chỉnh", f"{_fmt(revised_budget)} VND")
-    d.metric("Claim được duyệt", f"{_fmt(claim_approved)} VND", f"{approved_pct:.1f}%")
-    e.metric("Đã giải ngân", f"{_fmt(disbursed)} VND", f"{disbursed_pct:.1f}%")
-    f.metric("Còn lại", f"{_fmt(remaining)} VND")
+    a.metric("BAC / BOQ sau thuế", _metric_money(bac))
+    b.metric("VO được duyệt", _metric_money(vo_approved))
+    c.metric("Ngân sách điều chỉnh", _metric_money(revised_budget))
+    d.metric("IPC được duyệt", _metric_money(claim_approved), f"{approved_pct:.1f}%")
+    e.metric("Đã giải ngân", _metric_money(disbursed), f"{disbursed_pct:.1f}%")
+    f.metric("Còn lại", _metric_money(remaining))
 
-    t1, t2, t3 = st.tabs(["📊 Tổng hợp", "📑 BOQ & VO", "💳 Claim & giải ngân"])
+    t1, t2, t3 = st.tabs(["📊 Tổng hợp", "📑 BOQ & VO", "💳 IPC & giải ngân"])
 
     with t1:
-        summary = pd.DataFrame([
-            {"Chỉ tiêu": "BAC / BOQ", "Giá trị (VND)": bac},
+        summary_rows = [
+            {"Chỉ tiêu": "BAC / BOQ sau thuế", "Giá trị (VND)": bac},
+        ]
+        if after_tax is not None and abs(float(after_tax) - detail_boq) > 1:
+            summary_rows += [
+                {"Chỉ tiêu": "BOQ chi tiết trước thuế", "Giá trị (VND)": detail_boq},
+                {"Chỉ tiêu": "Thuế VAT / chênh lệch đến sau thuế", "Giá trị (VND)": max(0.0, bac - detail_boq)},
+            ]
+        summary_rows += [
             {"Chỉ tiêu": "VO đề xuất", "Giá trị (VND)": vo_proposed},
             {"Chỉ tiêu": "VO được duyệt", "Giá trị (VND)": vo_approved},
             {"Chỉ tiêu": "Ngân sách điều chỉnh", "Giá trị (VND)": revised_budget},
-            {"Chỉ tiêu": "Claim đề nghị", "Giá trị (VND)": claim_requested},
-            {"Chỉ tiêu": "Claim được duyệt", "Giá trị (VND)": claim_approved},
+            {"Chỉ tiêu": "IPC đề nghị", "Giá trị (VND)": claim_requested},
+            {"Chỉ tiêu": "IPC được duyệt", "Giá trị (VND)": claim_approved},
             {"Chỉ tiêu": "Đã giải ngân", "Giá trị (VND)": disbursed},
-            {"Chỉ tiêu": "Còn lại sau Claim duyệt", "Giá trị (VND)": remaining},
+            {"Chỉ tiêu": "Còn lại sau IPC duyệt", "Giá trị (VND)": remaining},
             {"Chỉ tiêu": "Ảnh hưởng chi phí từ hồ sơ", "Giá trị (VND)": doc_cost_impact},
-        ])
+        ]
+        summary = pd.DataFrame(summary_rows)
         show = summary.copy()
         show["Giá trị (VND)"] = show["Giá trị (VND)"].map(_fmt)
         st.dataframe(show, hide_index=True, width="stretch")
@@ -130,7 +160,13 @@ def render_cost_report(db, project_id: int) -> None:
             for col in ("KL", "Đơn giá", "Thành tiền"):
                 if col in boq_df.columns:
                     boq_df[col] = boq_df[col].map(_fmt)
-            st.caption(f"{len(boq):,} dòng BOQ · Tổng {_fmt(bac)} VND")
+            if after_tax is not None:
+                st.caption(
+                    f"{len(boq):,} dòng BOQ · Chi tiết trước thuế {_fmt(detail_boq)} VND · "
+                    f"BAC sau thuế {_fmt(bac)} VND"
+                )
+            else:
+                st.caption(f"{len(boq):,} dòng BOQ · Tổng {_fmt(bac)} VND")
             st.dataframe(boq_df, hide_index=True, width="stretch", height=460)
         else:
             st.info("Chưa có dữ liệu BOQ trong dự án.")
@@ -138,7 +174,7 @@ def render_cost_report(db, project_id: int) -> None:
         st.markdown("#### Chi phí phát sinh (VO)")
         if vo:
             vo_df = pd.DataFrame(vo).rename(columns={
-                "vo_code": "Mã VO", "task_ref": "Mã Task", "description": "Nội dung",
+                "vo_code": "Mã VO", "task_ref": "Mã công việc", "description": "Nội dung",
                 "proposed_amount": "Đề xuất", "approved_amount": "Được duyệt",
                 "funding_source": "Nguồn vốn", "status": "Trạng thái", "vo_date": "Ngày", "note": "Ghi chú",
             })
@@ -151,19 +187,19 @@ def render_cost_report(db, project_id: int) -> None:
     with t3:
         if claims:
             claim_df = pd.DataFrame(claims).rename(columns={
-                "claim_no": "Claim", "claim_code": "Mã IPC", "contractor": "Nhà thầu",
+                "claim_no": "Kỳ IPC", "claim_code": "Mã IPC", "contractor": "Nhà thầu",
                 "contract_value": "Giá trị HĐ", "requested_amount": "Đề nghị", "approved_amount": "Duyệt",
                 "disbursed_amount": "Giải ngân", "certified_cumulative": "Lũy kế nghiệm thu",
                 "payment_status": "Trạng thái", "disbursement_date": "Ngày giải ngân",
-                "latest_revision": "Revision", "updated_at": "Cập nhật",
+                "latest_revision": "Lần sửa", "updated_at": "Cập nhật",
             })
             for col in ("Giá trị HĐ", "Đề nghị", "Duyệt", "Giải ngân", "Lũy kế nghiệm thu"):
                 if col in claim_df.columns:
                     claim_df[col] = claim_df[col].map(_fmt)
             st.caption(
-                f"{len(claims):,} Claim · Đề nghị {_fmt(claim_requested)} VND · "
+                f"{len(claims):,} IPC · Đề nghị {_fmt(claim_requested)} VND · "
                 f"Duyệt {_fmt(claim_approved)} VND · Giải ngân {_fmt(disbursed)} VND"
             )
             st.dataframe(claim_df, hide_index=True, width="stretch")
         else:
-            st.info("Chưa có IPC/Claim thanh toán trong dự án.")
+            st.info("Chưa có IPC thanh toán trong dự án.")
