@@ -46,8 +46,6 @@ def initialize_business_runtime() -> None:
             return
         initialize_database_runtime()
 
-        # Workflow/Drive/local-storage behavior that used to be installed by the
-        # generated root entrypoint is now composed from packaged modules.
         from qlda.runtime_core.runtime_optimizations import install_runtime
         from qlda.runtime_core.local_runtime import install_local_vps_runtime
         install_runtime()
@@ -150,15 +148,15 @@ def initialize_ai_runtime() -> None:
         from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
         from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
         from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
-        from qlda.runtime_core.project_cost_signed_adjustments import install_project_cost_signed_adjustments
-        from qlda.runtime_core.vo_value_consistency import install_vo_value_consistency
+        from qlda.runtime_core.finance_consistency import install_finance_consistency_core
         from qlda.runtime_core.project_cost_ai_context import install_project_cost_ai_context
         install_ai_vps_pdf_fullscan()
         install_ai_vps_pdf_vision()
         install_owner_material_ai_context()
         install_cashflow_ai_context()
-        install_project_cost_signed_adjustments()
-        install_vo_value_consistency()
+        # Cleanup V2.3: one core policy replaces the signed-adjustment, VO-value
+        # and after-tax Project Cost patch chain.
+        install_finance_consistency_core()
         install_project_cost_ai_context()
         _AI_READY = True
 
@@ -171,64 +169,37 @@ def initialize_runtime() -> None:
     with _LOCK:
         if _UI_READY:
             return
-        # Only Streamlit reads st.secrets. VPS services normally use qlda.env.
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
         apply_streamlit_secrets_to_env()
         initialize_ai_runtime()
 
-        # Upload/UI policy: use the standard 200 MB Streamlit file size and hide
-        # legacy V6.24 multi-GB BOQ/IPC/VO/Schedule background-upload banners.
-        # This runs before app.py imports the background-panel functions as aliases.
         from qlda.runtime_core.upload_ui_200mb_policy import install_upload_ui_200mb_policy
         install_upload_ui_200mb_policy()
 
-        # Quản lý hồ sơ uses VPS-local attachments. Keep Biên bản họp status-free,
-        # remove its dedicated AI action and leave AI only under Công cụ -> Trợ lý AI.
         from qlda.runtime_core.document_management_vps_ui import install_document_management_vps_ui
         install_document_management_vps_ui()
 
-        # ERP vật tư CĐT cấp is additive to the existing Vật tư & thiết bị screen.
-        # It keeps owner stock, contractor custody, installed quantity and reconciliation separate.
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
-        # Cleanup V2: old V1/V2/V3 cashflow forecast panels are no longer installed.
-        # The approved finance sheet is the unpaid-IPC cash plan rendered by
-        # project_cost_management; historical forecast modules/data remain untouched
-        # for compatibility and can be removed only after a dependency audit.
         from qlda.runtime_core.finance_title_policy import install_finance_title_policy
         install_finance_title_policy()
 
-        # PMBOK-oriented project cost management owns the six-sheet finance
-        # navigation, including the unpaid-IPC cash-plan renderer.
+        # Project Cost owns the six-sheet Finance navigation.
         from qlda.runtime_core.project_cost_management import install_project_cost_management
         install_project_cost_management()
 
-        # BAC/BOQ budget uses the persisted BOQ workbook's after-tax total when
-        # available. Manual/no-workbook BOQ keeps the detail-row sum fallback.
-        from qlda.runtime_core.boq_after_tax_budget import install_boq_after_tax_budget_policy
-        install_boq_after_tax_budget_policy()
+        # Cleanup V2.3: a single UI consistency policy owns after-tax BAC,
+        # simplified budget cards, executive adjusted budget and VO consistency.
+        from qlda.runtime_core.finance_consistency import install_finance_consistency_ui
+        install_finance_consistency_ui()
 
-        # Keep the approved simplified finance presentation as a composed policy
-        # instead of leaving the module orphaned after a cold restart.
-        from qlda.runtime_core.project_cost_budget_ui_simplify import install_project_cost_budget_ui_simplify
-        install_project_cost_budget_ui_simplify()
-
-        # Global money-display policy: monetary/value columns keep numeric database
-        # values but render with comma thousands separators throughout QLDA tables.
         from qlda.runtime_core.money_display_format import install_money_display_format
         install_money_display_format()
 
-        # Final UI policy: most expanders start closed; edit panels auto-open only
-        # when the user selected an existing record.
         from qlda.runtime_core.ui_expander_default_collapsed import install_expanders_default_collapsed
         install_expanders_default_collapsed()
 
-        # A single checked document/drawing row should behave like choosing it in
-        # the upper "Chọn ... để sửa / cập nhật" selector: load the record, open
-        # the edit panel and reveal the existing attachment viewer. The installer
-        # also composes the uniform meeting-minutes interaction policy for all
-        # Quản lý hồ sơ sheets.
         from qlda.runtime_core.document_selection_autopen import install_document_selection_autopen
         install_document_selection_autopen()
 
