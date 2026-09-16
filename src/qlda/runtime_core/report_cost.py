@@ -24,12 +24,16 @@ def _fmt(value: Any) -> str:
         return "0"
 
 
+def _num(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return float(default)
+
+
 def _metric_money(value: Any) -> str:
     """Compact money text for metric cards so large VND values do not truncate."""
-    try:
-        number = float(value or 0)
-    except Exception:
-        number = 0.0
+    number = _num(value)
     sign = "-" if number < 0 else ""
     number = abs(number)
     if number >= 1_000_000_000:
@@ -52,6 +56,7 @@ def render_cost_report(db, project_id: int) -> None:
     import streamlit as st
 
     from qlda.runtime_core.boq_after_tax_budget import boq_budget_total, saved_after_tax_total
+    from qlda.runtime_core.boq_persistence import load_saved_boq_workbook
 
     pid = int(project_id)
     with db.connect() as c:
@@ -88,11 +93,17 @@ def render_cost_report(db, project_id: int) -> None:
                 (pid,),
             ).fetchall()]
 
-    # BAC used by the overview must be the same authoritative value as Finance:
-    # saved BOQ after-tax total when available, otherwise manual/detail BOQ sum.
+    # One authoritative BAC across BOQ, Finance, Cost Control and Overview report.
     bac = float(boq_budget_total(db, pid) or 0)
     detail_boq = sum(float(r.get("budget_total") or 0) for r in boq)
     after_tax = saved_after_tax_total(db, pid)
+    try:
+        saved_boq = load_saved_boq_workbook(db, pid) or {}
+    except Exception:
+        saved_boq = {}
+    summary_before_tax = _num(saved_boq.get("before_tax_total"), detail_boq)
+    summary_vat = _num(saved_boq.get("vat_total"), max(0.0, bac - summary_before_tax))
+    detail_summary_gap = detail_boq - summary_before_tax
 
     vo_proposed = sum(float(r.get("proposed_amount") or 0) for r in vo)
     vo_approved = sum(float(r.get("approved_amount") or 0) for r in vo)
@@ -122,10 +133,10 @@ def render_cost_report(db, project_id: int) -> None:
         summary_rows = [
             {"Chỉ tiêu": "BAC / BOQ sau thuế", "Giá trị (VND)": bac},
         ]
-        if after_tax is not None and abs(float(after_tax) - detail_boq) > 1:
+        if after_tax is not None:
             summary_rows += [
-                {"Chỉ tiêu": "BOQ chi tiết trước thuế", "Giá trị (VND)": detail_boq},
-                {"Chỉ tiêu": "Thuế VAT / chênh lệch đến sau thuế", "Giá trị (VND)": max(0.0, bac - detail_boq)},
+                {"Chỉ tiêu": "BOQ tổng hợp trước thuế", "Giá trị (VND)": summary_before_tax},
+                {"Chỉ tiêu": "Thuế VAT", "Giá trị (VND)": summary_vat},
             ]
         summary_rows += [
             {"Chỉ tiêu": "VO đề xuất", "Giá trị (VND)": vo_proposed},
@@ -141,6 +152,11 @@ def render_cost_report(db, project_id: int) -> None:
         show = summary.copy()
         show["Giá trị (VND)"] = show["Giá trị (VND)"].map(_fmt)
         st.dataframe(show, hide_index=True, width="stretch")
+        if after_tax is not None and abs(detail_summary_gap) > 1:
+            st.caption(
+                "ℹ️ BOQ chi tiết đang lệch tổng hợp trước thuế "
+                f"{_fmt(abs(detail_summary_gap))} VND. Báo cáo ngân sách dùng số tổng hợp trong workbook làm chuẩn."
+            )
         try:
             import plotly.express as px
             fig = px.bar(summary, x="Chỉ tiêu", y="Giá trị (VND)", title="Tổng hợp chi phí dự án")
@@ -162,8 +178,8 @@ def render_cost_report(db, project_id: int) -> None:
                     boq_df[col] = boq_df[col].map(_fmt)
             if after_tax is not None:
                 st.caption(
-                    f"{len(boq):,} dòng BOQ · Chi tiết trước thuế {_fmt(detail_boq)} VND · "
-                    f"BAC sau thuế {_fmt(bac)} VND"
+                    f"{len(boq):,} dòng BOQ · Tổng hợp trước thuế {_fmt(summary_before_tax)} VND · "
+                    f"VAT {_fmt(summary_vat)} VND · BAC sau thuế {_fmt(bac)} VND"
                 )
             else:
                 st.caption(f"{len(boq):,} dòng BOQ · Tổng {_fmt(bac)} VND")
