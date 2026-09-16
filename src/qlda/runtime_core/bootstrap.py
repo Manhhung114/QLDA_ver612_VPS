@@ -189,6 +189,11 @@ def initialize_runtime() -> None:
         install_cashflow_forecast_v2()
         install_cashflow_forecast_v3()
 
+        # Finance UI: move cashflow into a dedicated tab beside BOQ / payments / VO,
+        # rename the section to Quản lý Tài chính and localize cashflow labels.
+        from qlda.runtime_core.finance_management_ui import install_finance_management_ui
+        install_finance_management_ui()
+
         # Final UI policy: every Streamlit expander starts closed. Legacy modules
         # that requested expanded=True are normalized to collapsed and open only
         # after the user clicks the section header.
