@@ -218,10 +218,15 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.money_display_format import install_money_display_format
         install_money_display_format()
 
-        # Final UI policy: every Streamlit expander starts closed. Legacy modules
-        # that requested expanded=True are normalized to collapsed and open only
-        # after the user clicks the section header.
+        # Final UI policy: most expanders start closed; edit panels auto-open only
+        # when the user selected an existing record.
         from qlda.runtime_core.ui_expander_default_collapsed import install_expanders_default_collapsed
         install_expanders_default_collapsed()
+
+        # A single checked document/drawing row should behave like choosing it in
+        # the upper "Chọn ... để sửa / cập nhật" selector: load the record, open
+        # the edit panel and reveal the existing attachment viewer.
+        from qlda.runtime_core.document_selection_autopen import install_document_selection_autopen
+        install_document_selection_autopen()
 
         _UI_READY = True
