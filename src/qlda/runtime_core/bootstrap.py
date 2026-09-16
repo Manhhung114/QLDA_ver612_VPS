@@ -208,6 +208,11 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.project_cost_management import install_project_cost_management
         install_project_cost_management()
 
+        # Global money-display policy: monetary/value columns keep numeric database
+        # values but render with comma thousands separators throughout QLDA tables.
+        from qlda.runtime_core.money_display_format import install_money_display_format
+        install_money_display_format()
+
         # Final UI policy: every Streamlit expander starts closed. Legacy modules
         # that requested expanded=True are normalized to collapsed and open only
         # after the user clicks the section header.
