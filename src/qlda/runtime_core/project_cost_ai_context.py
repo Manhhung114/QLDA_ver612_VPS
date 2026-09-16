@@ -8,7 +8,7 @@ IPC, thanh toán và EVM trong đúng phạm vi workspace được phép truy c�
 
 from typing import Any
 
-PATCH_MARKER = "V7.6 PROJECT COST AI CONTEXT V1"
+PATCH_MARKER = "V7.6 PROJECT COST AI CONTEXT V2"
 
 
 def _text(value: Any) -> str:
@@ -82,14 +82,15 @@ def _appendix(builder, project_id: int) -> str:
     db = _BuilderDB(builder)
     lines = [
         "",
-        "## PROJECT COST MANAGEMENT — DỮ LIỆU TÀI CHÍNH LIVE",
+        "## QUẢN LÝ CHI PHÍ DỰ ÁN — DỮ LIỆU TÀI CHÍNH LIVE",
         "QUY TẮC NGHIỆP VỤ:",
-        "- Hợp đồng/Phụ lục chỉ được quản lý tại Hồ sơ Hợp đồng; phần Tài chính chỉ đọc lại để tính Committed Cost.",
-        "- Committed Cost = Hợp đồng gốc + Phụ lục cùng tiền tệ baseline.",
-        "- VO đã duyệt được hiển thị riêng và KHÔNG tự cộng vào Committed Cost để tránh cộng trùng nếu VO đã được đưa vào Phụ lục.",
+        "- Hợp đồng/Phụ lục chỉ được quản lý tại Hồ sơ Hợp đồng; phần Tài chính chỉ đọc lại để tính Chi phí đã cam kết.",
+        "- Chi phí đã cam kết = Hợp đồng gốc + Phụ lục cùng tiền tệ baseline.",
+        "- VO đã duyệt được hiển thị riêng và KHÔNG tự cộng vào Chi phí đã cam kết để tránh cộng trùng nếu VO đã được đưa vào Phụ lục.",
         "- Cost Baseline = Chi phí công việc baseline + Contingency Reserve; Management Reserve nằm ngoài Cost Baseline.",
         "- AC là Actual Cost thực tế phát sinh, KHÔNG đồng nhất với tiền đã thanh toán.",
         "- Nếu AC chưa được nhập thì không tự suy diễn CPI/EAC/ETC/VAC từ Paid Cash.",
+        "- Khi trả lời người dùng bằng tiếng Việt, dùng thuật ngữ 'Chi phí đã cam kết', không dùng 'Committed Cost'.",
     ]
 
     totals = {
@@ -110,14 +111,14 @@ def _appendix(builder, project_id: int) -> str:
             f"### [PROJECT-COST:{code}] {name} | workspace={wid}",
             f"Tiền tệ baseline={_text(settings.get('currency')) or 'VND'} | ngày baseline={_text(settings.get('baseline_date')) or 'chưa ghi nhận'}.",
             f"BOQ hiện tại={_money(snap.get('boq_estimate'))} | Chi phí công việc baseline={_money(snap.get('baseline_work_cost'))} | Contingency={_money(snap.get('contingency_reserve'))} | Cost Baseline(BAC)={_money(snap.get('cost_baseline'))} | Management Reserve={_money(snap.get('management_reserve'))} | Total Budget={_money(snap.get('total_budget'))}.",
-            f"Hợp đồng gốc={_money(snap.get('contract_value'))} | Phụ lục={_money(snap.get('appendix_value'))} | Committed Cost={_money(snap.get('committed_cost'))} | VO đã duyệt riêng={_money(snap.get('vo_approved'))}.",
+            f"Hợp đồng gốc={_money(snap.get('contract_value'))} | Phụ lục={_money(snap.get('appendix_value'))} | Chi phí đã cam kết={_money(snap.get('committed_cost'))} | VO đã duyệt riêng={_money(snap.get('vo_approved'))}.",
             f"Certified Cost/IPC lũy kế={_money(snap.get('certified_cost'))} | Paid Cash={_money(snap.get('paid_cash'))}.",
             f"PV={_money(snap.get('pv'))} | EV={_money(snap.get('ev'))} | AC={_money(snap.get('ac')) if snap.get('ac') is not None else 'CHƯA NHẬP'} | AC date={_text(snap.get('ac_status_date')) or '—'}.",
             f"CV={_money(snap.get('cv')) if snap.get('cv') is not None else 'Chưa đủ dữ liệu'} | SV={_money(snap.get('sv'))} | CPI={_ratio(snap.get('cpi'))} | SPI={_ratio(snap.get('spi'))} | EAC={_money(snap.get('eac')) if snap.get('eac') is not None else 'Chưa đủ dữ liệu'} | ETC={_money(snap.get('etc')) if snap.get('etc') is not None else 'Chưa đủ dữ liệu'} | VAC={_money(snap.get('vac')) if snap.get('vac') is not None else 'Chưa đủ dữ liệu'} | TCPI={_ratio(snap.get('tcpi'))}.",
             f"BOQ tham gia PV/EV={_money(snap.get('linked_boq'))} | BOQ chưa liên kết công việc={_money(snap.get('unlinked_boq'))} | Ngưỡng kiểm soát={_float(settings.get('control_threshold_pct')):.1f}%.",
         ]
         if snap.get("other_currency"):
-            lines.append("Hợp đồng/phụ lục khác tiền tệ chưa cộng Committed: " + " | ".join(f"{k}={_money(v)}" for k, v in snap["other_currency"].items()))
+            lines.append("Hợp đồng/phụ lục khác tiền tệ chưa cộng vào Chi phí đã cam kết: " + " | ".join(f"{k}={_money(v)}" for k, v in snap["other_currency"].items()))
 
         totals["boq"] += _float(snap.get("boq_estimate"))
         totals["baseline"] += _float(snap.get("cost_baseline"))
@@ -130,8 +131,8 @@ def _appendix(builder, project_id: int) -> str:
     lines += [
         "",
         "### [PROJECT-COST-TOTAL] TỔNG PHẠM VI ĐƯỢC PHÉP ĐỌC",
-        f"BOQ={_money(totals['boq'])} | Cost Baseline={_money(totals['baseline'])} | Total Budget={_money(totals['budget'])} | Committed Cost={_money(totals['committed'])} | VO đã duyệt riêng={_money(totals['vo'])} | Certified={_money(totals['certified'])} | Paid={_money(totals['paid'])}.",
-        "Khi người dùng hỏi ngân sách/chi phí/hợp đồng/EVM, dùng các số live ở trên. Không suy đoán AC nếu chưa nhập và không cộng VO đã duyệt vào Committed Cost trừ khi dữ liệu sau này có liên kết rõ ràng VO→Phụ lục.",
+        f"BOQ={_money(totals['boq'])} | Cost Baseline={_money(totals['baseline'])} | Total Budget={_money(totals['budget'])} | Chi phí đã cam kết={_money(totals['committed'])} | VO đã duyệt riêng={_money(totals['vo'])} | Certified={_money(totals['certified'])} | Paid={_money(totals['paid'])}.",
+        "Khi người dùng hỏi ngân sách/chi phí/hợp đồng/EVM, dùng các số live ở trên. Không suy đoán AC nếu chưa nhập và không cộng VO đã duyệt vào Chi phí đã cam kết trừ khi dữ liệu sau này có liên kết rõ ràng VO→Phụ lục.",
     ]
     return "\n".join(lines)
 
@@ -155,7 +156,7 @@ def install_project_cost_ai_context() -> None:
         try:
             appendix = _appendix(self, int(project_id))
         except Exception as exc:
-            appendix = f"\n## PROJECT COST MANAGEMENT\nKhông đọc được dữ liệu chi phí ở lượt này: {exc}"
+            appendix = f"\n## QUẢN LÝ CHI PHÍ DỰ ÁN\nKhông đọc được dữ liệu chi phí ở lượt này: {exc}"
         return snapshot.rstrip() + ("\n" + appendix if appendix else "") + "\n"
 
     cls.build = build_with_project_cost
