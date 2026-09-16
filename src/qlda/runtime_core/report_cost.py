@@ -87,7 +87,7 @@ def render_cost_report(db, project_id: int) -> None:
     import pandas as pd
     import streamlit as st
 
-    from qlda.runtime_core.boq_after_tax_budget import boq_budget_total, saved_after_tax_total
+    from qlda.runtime_core.finance_consistency import boq_budget_total, saved_after_tax_total
     from qlda.runtime_core.boq_persistence import load_saved_boq_workbook
     from qlda.runtime_core.project_cost_management import build_cost_snapshot
 
