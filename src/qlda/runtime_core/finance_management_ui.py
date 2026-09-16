@@ -1,40 +1,19 @@
 from __future__ import annotations
 
-"""Giao diện Quản lý Tài chính: Dự trù dòng tiền là một sheet riêng.
+"""Giao diện Quản lý Tài chính.
 
-Module này không sửa dữ liệu tài chính. Nó chỉ bố trí lại màn hình hiện hữu:
-- đổi tiêu đề Quản lý chi phí -> Quản lý Tài chính;
-- thêm tab Dự trù dòng tiền ngang hàng BOQ / Thanh toán / VO;
-- bỏ khối expander dự trù ở phía trên;
-- Việt hóa các nhãn chính của Dự trù dòng tiền V3.
+Dự trù dòng tiền chỉ phản ánh các IPC đã tồn tại và còn số dư chưa thanh toán.
+Không dùng dự báo BOQ/tiến độ, xác suất, kịch bản hay mô phỏng tương lai.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime
 from functools import wraps
 import inspect
+import re
+import unicodedata
 from typing import Any
 
-PATCH_MARKER = "V7.6 FINANCE MANAGEMENT TABS VN V1"
-
-_SCENARIO_VN = {
-    "Base": "Cơ sở",
-    "Optimistic": "Lạc quan",
-    "Conservative": "Thận trọng",
-}
-
-_SEVERITY_VN = {
-    "CRITICAL": "Nghiêm trọng",
-    "WARNING": "Cảnh báo",
-    "INFO": "Thông tin",
-}
-
-_SOURCE_VN = {
-    "SCHEDULE_BOQ": "BOQ + tiến độ",
-    "PAYMENT_CLAIM": "Hồ sơ thanh toán",
-    "CLAIM": "Hồ sơ thanh toán",
-    "PAYMENT": "Thanh toán",
-    "PAYMENT_TRACKING": "Theo dõi thanh toán",
-}
+PATCH_MARKER = "V7.6 FINANCE IPC UNPAID CASH PLAN V2"
 
 
 def _text(value: Any) -> str:
@@ -55,453 +34,339 @@ def _int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
-def _source_label(value: Any) -> str:
-    raw = _text(value)
-    return _SOURCE_VN.get(raw, raw.replace("_", " ") or "Khác")
+def _rowdict(row: Any) -> dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    try:
+        return {str(k): row[k] for k in row.keys()}
+    except Exception:
+        try:
+            return dict(row)
+        except Exception:
+            return {}
+
+
+def _norm(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", _text(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower().replace("đ", "d")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = _text(value)
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text[:19] if "%H" in fmt else text[:10], fmt).date()
+        except Exception:
+            pass
+    return None
 
 
 def _date_text(value: Any) -> str:
-    from qlda.runtime_core.cashflow_forecast_v3 import _parse_date
-
-    d = _parse_date(value)
-    return d.strftime("%d/%m/%Y") if d else ""
+    parsed = _parse_date(value)
+    return parsed.strftime("%d/%m/%Y") if parsed else ""
 
 
 def _money(value: Any) -> str:
-    from qlda.runtime_core.cashflow_forecast_v3 import _money
+    number = _float(value)
+    sign = "-" if number < 0 else ""
+    number = abs(number)
+    if number >= 1_000_000_000:
+        return f"{sign}{number / 1_000_000_000:,.2f} tỷ"
+    if number >= 1_000_000:
+        return f"{sign}{number / 1_000_000:,.1f} triệu"
+    return f"{sign}{number:,.0f} đ"
 
-    return _money(value)
+
+def _table_exists(connection, table: str) -> bool:
+    try:
+        connection.execute(f"SELECT 1 FROM {table} LIMIT 1")
+        return True
+    except Exception:
+        return False
 
 
-def _render_overview(st, rows: list[dict[str, Any]], start: date, end: date, scenario: str, alerts: list[dict[str, Any]]) -> None:
+def _scope_label(db, pid: int) -> str:
+    try:
+        from qlda.runtime_core.cashflow_forecast_v1 import _resolve_scope
+        scope = _resolve_scope(db, int(pid))
+        label = " - ".join(
+            x for x in (_text(scope.get("contractor_code")), _text(scope.get("contractor_name"))) if x
+        )
+        return label or "Workspace mặc định"
+    except Exception:
+        return "Workspace hiện tại"
+
+
+def _payment_rows_by_code(connection, project_id: int) -> dict[str, dict[str, Any]]:
+    if not _table_exists(connection, "payment_tracking"):
+        return {}
+    try:
+        rows = connection.execute(
+            "SELECT * FROM payment_tracking WHERE project_id=? ORDER BY id", (int(project_id),)
+        ).fetchall()
+    except Exception:
+        try:
+            rows = connection.execute(
+                "SELECT * FROM payment_tracking WHERE project_id=?", (int(project_id),)
+            ).fetchall()
+        except Exception:
+            rows = []
+    out: dict[str, dict[str, Any]] = {}
+    for raw in rows:
+        row = _rowdict(raw)
+        code = _text(row.get("payment_code"))
+        if code:
+            out[code] = row
+    return out
+
+
+def _is_cancelled(status: Any) -> bool:
+    q = _norm(status)
+    return any(term in q for term in ("huy", "tu choi", "cancelled", "canceled", "rejected"))
+
+
+def _is_approved(status: Any, approved_amount: float) -> bool:
+    if approved_amount > 0:
+        return True
+    q = _norm(status)
+    return any(term in q for term in ("da duyet", "duoc duyet", "chap thuan", "approved", "certified", "cho thanh toan"))
+
+
+def load_unpaid_ipcs(db, project_id: int) -> list[dict[str, Any]]:
+    """Đọc IPC hiện hữu và chỉ giữ các khoản còn số dư phải thanh toán."""
+    pid = int(project_id)
+    today = date.today()
+    rows: list[dict[str, Any]] = []
+
+    with db.connect() as connection:
+        if not _table_exists(connection, "payment_claims"):
+            return []
+        payments = _payment_rows_by_code(connection, pid)
+        try:
+            claims = connection.execute(
+                "SELECT * FROM payment_claims WHERE project_id=? ORDER BY claim_no,updated_at", (pid,)
+            ).fetchall()
+        except Exception:
+            claims = connection.execute(
+                "SELECT * FROM payment_claims WHERE project_id=?", (pid,)
+            ).fetchall()
+
+        for raw in claims:
+            claim = _rowdict(raw)
+            code = _text(claim.get("claim_code") or claim.get("claim_no") or claim.get("claim_id"))
+            payment = payments.get(code, {})
+            status = _text(claim.get("payment_status") or payment.get("payment_status") or "Chưa thanh toán")
+            if _is_cancelled(status):
+                continue
+
+            requested = max(0.0, _float(claim.get("requested_amount")))
+            approved = max(0.0, _float(claim.get("approved_amount")))
+            certified = max(0.0, _float(claim.get("certified_cumulative")))
+            paid = max(
+                0.0,
+                _float(claim.get("disbursed_amount")),
+                _float(payment.get("paid_amount")),
+            )
+            target = approved if approved > 0 else requested if requested > 0 else certified
+            outstanding = max(0.0, target - paid)
+            if outstanding <= 1e-6:
+                continue
+
+            due_date = None
+            for candidate in (
+                claim.get("payment_due_date"),
+                payment.get("payment_due_date"),
+                payment.get("due_date"),
+                claim.get("due_date"),
+            ):
+                due_date = _parse_date(candidate)
+                if due_date:
+                    break
+
+            overdue_days = max(0, (today - due_date).days) if due_date and due_date < today else 0
+            rows.append({
+                "claim_id": _text(claim.get("claim_id") or claim.get("id")),
+                "claim_no": _text(claim.get("claim_no")),
+                "claim_code": code,
+                "contractor": _text(claim.get("contractor")),
+                "contract_no": _text(claim.get("contract_no")),
+                "package_name": _text(claim.get("package_name")),
+                "status": status,
+                "requested_amount": requested,
+                "approved_amount": approved,
+                "certified_amount": certified,
+                "paid_amount": paid,
+                "outstanding": outstanding,
+                "due_date": due_date,
+                "overdue_days": overdue_days,
+                "approved_waiting": _is_approved(status, approved),
+                "retention": max(0.0, _float(claim.get("retention_cumulative"))),
+                "advance_recovery": max(0.0, _float(claim.get("advance_recovery"))),
+                "deductions": max(0.0, _float(claim.get("current_deductions"))),
+                "period_to": _parse_date(claim.get("to_date")),
+                "note": _text(claim.get("note") or payment.get("note")),
+            })
+
+    rows.sort(key=lambda row: (row.get("due_date") is None, row.get("due_date") or date.max, _text(row.get("claim_code"))))
+    return rows
+
+
+def _render_due_month_summary(st, rows: list[dict[str, Any]]) -> None:
     import pandas as pd
-    import qlda.runtime_core.cashflow_forecast_v1 as v1
-    import qlda.runtime_core.cashflow_forecast_v3 as v3
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("30 ngày", _money(v1._sum_horizon(rows, 30)))
-    c2.metric("60 ngày", _money(v1._sum_horizon(rows, 60)))
-    c3.metric("90 ngày", _money(v1._sum_horizon(rows, 90)))
-    c4.metric("6 tháng", _money(v1._sum_horizon(rows, 180)))
-    c5.metric("12 tháng", _money(v1._sum_horizon(rows, 365)))
+    buckets: dict[str, float] = {}
+    no_due = 0.0
+    for row in rows:
+        due = row.get("due_date")
+        value = max(0.0, _float(row.get("outstanding")))
+        if isinstance(due, date):
+            key = due.strftime("%m/%Y")
+            buckets[key] = buckets.get(key, 0.0) + value
+        else:
+            no_due += value
 
-    summary = v3.summarize_rows(rows, start, end)
+    if not buckets:
+        if rows:
+            st.info("Các IPC chưa thanh toán hiện chưa có ngày đến hạn để phân bổ dòng tiền theo tháng.")
+        return
+
+    ordered = sorted(
+        buckets.items(),
+        key=lambda item: datetime.strptime(item[0], "%m/%Y"),
+    )
+    frame = pd.DataFrame([{"Tháng đến hạn": key, "Cần thanh toán": value} for key, value in ordered])
+    st.markdown("#### Dòng tiền theo hạn thanh toán IPC")
+    st.bar_chart(frame.set_index("Tháng đến hạn"), use_container_width=True)
+    st.dataframe(frame, hide_index=True, use_container_width=True)
+    if no_due > 0:
+        st.caption(f"IPC chưa có hạn thanh toán: {_money(no_due)}.")
+
+
+def render_cashflow_finance_sheet(
+    st,
+    db,
+    pid: int,
+    *,
+    identity: Any = None,
+    can_update: bool = False,
+    is_admin: bool = False,
+) -> None:
+    del identity, can_update, is_admin
+    import pandas as pd
+
+    pid = int(pid)
+    rows = load_unpaid_ipcs(db, pid)
+    today = date.today()
+
+    st.markdown("### 💵 Dự trù dòng tiền thanh toán IPC")
+    st.caption(
+        f"Phạm vi: {_scope_label(db, pid)}. Chỉ tổng hợp các IPC đã tồn tại và còn số dư chưa thanh toán. "
+        "Không sử dụng dự báo BOQ, tiến độ, xác suất, kịch bản hoặc mô phỏng."
+    )
+
+    total_outstanding = sum(_float(row.get("outstanding")) for row in rows)
+    approved_waiting = sum(
+        _float(row.get("outstanding")) for row in rows if bool(row.get("approved_waiting"))
+    )
+    overdue_total = sum(
+        _float(row.get("outstanding")) for row in rows if _int(row.get("overdue_days")) > 0
+    )
+    no_due_total = sum(
+        _float(row.get("outstanding")) for row in rows if not isinstance(row.get("due_date"), date)
+    )
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"Dự báo • {_SCENARIO_VN.get(scenario, scenario)}", _money(summary["forecast"]))
-    c2.metric("Dòng tiền kỳ vọng", _money(summary["expected"]))
-    c3.metric("Đã duyệt chờ thanh toán", _money(summary["approved_waiting"]))
-    c4.metric("Số cảnh báo", len(alerts))
-
-    monthly = v1.aggregate_monthly(rows, start, end)
-    if monthly:
-        frame = pd.DataFrame([
-            {
-                "Tháng": v1._month_label(r["month"]),
-                "Kế hoạch": r["plan"],
-                "Dự báo": r["forecast"],
-                "Kỳ vọng": r["expected"],
-                "Thực tế": r["actual"],
-            }
-            for r in monthly
-        ])
-        st.markdown("#### Kế hoạch / Dự báo / Kỳ vọng / Thực tế")
-        st.bar_chart(frame.set_index("Tháng"), use_container_width=True)
-        view = frame.copy()
-        for col in ("Kế hoạch", "Dự báo", "Kỳ vọng", "Thực tế"):
-            view[col] = view[col].map(lambda x: f"{float(x):,.0f}")
-        st.dataframe(view, hide_index=True, use_container_width=True)
-
-
-def _render_scenarios_vn(st, db, pid: int, start: date, end: date) -> None:
-    import pandas as pd
-    import qlda.runtime_core.cashflow_forecast_v3 as v3
-
-    data = v3.scenario_summary(db, pid, start, end)
-    cols = st.columns(3)
-    for col, item in zip(cols, data):
-        label = _SCENARIO_VN.get(_text(item.get("scenario")), _text(item.get("scenario")))
-        col.metric(label, _money(item.get("expected")), delta=f"Dự báo {_money(item.get('forecast'))}")
-    frame = pd.DataFrame([
-        {
-            "Kịch bản": _SCENARIO_VN.get(_text(x.get("scenario")), _text(x.get("scenario"))),
-            "Kế hoạch": x.get("plan", 0),
-            "Dự báo": x.get("forecast", 0),
-            "Kỳ vọng": x.get("expected", 0),
-        }
-        for x in data
-    ])
-    st.dataframe(frame, hide_index=True, use_container_width=True)
-    if not frame.empty:
-        st.bar_chart(frame.set_index("Kịch bản")[["Kỳ vọng"]], use_container_width=True)
-
-
-def _render_alerts_vn(st, alerts: list[dict[str, Any]]) -> None:
-    import pandas as pd
-
-    if not alerts:
-        st.success("Không phát hiện cảnh báo dòng tiền theo các ngưỡng hiện tại.")
-        return
-    critical = sum(1 for a in alerts if _text(a.get("severity")) == "CRITICAL")
-    warning = sum(1 for a in alerts if _text(a.get("severity")) == "WARNING")
-    info = sum(1 for a in alerts if _text(a.get("severity")) == "INFO")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Nghiêm trọng", critical)
-    c2.metric("Cảnh báo", warning)
-    c3.metric("Thông tin", info)
-    frame = pd.DataFrame([
-        {
-            "Mức": _SEVERITY_VN.get(_text(a.get("severity")), _text(a.get("severity"))),
-            "Mã": a.get("code", ""),
-            "Nội dung": a.get("title", ""),
-            "Giá trị": a.get("amount", 0),
-            "Chi tiết": a.get("detail", ""),
-        }
-        for a in alerts
-    ])
-    st.dataframe(frame, hide_index=True, use_container_width=True)
-
-
-def _render_delay_vn(st, rows: list[dict[str, Any]], start: date, end: date, pid: int) -> None:
-    import pandas as pd
-    import qlda.runtime_core.cashflow_forecast_v3 as v3
-
-    st.caption("Mô phỏng chỉ dịch ngày dự báo của phần BOQ + tiến độ; không sửa dữ liệu gốc và không thay đổi giá trị tiền.")
-    schedule_rows = [r for r in rows if _text(r.get("source_type")) == "SCHEDULE_BOQ"]
-    contractors = sorted({_text(r.get("contractor")) for r in schedule_rows if _text(r.get("contractor"))})
-    c1, c2 = st.columns(2)
-    delay = c1.selectbox(
-        "Giả định chậm tiến độ",
-        [0, 15, 30, 45, 60, 90],
-        index=2,
-        format_func=lambda x: f"{x} ngày",
-        key=f"cashflow_finance_delay_{pid}",
-    )
-    selected = c2.selectbox(
-        "Phạm vi mô phỏng",
-        ["Tất cả nhà thầu"] + contractors,
-        key=f"cashflow_finance_delay_contractor_{pid}",
-    )
-    contractor = "" if selected == "Tất cả nhà thầu" else selected
-    base = {r["month"]: r["expected"] for r in v3.monthly_expected(rows, start, end)}
-    shifted = {
-        r["month"]: r["expected"]
-        for r in v3.monthly_expected(rows, start, end, shift_days=int(delay), contractor=contractor)
-    }
-    months = sorted(set(base) | set(shifted))
-    frame = pd.DataFrame([
-        {
-            "Tháng": m,
-            "Hiện tại": base.get(m, 0.0),
-            f"Sau khi trễ {delay} ngày": shifted.get(m, 0.0),
-            "Chênh lệch": shifted.get(m, 0.0) - base.get(m, 0.0),
-        }
-        for m in months
-    ])
-    if frame.empty:
-        st.info("Không có dòng BOQ + tiến độ trong kỳ để mô phỏng.")
-        return
-    st.bar_chart(frame.set_index("Tháng")[["Hiện tại", f"Sau khi trễ {delay} ngày"]], use_container_width=True)
-    st.dataframe(frame, hide_index=True, use_container_width=True)
-
-
-def _render_detail_vn(st, db, pid: int, rows: list[dict[str, Any]], *, identity: Any, can_update: bool) -> None:
-    import pandas as pd
-    import qlda.runtime_core.cashflow_forecast_v1 as v1
+    c1.metric("IPC chưa thanh toán", f"{len(rows):,}")
+    c2.metric("Còn phải thanh toán", _money(total_outstanding))
+    c3.metric("Đã duyệt chờ thanh toán", _money(approved_waiting))
+    c4.metric("Quá hạn thanh toán", _money(overdue_total))
 
     if not rows:
-        st.info("Chưa có dữ liệu dự báo.")
+        st.success("Không có IPC nào còn số dư chưa thanh toán trong workspace hiện tại.")
         return
+
+    statuses = sorted({_text(row.get("status")) for row in rows if _text(row.get("status"))})
+    contractors = sorted({_text(row.get("contractor")) for row in rows if _text(row.get("contractor"))})
+    f1, f2, f3 = st.columns(3)
+    status_filter = f1.selectbox(
+        "Trạng thái",
+        ["Tất cả"] + statuses,
+        key=f"ipc_cash_status_{pid}",
+    )
+    contractor_filter = f2.selectbox(
+        "Nhà thầu",
+        ["Tất cả"] + contractors,
+        key=f"ipc_cash_contractor_{pid}",
+    )
+    due_filter = f3.selectbox(
+        "Hạn thanh toán",
+        ["Tất cả", "Quá hạn", "Chưa đến hạn", "Chưa có hạn"],
+        key=f"ipc_cash_due_{pid}",
+    )
+
+    filtered = []
+    for row in rows:
+        if status_filter != "Tất cả" and _text(row.get("status")) != status_filter:
+            continue
+        if contractor_filter != "Tất cả" and _text(row.get("contractor")) != contractor_filter:
+            continue
+        due = row.get("due_date")
+        if due_filter == "Quá hạn" and not (_int(row.get("overdue_days")) > 0):
+            continue
+        if due_filter == "Chưa đến hạn" and not (isinstance(due, date) and due >= today):
+            continue
+        if due_filter == "Chưa có hạn" and isinstance(due, date):
+            continue
+        filtered.append(row)
+
+    st.markdown("#### Danh sách IPC còn phải thanh toán")
     table = pd.DataFrame([
         {
-            "Nguồn": _source_label(r.get("source_type")),
-            "IPC/BOQ": r.get("claim_code", ""),
-            "Nhà thầu": r.get("contractor", ""),
-            "Trạng thái": r.get("status", ""),
-            "Công việc": r.get("task_name", ""),
-            "Hạng mục BOQ": r.get("boq_item", ""),
-            "Ngày đến hạn": _date_text(r.get("due_date")),
-            "Ngày dự báo": _date_text(r.get("forecast_date")),
-            "Giá trị dự báo": _float(r.get("outstanding")),
-            "Xác suất": f"{_float(r.get('probability')) * 100:.0f}%",
-            "Giá trị kỳ vọng": _float(r.get("expected_amount")),
-            "Đã giải ngân": _float(r.get("disbursed_amount")),
-            "Căn cứ ngày": r.get("due_source", ""),
-            "Ghi chú": r.get("note", ""),
+            "IPC": row.get("claim_code", ""),
+            "Nhà thầu": row.get("contractor", ""),
+            "Hợp đồng": row.get("contract_no", ""),
+            "Gói thầu": row.get("package_name", ""),
+            "Trạng thái": row.get("status", ""),
+            "Giá trị đề nghị": row.get("requested_amount", 0.0),
+            "Giá trị được duyệt": row.get("approved_amount", 0.0),
+            "Giá trị chứng nhận": row.get("certified_amount", 0.0),
+            "Đã thanh toán": row.get("paid_amount", 0.0),
+            "Còn phải thanh toán": row.get("outstanding", 0.0),
+            "Ngày đến hạn": _date_text(row.get("due_date")),
+            "Quá hạn (ngày)": row.get("overdue_days", 0),
+            "Giữ lại": row.get("retention", 0.0),
+            "Thu hồi tạm ứng": row.get("advance_recovery", 0.0),
+            "Khấu trừ": row.get("deductions", 0.0),
+            "Ghi chú": row.get("note", ""),
         }
-        for r in rows
+        for row in filtered
     ])
     st.dataframe(table, hide_index=True, use_container_width=True)
     st.download_button(
-        "⬇️ Xuất bảng dự báo CSV",
+        "⬇️ Xuất danh sách IPC chưa thanh toán",
         data=table.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"du_tru_dong_tien_{pid}_{date.today():%Y%m%d}.csv",
+        file_name=f"du_tru_thanh_toan_ipc_{pid}_{today:%Y%m%d}.csv",
         mime="text/csv",
         use_container_width=True,
     )
 
-    st.markdown("#### Điều chỉnh một khoản dự báo")
-    labels = {
-        f"{r['source_type']}|{r['source_key']}": (
-            f"{r.get('claim_code') or r.get('source_key')} • {r.get('contractor','')} • {_money(r.get('outstanding'))}"
+    _render_due_month_summary(st, filtered)
+    if no_due_total > 0:
+        st.warning(
+            f"Có {_money(no_due_total)} IPC chưa ghi nhận ngày đến hạn thanh toán. "
+            "Các khoản này vẫn được tính vào tổng còn phải thanh toán nhưng chưa thể phân bổ theo tháng."
         )
-        for r in rows if _text(r.get("source_key"))
-    }
-    if not labels:
-        return
-    selected_key = st.selectbox(
-        "Khoản cần điều chỉnh",
-        list(labels),
-        format_func=lambda key: labels.get(key, key),
-        key=f"cashflow_finance_edit_select_{pid}",
-    )
-    current = next(r for r in rows if f"{r['source_type']}|{r['source_key']}" == selected_key)
-    auto_date = not bool(current.get("has_override")) or _text(current.get("due_source")) != "Điều chỉnh thủ công"
-    with st.form(f"cashflow_finance_override_{pid}_{current['source_type']}_{current['source_key']}"):
-        use_auto_date = st.checkbox("Dùng ngày dự báo tự động", value=auto_date)
-        forecast_date_value = st.date_input(
-            "Ngày dự kiến thanh toán",
-            value=current.get("forecast_date") or date.today(),
-            disabled=use_auto_date,
-        )
-        use_source_amount = st.checkbox(
-            "Dùng giá trị dự báo tự động",
-            value=abs(_float(current.get("planned_amount")) - _float(current.get("outstanding"))) < 1e-6,
-        )
-        planned_amount = st.number_input(
-            "Giá trị kế hoạch (VND)",
-            min_value=0.0,
-            value=float(current.get("planned_amount") or 0),
-            step=1_000_000.0,
-            disabled=use_source_amount,
-        )
-        auto_prob = st.checkbox(
-            "Dùng xác suất tự động theo nguồn/trạng thái",
-            value=_text(current.get("probability_reason")) != "Điều chỉnh thủ công",
-        )
-        prob_pct = st.number_input(
-            "Xác suất kịch bản cơ sở (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=float(current.get("base_probability") or 0) * 100.0,
-            step=5.0,
-            disabled=auto_prob,
-        )
-        note = st.text_area("Ghi chú dự báo", value=_text(current.get("note")))
-        save = st.form_submit_button("💾 Lưu điều chỉnh", disabled=not can_update, use_container_width=True)
-        if save:
-            v1.save_override(
-                db,
-                pid,
-                current["source_type"],
-                current["source_key"],
-                forecast_date=None if use_auto_date else forecast_date_value,
-                planned_amount=0.0 if use_source_amount else planned_amount,
-                probability=-1.0 if auto_prob else prob_pct / 100.0,
-                note=note,
-                actor=identity,
-            )
-            st.success("Đã lưu điều chỉnh dự báo.")
-            st.rerun()
-    if st.button(
-        "↩️ Xóa điều chỉnh, dùng lại dữ liệu tự động",
-        key=f"cashflow_finance_clear_{pid}_{current['source_type']}_{current['source_key']}",
-        disabled=(not can_update or not current.get("has_override")),
-        use_container_width=True,
-    ):
-        v1.clear_override(db, pid, current["source_type"], current["source_key"])
-        st.success("Đã trả khoản dự báo về chế độ tự động.")
-        st.rerun()
-
-
-def _render_schedule_vn(st, diagnostics: dict[str, Any]) -> None:
-    import pandas as pd
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("BOQ có liên kết tiến độ", f"{_int(diagnostics.get('linked_rows')):,} dòng")
-    c2.metric("BOQ chưa liên kết", f"{_int(diagnostics.get('unlinked_rows')):,} dòng")
-    c3.metric("Giá trị chưa liên kết", _money(diagnostics.get("unlinked_value")))
-    c4.metric("Dự báo từ BOQ", _money(diagnostics.get("forecast_value")))
-    latest = _text(diagnostics.get("latest_claim_code")) or "Chưa có IPC"
-    st.caption(
-        f"Mốc chống cộng trùng: {latest}; giá trị chứng nhận lũy kế {_money(diagnostics.get('latest_certified_total'))}. "
-        f"Độ trễ từ mốc khối lượng đến thanh toán: {_int(diagnostics.get('payment_lag_days'))} ngày."
-    )
-    data = diagnostics.get("task_rows") or []
-    if data:
-        view = pd.DataFrame([
-            {
-                "BOQ ID": r.get("boq_id"),
-                "Công việc": r.get("task_name"),
-                "Hạng mục BOQ": r.get("boq_item"),
-                "Giá trị BOQ": r.get("budget_total"),
-                "Đã chứng nhận": r.get("certified"),
-                "Cách đối chiếu IPC": r.get("certified_method"),
-                "Thực tế (%)": r.get("actual_progress"),
-                "Kế hoạch hôm nay (%)": r.get("planned_progress"),
-                "Kết thúc kế hoạch": r.get("planned_finish"),
-                "Kết thúc dự báo": r.get("projected_finish"),
-                "Giá trị dự báo còn lại": r.get("forecast_remaining"),
-            }
-            for r in data
-        ])
-        st.dataframe(view, hide_index=True, use_container_width=True)
-    else:
-        st.info("Chưa có BOQ liên kết công việc đủ dữ liệu để sinh dự báo.")
-    if _int(diagnostics.get("unlinked_rows")) > 0:
-        st.warning("Các dòng BOQ chưa gắn công việc được loại khỏi dự báo để tránh tự gán ngày thanh toán sai.")
-
-
-def _render_settings_vn(st, db, pid: int, *, identity: Any, can_update: bool) -> None:
-    import qlda.runtime_core.cashflow_forecast_v1 as v1
-    import qlda.runtime_core.cashflow_forecast_v2 as v2
-    import qlda.runtime_core.cashflow_forecast_v3 as v3
-
-    s1 = v1.get_settings(db, pid)
-    s2 = v2.get_settings(db, pid)
-    s3 = v3.get_settings(db, pid)
-
-    st.markdown("#### Giả định dự báo và thanh toán")
-    with st.form(f"cashflow_finance_settings_{pid}"):
-        c1, c2, c3 = st.columns(3)
-        terms = c1.number_input("Điều khoản thanh toán sau khi duyệt (ngày)", 0, 365, _int(s1.get("payment_terms_days"), 30), 1)
-        prep = c2.number_input("Chuẩn bị/trình IPC (ngày)", 0, 90, _int(s2.get("claim_preparation_days"), 5), 1)
-        approval = c3.number_input("Kiểm tra/phê duyệt IPC (ngày)", 0, 180, _int(s2.get("approval_days"), 7), 1)
-        cycle = st.number_input("Chu kỳ dự kiến lập IPC (ngày)", 7, 90, _int(s2.get("forecast_cycle_days"), 30), 1)
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        draft = c1.number_input("IPC nháp (%)", 0.0, 100.0, _float(s1.get("prob_draft"), 0.60) * 100.0, 5.0)
-        submitted = c2.number_input("IPC đã trình (%)", 0.0, 100.0, _float(s1.get("prob_submitted"), 0.85) * 100.0, 5.0)
-        approved = c3.number_input("IPC đã duyệt (%)", 0.0, 100.0, _float(s1.get("prob_approved"), 1.0) * 100.0, 5.0)
-        earned = c4.number_input("KL đã làm chưa IPC (%)", 0.0, 100.0, _float(s2.get("prob_earned_unclaimed"), 0.70) * 100.0, 5.0)
-        future = c5.number_input("BOQ + tiến độ tương lai (%)", 0.0, 100.0, _float(s2.get("prob_schedule_boq"), 0.50) * 100.0, 5.0)
-
-        c1, c2 = st.columns(2)
-        opt = c1.number_input("Kịch bản lạc quan: điều chỉnh xác suất (%)", -100.0, 100.0, _float(s1.get("optimistic_delta"), 0.15) * 100.0, 5.0)
-        con = c2.number_input("Kịch bản thận trọng: điều chỉnh xác suất (%)", -100.0, 100.0, _float(s1.get("conservative_delta"), -0.20) * 100.0, 5.0)
-
-        st.markdown("#### Ngưỡng cảnh báo")
-        c1, c2, c3, c4 = st.columns(4)
-        jump = c1.number_input("Tháng tăng cao hơn bình quân (%)", 0.0, 500.0, _float(s3.get("alert_month_jump_pct"), 35.0), 5.0)
-        conc = c2.number_input("Tập trung theo nhà thầu (%)", 1.0, 100.0, _float(s3.get("alert_contractor_concentration_pct"), 50.0), 5.0)
-        unlinked = c3.number_input("BOQ chưa liên kết tiến độ (%)", 0.0, 100.0, _float(s3.get("alert_unlinked_boq_pct"), 10.0), 5.0)
-        due = c4.number_input("IPC đã duyệt sắp đến hạn (ngày)", 1, 365, _int(s3.get("approved_due_days"), 30), 1)
-
-        save = st.form_submit_button("💾 Lưu giả định", disabled=not can_update, use_container_width=True)
-        if save:
-            v1.save_settings(
-                db,
-                pid,
-                {
-                    "payment_terms_days": terms,
-                    "prob_draft": draft / 100.0,
-                    "prob_submitted": submitted / 100.0,
-                    "prob_approved": approved / 100.0,
-                    "optimistic_delta": opt / 100.0,
-                    "conservative_delta": con / 100.0,
-                },
-                actor=identity,
-            )
-            v2.save_settings(
-                db,
-                pid,
-                {
-                    "claim_preparation_days": prep,
-                    "approval_days": approval,
-                    "forecast_cycle_days": cycle,
-                    "prob_earned_unclaimed": earned / 100.0,
-                    "prob_schedule_boq": future / 100.0,
-                },
-                actor=identity,
-            )
-            v3.save_settings(
-                db,
-                pid,
-                {
-                    "alert_month_jump_pct": jump,
-                    "alert_contractor_concentration_pct": conc,
-                    "alert_unlinked_boq_pct": unlinked,
-                    "approved_due_days": due,
-                },
-                actor=identity,
-            )
-            st.success("Đã lưu giả định dự trù dòng tiền.")
-            st.rerun()
-
-
-def render_cashflow_finance_sheet(st, db, pid: int, *, identity: Any = None, can_update: bool = False, is_admin: bool = False) -> None:
-    del is_admin
-    import qlda.runtime_core.cashflow_forecast_v1 as v1
-    import qlda.runtime_core.cashflow_forecast_v2 as v2
-    import qlda.runtime_core.cashflow_forecast_v3 as v3
-
-    pid = int(pid)
-    v1.ensure_schema(db)
-    v2.ensure_schema(db)
-    v3.ensure_schema(db)
-
-    st.markdown("### 💸 Dự trù dòng tiền")
-    st.caption(
-        f"Phạm vi: {v1._scope_label(db, pid)}. Dữ liệu tổng hợp từ IPC/thanh toán, BOQ và tiến độ; "
-        "kịch bản và mô phỏng chỉ phục vụ phân tích, không ghi đè dữ liệu gốc."
-    )
-
-    c1, c2, c3 = st.columns([1.2, 1, 1.2])
-    horizon_label = c1.selectbox(
-        "Kỳ dự báo",
-        list(v1.HORIZONS.keys()),
-        index=2,
-        key=f"cashflow_finance_horizon_{pid}",
-    )
-    scenario = c2.selectbox(
-        "Kịch bản",
-        list(v1.SCENARIOS),
-        index=0,
-        format_func=lambda value: _SCENARIO_VN.get(value, value),
-        key=f"cashflow_finance_scenario_{pid}",
-    )
-    start = date.today()
-    days = v1.HORIZONS[horizon_label]
-    if days > 0:
-        end = start + timedelta(days=days)
-        c3.date_input("Đến ngày", value=end, disabled=True, key=f"cashflow_finance_end_{pid}")
-    else:
-        end = c3.date_input(
-            "Đến ngày tùy chọn",
-            value=start + timedelta(days=365),
-            min_value=start,
-            max_value=start + timedelta(days=365),
-            key=f"cashflow_finance_custom_end_{pid}",
-        )
-        if end < start:
-            end = start
-
-    rows = v1.build_forecast_rows(db, pid, scenario=scenario)
-    _, diagnostics = v2.build_schedule_boq_rows(db, pid, scenario=scenario)
-    alerts = v3.build_alerts(db, pid, rows, diagnostics, start, end)
-
-    tabs = st.tabs([
-        "Tổng quan",
-        "Kịch bản",
-        "Cảnh báo",
-        "Mô phỏng trễ",
-        "Chi tiết dự báo",
-        "BOQ & tiến độ",
-        "Giả định",
-    ])
-    with tabs[0]:
-        _render_overview(st, rows, start, end, scenario, alerts)
-    with tabs[1]:
-        _render_scenarios_vn(st, db, pid, start, end)
-    with tabs[2]:
-        _render_alerts_vn(st, alerts)
-    with tabs[3]:
-        _render_delay_vn(st, rows, start, end, pid)
-    with tabs[4]:
-        _render_detail_vn(st, db, pid, rows, identity=identity, can_update=can_update)
-    with tabs[5]:
-        _render_schedule_vn(st, diagnostics)
-    with tabs[6]:
-        _render_settings_vn(st, db, pid, identity=identity, can_update=can_update)
 
 
 def install_finance_management_ui() -> None:
@@ -516,8 +381,7 @@ def install_finance_management_ui() -> None:
 
     @wraps(previous_subheader)
     def finance_subheader(body, *args, **kwargs):
-        # Việc truyền tiêu đề mới vào wrapper cũ cũng vô hiệu hóa panel dự trù
-        # được V1 chèn phía trên bằng điều kiện khớp tiêu đề "Quản lý chi phí".
+        # Truyền tiêu đề mới xuống wrapper V1 cũ để nó không chèn panel forecast phía trên.
         if _text(body) == "💰 Quản lý chi phí":
             body = "💰 Quản lý Tài chính"
         return previous_subheader(body, *args, **kwargs)
@@ -569,4 +433,4 @@ def install_finance_management_ui() -> None:
     st._qlda_finance_management_ui_marker = PATCH_MARKER
 
 
-__all__ = ["render_cashflow_finance_sheet", "install_finance_management_ui"]
+__all__ = ["load_unpaid_ipcs", "render_cashflow_finance_sheet", "install_finance_management_ui"]
