@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-"""Preserve signed contract appendices and approved VO reductions in Project Cost Management.
+"""Preserve signed contract appendices and VO reductions in Project Cost Management.
 
-Phụ lục/VO có thể tăng hoặc giảm giá trị; không được ép số âm về 0. Independent
-VO records in variation_orders are authoritative for VO proposal/approval values.
+Phụ lục/VO có thể tăng hoặc giảm giá trị hợp đồng; không được ép số âm về 0.
 """
 
 from typing import Any
 
-PATCH_MARKER = "V7.6 PROJECT COST SIGNED ADJUSTMENTS V2 VO APPROVAL"
+PATCH_MARKER = "V7.6 PROJECT COST SIGNED ADJUSTMENTS V3 CONSISTENT VO"
 
 
 def _text(value: Any) -> str:
@@ -51,36 +50,17 @@ def install_project_cost_signed_adjustments() -> None:
             "other_currency": other_currency,
         }
 
+    # Legacy/manual fallback. Independent VO is installed as the authoritative
+    # source immediately below by vo_value_consistency.
     def vo_summary(db, pid: int) -> dict[str, float]:
-        # New independent VO storage is authoritative. Only explicit Đã duyệt
-        # records contribute to approved VO. Signed reductions remain negative.
+        proposed = approved = 0.0
         with db.connect() as connection:
-            if pcm._table_exists(connection, "variation_orders"):
-                try:
-                    rows = connection.execute(
-                        "SELECT proposed_amount,approved_amount,status FROM variation_orders WHERE project_id=? ORDER BY vo_no",
-                        (int(pid),),
-                    ).fetchall()
-                except Exception:
-                    rows = []
-                if rows:
-                    proposed = 0.0
-                    approved = 0.0
-                    for raw in rows:
-                        row = pcm._rowdict(raw)
-                        proposed += _float(row.get("proposed_amount"))
-                        if _text(row.get("status")) == "Đã duyệt":
-                            approved += _float(row.get("approved_amount"))
-                    return {"proposed": proposed, "approved": approved}
-
-            # Legacy/manual fallback.
             if not pcm._table_exists(connection, "cost_variations"):
                 return {"proposed": 0.0, "approved": 0.0}
             try:
                 rows = connection.execute("SELECT * FROM cost_variations WHERE project_id=?", (int(pid),)).fetchall()
             except Exception:
                 rows = []
-        proposed = approved = 0.0
         for raw in rows:
             row = pcm._rowdict(raw)
             proposed += _float(row.get("proposed_amount"))
@@ -91,6 +71,11 @@ def install_project_cost_signed_adjustments() -> None:
     pcm._vo_summary = vo_summary
     pcm._qlda_project_cost_signed_adjustments_installed = True
     pcm._qlda_project_cost_signed_adjustments_marker = PATCH_MARKER
+
+    # One source of truth for VO proposal/approval across:
+    # VO sheet -> Báo cáo tổng quan -> Phân lớp chi phí -> AI context.
+    from qlda.runtime_core.vo_value_consistency import install_vo_value_consistency
+    install_vo_value_consistency()
 
 
 __all__ = ["install_project_cost_signed_adjustments"]
