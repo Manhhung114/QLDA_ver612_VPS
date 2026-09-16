@@ -145,15 +145,17 @@ def initialize_ai_runtime() -> None:
         install_ai_access_guard()
 
         # Shared assistant reads the final composed project context, searchable PDFs,
-        # scanned PDFs, owner-supplied materials and live V3 cashflow forecast.
+        # scanned PDFs, owner-supplied materials, unpaid IPC cash plan and project costs.
         from qlda.runtime_core.ai_vps_pdf_fullscan import install_ai_vps_pdf_fullscan
         from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
         from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
         from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
+        from qlda.runtime_core.project_cost_ai_context import install_project_cost_ai_context
         install_ai_vps_pdf_fullscan()
         install_ai_vps_pdf_vision()
         install_owner_material_ai_context()
         install_cashflow_ai_context()
+        install_project_cost_ai_context()
         _AI_READY = True
 
 
@@ -180,8 +182,8 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
-        # Cashflow V1 keeps Claim/Payment, V2 adds BOQ + schedule and V3 adds
-        # scenario comparison, alerts, delay simulation and shared-AI analysis.
+        # Legacy cashflow calculation modules remain installed for compatibility with
+        # stored settings/helpers; the visible finance sheet is restricted to unpaid IPCs.
         from qlda.runtime_core.cashflow_forecast_v1 import install_cashflow_forecast_v1
         from qlda.runtime_core.cashflow_forecast_v2 import install_cashflow_forecast_v2
         from qlda.runtime_core.cashflow_forecast_v3 import install_cashflow_forecast_v3
@@ -189,10 +191,14 @@ def initialize_runtime() -> None:
         install_cashflow_forecast_v2()
         install_cashflow_forecast_v3()
 
-        # Finance UI: move cashflow into a dedicated tab beside BOQ / payments / VO,
-        # rename the section to Quản lý Tài chính and localize cashflow labels.
+        # Finance UI: dedicated cash-plan sheet reads only unpaid IPC obligations.
         from qlda.runtime_core.finance_management_ui import install_finance_management_ui
         install_finance_management_ui()
+
+        # PMBOK-oriented project cost management: baseline/budget and EVM control.
+        # Contract/appendix values are read from Hồ sơ Hợp đồng; no duplicate contract sheet.
+        from qlda.runtime_core.project_cost_management import install_project_cost_management
+        install_project_cost_management()
 
         # Final UI policy: every Streamlit expander starts closed. Legacy modules
         # that requested expanded=True are normalized to collapsed and open only
