@@ -208,6 +208,11 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.project_cost_management import install_project_cost_management
         install_project_cost_management()
 
+        # BAC/BOQ budget uses the persisted BOQ workbook's after-tax total when
+        # available. Manual/no-workbook BOQ keeps the detail-row sum fallback.
+        from qlda.runtime_core.boq_after_tax_budget import install_boq_after_tax_budget_policy
+        install_boq_after_tax_budget_policy()
+
         # Global money-display policy: monetary/value columns keep numeric database
         # values but render with comma thousands separators throughout QLDA tables.
         from qlda.runtime_core.money_display_format import install_money_display_format
