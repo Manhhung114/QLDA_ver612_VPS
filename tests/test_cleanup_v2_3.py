@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = ROOT / "src/qlda/runtime_core"
+SRC = ROOT / "src/qlda"
+RUNTIME = SRC / "runtime_core"
 
 
 class CleanupV23Tests(unittest.TestCase):
@@ -16,27 +18,33 @@ class CleanupV23Tests(unittest.TestCase):
         self.assertIn("def install_finance_consistency_core", source)
         self.assertIn("def install_finance_consistency_ui", source)
 
-    def test_old_project_cost_policy_files_are_thin_facades(self):
-        names = (
+    def test_retired_finance_policy_facades_are_physically_absent(self):
+        for name in (
             "boq_after_tax_budget.py",
             "project_cost_budget_ui_simplify.py",
             "project_cost_signed_adjustments.py",
             "vo_value_consistency.py",
-        )
-        for name in names:
-            path = RUNTIME / name
-            source = path.read_text(encoding="utf-8")
-            self.assertLess(path.stat().st_size, 1600, name)
-            self.assertIn("finance_consistency", source, name)
-            self.assertNotIn("inspect.currentframe", source, name)
-            self.assertNotIn("CREATE TABLE", source, name)
+        ):
+            self.assertFalse((RUNTIME / name).exists(), name)
 
-    def test_compatibility_facades_share_function_objects(self):
-        from qlda.runtime_core import boq_after_tax_budget, finance_consistency, vo_value_consistency
-        self.assertIs(boq_after_tax_budget.boq_budget_total, finance_consistency.boq_budget_total)
-        self.assertIs(boq_after_tax_budget.saved_after_tax_total, finance_consistency.saved_after_tax_total)
-        self.assertIs(vo_value_consistency.effective_proposed_value, finance_consistency.effective_proposed_value)
-        self.assertIs(vo_value_consistency.normalize_project_vo_values, finance_consistency.normalize_project_vo_values)
+    def test_no_packaged_module_imports_retired_finance_facades(self):
+        retired = {
+            "qlda.runtime_core.boq_after_tax_budget",
+            "qlda.runtime_core.project_cost_budget_ui_simplify",
+            "qlda.runtime_core.project_cost_signed_adjustments",
+            "qlda.runtime_core.vo_value_consistency",
+        }
+        offenders: list[str] = []
+        for path in SRC.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module in retired:
+                    offenders.append(f"{path.relative_to(ROOT)}: from {node.module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in retired:
+                            offenders.append(f"{path.relative_to(ROOT)}: import {alias.name}")
+        self.assertEqual(offenders, [])
 
     def test_bootstrap_has_single_finance_consistency_chain(self):
         bootstrap = (RUNTIME / "bootstrap.py").read_text(encoding="utf-8")
