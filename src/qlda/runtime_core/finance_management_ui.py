@@ -13,6 +13,12 @@ import re
 import unicodedata
 from typing import Any
 
+from qlda.runtime_core.finance_common import (
+    date_text as _date_text,
+    parse_date as _parse_date,
+    scope_label as _shared_scope_label,
+)
+
 PATCH_MARKER = "V7.6 FINANCE IPC UNPAID CASH PLAN V2"
 
 
@@ -56,27 +62,6 @@ def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _parse_date(value: Any) -> date | None:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    text = _text(value)
-    if not text:
-        return None
-    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(text[:19] if "%H" in fmt else text[:10], fmt).date()
-        except Exception:
-            pass
-    return None
-
-
-def _date_text(value: Any) -> str:
-    parsed = _parse_date(value)
-    return parsed.strftime("%d/%m/%Y") if parsed else ""
-
-
 def _money(value: Any) -> str:
     number = _float(value)
     sign = "-" if number < 0 else ""
@@ -98,12 +83,7 @@ def _table_exists(connection, table: str) -> bool:
 
 def _scope_label(db, pid: int) -> str:
     try:
-        from qlda.runtime_core.cashflow_forecast_v1 import _resolve_scope
-        scope = _resolve_scope(db, int(pid))
-        label = " - ".join(
-            x for x in (_text(scope.get("contractor_code")), _text(scope.get("contractor_name"))) if x
-        )
-        return label or "Workspace mặc định"
+        return _shared_scope_label(db, int(pid))
     except Exception:
         return "Workspace hiện tại"
 
@@ -370,7 +350,7 @@ def render_cashflow_finance_sheet(
 
 
 def install_finance_management_ui() -> None:
-    """Đổi tiêu đề và thêm sheet Dự trù dòng tiền vào render_cost_management."""
+    """Legacy compatibility installer; Cleanup V2 no longer composes it at startup."""
     import streamlit as st
 
     if getattr(st, "_qlda_finance_management_ui_installed", False):
@@ -381,7 +361,6 @@ def install_finance_management_ui() -> None:
 
     @wraps(previous_subheader)
     def finance_subheader(body, *args, **kwargs):
-        # Truyền tiêu đề mới xuống wrapper V1 cũ để nó không chèn panel forecast phía trên.
         if _text(body) == "💰 Quản lý chi phí":
             body = "💰 Quản lý Tài chính"
         return previous_subheader(body, *args, **kwargs)
