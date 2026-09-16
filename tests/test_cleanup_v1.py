@@ -15,8 +15,6 @@ class CleanupV1Tests(unittest.TestCase):
         self.assertIs(boq_persistence.load_saved_boq_workbook, boq_snapshot.load_saved_boq_workbook)
         self.assertIs(boq_persistence.delete_saved_boq_workbook, boq_snapshot.delete_saved_boq_workbook)
         self.assertIs(boq_persistence.format_table_number, boq_snapshot.format_table_number)
-        # Historical tests/helpers used these private functions directly.  Cleanup
-        # keeps them as aliases without restoring a duplicate implementation.
         self.assertIs(boq_persistence._encode_result, boq_snapshot._encode_result)
         self.assertIs(boq_persistence._decode_result, boq_snapshot._decode_result)
         self.assertIs(boq_persistence._ensure_table, boq_snapshot._ensure_table)
@@ -25,21 +23,19 @@ class CleanupV1Tests(unittest.TestCase):
         self.assertIn("from qlda.import_engines.boq_snapshot import", facade)
         self.assertNotIn("CREATE TABLE IF NOT EXISTS", facade)
 
-    def test_requested_consistency_policies_are_composed(self):
+    def test_requested_consistency_policies_are_consolidated(self):
         bootstrap = (ROOT / "src/qlda/runtime_core/bootstrap.py").read_text(encoding="utf-8")
-        self.assertIn("install_vo_value_consistency", bootstrap)
-        self.assertIn("install_project_cost_budget_ui_simplify", bootstrap)
-        self.assertLess(
-            bootstrap.index("install_project_cost_signed_adjustments()"),
-            bootstrap.index("install_vo_value_consistency()"),
-        )
+        self.assertIn("install_finance_consistency_core", bootstrap)
+        self.assertIn("install_finance_consistency_ui", bootstrap)
+        self.assertNotIn("install_project_cost_signed_adjustments", bootstrap)
+        self.assertNotIn("install_vo_value_consistency", bootstrap)
+        self.assertNotIn("install_boq_after_tax_budget_policy", bootstrap)
+        self.assertNotIn("install_project_cost_budget_ui_simplify", bootstrap)
 
     def test_document_uniform_interaction_is_not_a_second_bootstrap_chain(self):
         bridge = (ROOT / "src/qlda/runtime_core/document_selection_autopen.py").read_text(encoding="utf-8")
         bootstrap = (ROOT / "src/qlda/runtime_core/bootstrap.py").read_text(encoding="utf-8")
         self.assertIn("install_document_management_uniform_interaction", bridge)
-        # One composition entrypoint is enough: selection-autopen owns the uniform
-        # interaction install so bootstrap does not need a second direct call.
         self.assertNotIn(
             "from qlda.runtime_core.document_management_uniform_interaction import",
             bootstrap,
