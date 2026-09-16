@@ -15,6 +15,11 @@ class CleanupV1Tests(unittest.TestCase):
         self.assertIs(boq_persistence.load_saved_boq_workbook, boq_snapshot.load_saved_boq_workbook)
         self.assertIs(boq_persistence.delete_saved_boq_workbook, boq_snapshot.delete_saved_boq_workbook)
         self.assertIs(boq_persistence.format_table_number, boq_snapshot.format_table_number)
+        # Historical tests/helpers used these private functions directly.  Cleanup
+        # keeps them as aliases without restoring a duplicate implementation.
+        self.assertIs(boq_persistence._encode_result, boq_snapshot._encode_result)
+        self.assertIs(boq_persistence._decode_result, boq_snapshot._decode_result)
+        self.assertIs(boq_persistence._ensure_table, boq_snapshot._ensure_table)
 
         facade = (ROOT / "src/qlda/runtime_core/boq_persistence.py").read_text(encoding="utf-8")
         self.assertIn("from qlda.import_engines.boq_snapshot import", facade)
