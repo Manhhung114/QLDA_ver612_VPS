@@ -30,11 +30,11 @@ class CleanupV2Tests(unittest.TestCase):
         self.assertIn('"Dự trù dòng tiền"', project_cost)
         self.assertIn('"Kiểm soát chi phí"', project_cost)
 
-    def test_legacy_forecast_files_remain_compatibility_only_for_now(self):
-        # Cleanup V2 deactivates the old forecast UI without deleting stored data or
-        # compatibility code before the dependency audit is complete.
+    def test_legacy_forecast_files_are_removed_after_dependency_audit(self):
+        # Cleanup V2.2 deletes the retired forecast implementation while leaving
+        # any historical database tables untouched for data safety.
         for name in ("cashflow_forecast_v1.py", "cashflow_forecast_v2.py", "cashflow_forecast_v3.py"):
-            self.assertTrue((RUNTIME / name).exists(), name)
+            self.assertFalse((RUNTIME / name).exists(), name)
 
 
 if __name__ == "__main__":
