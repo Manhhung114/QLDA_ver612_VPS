@@ -2,10 +2,16 @@ from __future__ import annotations
 
 """Document-management UI adaptations for the VPS deployment.
 
-All document sheets keep the existing upload/download implementation, but the
-visible file area is presented as VPS storage rather than Google Drive. Meeting
-minutes remain a simple status-free archive. AI is available only from
+All document/drawing sheets keep the existing upload/download implementation, but
+the visible file area is presented as VPS storage rather than Google Drive.
+Meeting minutes remain a simple status-free archive. AI is available only from
 Công cụ -> Trợ lý AI.
+
+V7.6 also restores the expected attachment interaction for an existing selected
+record: pressing ``📎 Đính kèm file`` or ``🔄 Làm mới file / File DB`` creates a
+fresh direct-upload ticket before the legacy renderer reruns.  This is applied to
+NCR/RFA/RFI/BBHT/NTCV/NTVL/KDVT/BBHOP and every drawing sheet using the common
+attachment renderer.
 """
 
 import inspect
@@ -15,6 +21,7 @@ from qlda.runtime_core import meeting_minutes_simple as meeting
 
 
 _PATCH_FLAG = "_qlda_document_vps_attachment_renderer"
+PATCH_MARKER = "V7.6 VPS ATTACHMENT REOPEN V2"
 
 
 def _find_app_globals() -> dict[str, Any] | None:
@@ -26,10 +33,138 @@ def _find_app_globals() -> dict[str, Any] | None:
             cfg = glob.get("DOC_CONFIG")
             if isinstance(cfg, dict) and "NCR" in cfg and "BBHT" in cfg:
                 return glob
+            app_globals = frame.f_locals.get("app_globals")
+            if isinstance(app_globals, dict) and callable(app_globals.get("_prepare_inline_upload_ticket")):
+                return app_globals
             frame = frame.f_back
     finally:
         del frame
     return None
+
+
+def _row_value(row: Any, key: str) -> str:
+    if row is None:
+        return ""
+    try:
+        value = row[key]
+    except Exception:
+        try:
+            value = dict(row).get(key, "")
+        except Exception:
+            return ""
+    return str(value or "").strip()
+
+
+def _active_upload_context() -> dict[str, Any] | None:
+    """Resolve the selected file owner from the active Streamlit render stack."""
+    frame = inspect.currentframe()
+    try:
+        current = frame.f_back if frame else None
+        for _ in range(40):
+            if current is None:
+                break
+            loc = current.f_locals
+            name = current.f_code.co_name
+
+            # The refresh button lives inside the common attachment renderer.  Its
+            # locals are the most authoritative source for kind/subtype/code/key.
+            if name in {"_render_inline_drive_attachments", "_render_vps_attachments"}:
+                pid = loc.get("pid")
+                if pid is None:
+                    call_args = loc.get("args") or ()
+                    if call_args:
+                        pid = call_args[0]
+                kwargs = loc.get("kwargs") if isinstance(loc.get("kwargs"), dict) else {}
+                kind = str(loc.get("kind") or kwargs.get("kind") or "").strip()
+                subtype = str(loc.get("subtype") or kwargs.get("subtype") or "").strip()
+                record_code = str(loc.get("record_code") or kwargs.get("record_code") or "").strip()
+                panel_key = str(loc.get("panel_key") or kwargs.get("panel_key") or "").strip()
+                app_globals = _find_app_globals()
+                if pid is not None and kind and subtype and record_code and panel_key and app_globals:
+                    return {
+                        "pid": int(pid),
+                        "kind": kind,
+                        "subtype": subtype,
+                        "record_code": record_code,
+                        "panel_key": panel_key,
+                        "app_globals": app_globals,
+                    }
+
+            renderer_kind = ""
+            subtype_name = ""
+            code_field = ""
+            panel_prefix = ""
+            if name in {"render_document_type", "_render_approval_document_type"}:
+                renderer_kind, subtype_name, code_field, panel_prefix = "document", "doc_type", "code", "v6_doc_attach"
+            elif name in {"render_drawing_type", "_render_approval_shopdrawing_type"}:
+                renderer_kind, subtype_name, code_field, panel_prefix = "drawing", "drawing_type", "drawing_no", "v6_drawing_attach"
+            elif name == "render_meeting_minutes_simple":
+                renderer_kind, subtype_name, code_field, panel_prefix = "document", "", "code", "meeting_minutes_files"
+
+            if renderer_kind:
+                selected = loc.get("selected")
+                pid = loc.get("pid")
+                if selected not in (None, "") and pid is not None:
+                    try:
+                        rid = int(selected)
+                    except Exception:
+                        rid = 0
+                    db = loc.get("db")
+                    app_globals = loc.get("app_globals") if isinstance(loc.get("app_globals"), dict) else None
+                    if app_globals is None:
+                        app_globals = _find_app_globals()
+                    if rid and db is not None and app_globals:
+                        try:
+                            row = db.drawing(rid) if renderer_kind == "drawing" else db.document(rid)
+                        except Exception:
+                            row = None
+                        code = _row_value(row, code_field)
+                        subtype = "BBHOP" if name == "render_meeting_minutes_simple" else str(loc.get(subtype_name) or "").strip()
+                        if code and subtype:
+                            return {
+                                "pid": int(pid),
+                                "kind": renderer_kind,
+                                "subtype": subtype,
+                                "record_code": code,
+                                "panel_key": f"{panel_prefix}_{int(pid)}_{subtype}_{rid}" if panel_prefix.startswith("v6_") else f"{panel_prefix}_{int(pid)}_{rid}",
+                                "app_globals": app_globals,
+                            }
+            current = current.f_back
+    finally:
+        del frame
+        try:
+            del current
+        except Exception:
+            pass
+    return None
+
+
+def _prepare_selected_upload(st) -> bool:
+    """Create a new upload ticket for the selected existing record."""
+    context = _active_upload_context()
+    if not context:
+        return False
+    app_globals = context["app_globals"]
+    prepare = app_globals.get("_prepare_inline_upload_ticket")
+    if not callable(prepare):
+        return False
+
+    panel_key = str(context["panel_key"])
+    st.session_state.pop(panel_key + "_ticket", None)
+    st.session_state.pop(panel_key + "_upload_open", None)
+    st.session_state.pop(panel_key + "_ticket_error", None)
+    try:
+        prepare(
+            int(context["pid"]),
+            kind=str(context["kind"]),
+            subtype=str(context["subtype"]),
+            record_code=str(context["record_code"]),
+            panel_key=panel_key,
+        )
+        return True
+    except Exception as exc:
+        st.session_state[panel_key + "_ticket_error"] = f"Chưa mở được vùng tải file lên VPS: {exc}"
+        return False
 
 
 def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
@@ -42,11 +177,11 @@ def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
 
     def _render_vps_attachments(*args, **kwargs):
         kind = str(kwargs.get("kind") or "")
-        if kind != "document":
+        if kind not in {"document", "drawing"}:
             return original(*args, **kwargs)
 
         # Local VPS mode already uses the same gateway API. Keep Xem/Tải/Xóa,
-        # but remove every Google-Drive-specific control from document sheets.
+        # but remove every Google-Drive-specific control from document/drawing sheets.
         original_markdown = st.markdown
         original_link_button = st.link_button
         original_checkbox = st.checkbox
@@ -106,7 +241,7 @@ def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
 
 
 def install_document_management_vps_ui() -> None:
-    """Apply VPS file presentation to every sheet in Quản lý hồ sơ."""
+    """Apply VPS file presentation/upload behavior to every supported sheet."""
     import streamlit as st
 
     if getattr(st, "_qlda_document_management_vps_ui_installed", False):
@@ -115,6 +250,8 @@ def install_document_management_vps_ui() -> None:
     meeting.install_meeting_minutes_simple_ui()
 
     original_segmented = st.segmented_control
+    original_form_submit = st.form_submit_button
+    original_button = st.button
 
     def _segmented_control(label, options, *args, **kwargs):
         result = original_segmented(label, options, *args, **kwargs)
@@ -124,6 +261,36 @@ def install_document_management_vps_ui() -> None:
                 _patch_attachment_renderer(st, app_globals)
         return result
 
+    def _form_submit_button(label, *args, **kwargs):
+        clicked = original_form_submit(label, *args, **kwargs)
+        text = str(label or "").strip()
+        if clicked and "Đính kèm file" in text:
+            # Existing records already have a durable DB id/code, so create the
+            # ticket immediately. The renderer's normal rerun then reveals the
+            # upload page instead of returning to a file-only view.
+            _prepare_selected_upload(st)
+        return clicked
+
+    def _button(label, *args, **kwargs):
+        clicked = original_button(label, *args, **kwargs)
+        text = str(label or "").strip()
+        if clicked and (
+            "Làm mới file / File DB" in text
+            or text in {"📎 Đính kèm file", "📤 Tải file lên lưu"}
+        ):
+            # The legacy refresh handler reruns immediately after this call. Make
+            # the fresh upload ticket first so the next run displays the uploader.
+            _prepare_selected_upload(st)
+        return clicked
+
     st._qlda_document_management_vps_original_segmented = original_segmented
+    st._qlda_document_management_vps_original_form_submit_button = original_form_submit
+    st._qlda_document_management_vps_original_button = original_button
     st.segmented_control = _segmented_control
+    st.form_submit_button = _form_submit_button
+    st.button = _button
     st._qlda_document_management_vps_ui_installed = True
+    st._qlda_document_management_vps_ui_marker = PATCH_MARKER
+
+
+__all__ = ["PATCH_MARKER", "install_document_management_vps_ui"]
