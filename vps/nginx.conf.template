@@ -3,7 +3,7 @@ server {
     listen [::]:80;
     server_name __QLDA_DOMAIN__;
 
-    client_max_body_size 200M;
+    client_max_body_size 500M;
 
     # QLDA V6.27 FastAPI. Only Nginx is public; Uvicorn stays on localhost.
     location /api/ {
