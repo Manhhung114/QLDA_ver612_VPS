@@ -179,6 +179,12 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.document_management_vps_ui import install_document_management_vps_ui
         install_document_management_vps_ui()
 
+        # Existing document/drawing forms keep the database handle in app globals.
+        # Install the V4 reopen bridge after the VPS UI wrapper so attachment and
+        # refresh clicks always resolve the selected record and create a fresh ticket.
+        from qlda.runtime_core.attachment_upload_reopen_fix import install_attachment_upload_reopen_fix
+        install_attachment_upload_reopen_fix()
+
         from qlda.runtime_core.owner_supplied_materials import install_owner_supplied_material_erp
         install_owner_supplied_material_erp()
 
