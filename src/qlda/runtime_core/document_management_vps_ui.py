@@ -7,9 +7,11 @@ the visible file area is presented as VPS storage rather than Google Drive.
 Meeting minutes remain a simple status-free archive. AI is available only from
 Công cụ -> Trợ lý AI.
 
-V7.6 also restores the expected attachment interaction for an existing selected
-record: pressing ``📎 Đính kèm file`` or ``🔄 Làm mới file / File DB`` creates a
-fresh direct-upload ticket before the legacy renderer reruns.  This is applied to
+V7.6 restores the expected attachment interaction for an existing selected record:
+pressing ``📎 Đính kèm file`` or ``🔄 Làm mới file / File DB`` creates a fresh
+direct-upload ticket *before* Streamlit performs the widget-triggered rerun.  This
+matters because ``st.rerun()`` raises immediately; post-click wrapper code is never
+reached by the legacy refresh handler.  The pre-click callback is applied to
 NCR/RFA/RFI/BBHT/NTCV/NTVL/KDVT/BBHOP and every drawing sheet using the common
 attachment renderer.
 """
@@ -21,7 +23,7 @@ from qlda.runtime_core import meeting_minutes_simple as meeting
 
 
 _PATCH_FLAG = "_qlda_document_vps_attachment_renderer"
-PATCH_MARKER = "V7.6 VPS ATTACHMENT REOPEN V2"
+PATCH_MARKER = "V7.6 VPS ATTACHMENT REOPEN V3"
 
 
 def _find_app_globals() -> dict[str, Any] | None:
@@ -66,7 +68,7 @@ def _active_upload_context() -> dict[str, Any] | None:
             loc = current.f_locals
             name = current.f_code.co_name
 
-            # The refresh button lives inside the common attachment renderer.  Its
+            # The refresh button lives inside the common attachment renderer. Its
             # locals are the most authoritative source for kind/subtype/code/key.
             if name in {"_render_inline_drive_attachments", "_render_vps_attachments"}:
                 pid = loc.get("pid")
@@ -74,11 +76,11 @@ def _active_upload_context() -> dict[str, Any] | None:
                     call_args = loc.get("args") or ()
                     if call_args:
                         pid = call_args[0]
-                kwargs = loc.get("kwargs") if isinstance(loc.get("kwargs"), dict) else {}
-                kind = str(loc.get("kind") or kwargs.get("kind") or "").strip()
-                subtype = str(loc.get("subtype") or kwargs.get("subtype") or "").strip()
-                record_code = str(loc.get("record_code") or kwargs.get("record_code") or "").strip()
-                panel_key = str(loc.get("panel_key") or kwargs.get("panel_key") or "").strip()
+                call_kwargs = loc.get("kwargs") if isinstance(loc.get("kwargs"), dict) else {}
+                kind = str(loc.get("kind") or call_kwargs.get("kind") or "").strip()
+                subtype = str(loc.get("subtype") or call_kwargs.get("subtype") or "").strip()
+                record_code = str(loc.get("record_code") or call_kwargs.get("record_code") or "").strip()
+                panel_key = str(loc.get("panel_key") or call_kwargs.get("panel_key") or "").strip()
                 app_globals = _find_app_globals()
                 if pid is not None and kind and subtype and record_code and panel_key and app_globals:
                     return {
@@ -139,17 +141,18 @@ def _active_upload_context() -> dict[str, Any] | None:
     return None
 
 
-def _prepare_selected_upload(st) -> bool:
-    """Create a new upload ticket for the selected existing record."""
-    context = _active_upload_context()
+def _prepare_upload_context(st, context: dict[str, Any] | None) -> bool:
+    """Create a fresh direct-upload ticket from an already resolved context."""
     if not context:
         return False
-    app_globals = context["app_globals"]
+    app_globals = context.get("app_globals") or {}
     prepare = app_globals.get("_prepare_inline_upload_ticket")
     if not callable(prepare):
         return False
 
-    panel_key = str(context["panel_key"])
+    panel_key = str(context.get("panel_key") or "").strip()
+    if not panel_key:
+        return False
     st.session_state.pop(panel_key + "_ticket", None)
     st.session_state.pop(panel_key + "_upload_open", None)
     st.session_state.pop(panel_key + "_ticket_error", None)
@@ -165,6 +168,37 @@ def _prepare_selected_upload(st) -> bool:
     except Exception as exc:
         st.session_state[panel_key + "_ticket_error"] = f"Chưa mở được vùng tải file lên VPS: {exc}"
         return False
+
+
+def _prepare_selected_upload(st) -> bool:
+    """Create a new upload ticket for the selected existing record."""
+    return _prepare_upload_context(st, _active_upload_context())
+
+
+def _install_preclick_upload_callback(st, widget_kwargs: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+    """Run ticket preparation in the widget callback, before any legacy rerun.
+
+    The previous implementation prepared the ticket after ``st.button`` returned.
+    That cannot work for the legacy refresh button because its handler calls
+    ``st.rerun()`` immediately, which aborts the stack before the wrapper regains
+    control.  Streamlit callbacks execute first, so the ticket/session state is
+    durable by the time the legacy handler reruns the page.
+    """
+    if not context:
+        return widget_kwargs
+
+    out = dict(widget_kwargs)
+    existing_callback = out.pop("on_click", None)
+    existing_args = out.pop("args", None) or ()
+    existing_kwargs = out.pop("kwargs", None) or {}
+
+    def _before_rerun_callback():
+        _prepare_upload_context(st, context)
+        if callable(existing_callback):
+            existing_callback(*existing_args, **existing_kwargs)
+
+    out["on_click"] = _before_rerun_callback
+    return out
 
 
 def _patch_attachment_renderer(st, app_globals: dict[str, Any]) -> None:
@@ -262,26 +296,24 @@ def install_document_management_vps_ui() -> None:
         return result
 
     def _form_submit_button(label, *args, **kwargs):
-        clicked = original_form_submit(label, *args, **kwargs)
         text = str(label or "").strip()
-        if clicked and "Đính kèm file" in text:
-            # Existing records already have a durable DB id/code, so create the
-            # ticket immediately. The renderer's normal rerun then reveals the
-            # upload page instead of returning to a file-only view.
-            _prepare_selected_upload(st)
-        return clicked
+        if "Đính kèm file" in text:
+            # Capture the selected record while the renderer stack is still alive,
+            # then prepare the ticket in Streamlit's pre-rerun callback.
+            context = _active_upload_context()
+            kwargs = _install_preclick_upload_callback(st, kwargs, context)
+        return original_form_submit(label, *args, **kwargs)
 
     def _button(label, *args, **kwargs):
-        clicked = original_button(label, *args, **kwargs)
         text = str(label or "").strip()
-        if clicked and (
+        if (
             "Làm mới file / File DB" in text
-            or text in {"📎 Đính kèm file", "📤 Tải file lên lưu"}
+            or "Đính kèm file" in text
+            or text == "📤 Tải file lên lưu"
         ):
-            # The legacy refresh handler reruns immediately after this call. Make
-            # the fresh upload ticket first so the next run displays the uploader.
-            _prepare_selected_upload(st)
-        return clicked
+            context = _active_upload_context()
+            kwargs = _install_preclick_upload_callback(st, kwargs, context)
+        return original_button(label, *args, **kwargs)
 
     st._qlda_document_management_vps_original_segmented = original_segmented
     st._qlda_document_management_vps_original_form_submit_button = original_form_submit
