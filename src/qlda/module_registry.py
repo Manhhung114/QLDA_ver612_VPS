@@ -51,6 +51,21 @@ MODULES: dict[str, ModuleSpec] = {
         dependencies=("boq", "ipc", "vo", "schedule", "infrastructure"),
         migration_state="native-entrypoint",
     ),
+    "autonomy": ModuleSpec(
+        name="autonomy",
+        package="qlda.autonomy",
+        owns=(
+            "V7.7 data integrity and evidence",
+            "V7.8 unified AI tool/service boundary",
+            "V7.9 event automation",
+            "V8.0 AI planner/executor and approval gate",
+            "V8.1 project supervisor",
+            "V8.2 semi-autonomous policy",
+            "V9.0 project digital twin and what-if engine",
+        ),
+        dependencies=("production_progress", "boq", "ipc", "vo", "schedule", "infrastructure"),
+        migration_state="native-platform",
+    ),
 }
 
 
