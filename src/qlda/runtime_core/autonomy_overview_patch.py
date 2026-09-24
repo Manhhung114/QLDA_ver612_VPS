@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-PATCH_MARKER = "V7.7-V9 AUTONOMY OVERVIEW CONTROL CENTER V2 CONTRACTOR TENANT"
+PATCH_MARKER = "V7.7-V9 AUTONOMY OVERVIEW CONTROL CENTER V3 NO DIGITAL TWIN"
 
 
 def _app_identity(ui_module) -> tuple[dict[str, Any], bool, bool]:
@@ -79,13 +79,7 @@ def _contractor_tenants(db, project_id: int) -> tuple[int, list[dict[str, Any]]]
 
 
 def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, dict[str, Any]]:
-    """Bind the Control Center to exactly one contractor workspace.
-
-    The normal app sidebar may already hold ``contractor_workspace_<master>``.
-    Reusing that value keeps Chat AI and AI Supervisor on the same contractor.
-    Admin receives an explicit selector in the Control Center; non-admin users
-    remain on the workspace already authorized by the application.
-    """
+    """Bind the Control Center to exactly one contractor workspace."""
     pid = int(project_id)
     master_id, rows = _contractor_tenants(db, pid)
     if not rows:
@@ -124,11 +118,10 @@ def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, 
             f"{by_workspace[wid].get('contractor_name','')}"
         ),
         key=f"autonomy_tenant_select_{master_id}",
-        help="Mỗi nhà thầu có AI, snapshot, approval, event và Digital Twin độc lập.",
+        help="Mỗi nhà thầu có AI, snapshot, approval và event độc lập.",
     )
     selected = int(selected)
     st.session_state[state_key] = selected
-    # Keep the normal assistant tenant aligned with the Supervisor tenant.
     st.session_state[sidebar_key] = selected
     try:
         from qlda.runtime_core.contractor_access_control import _pin_ai_workspace_scope
@@ -142,6 +135,7 @@ def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, 
 def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -> None:
     """Contractor-isolated V7.7→V9 AI control center."""
     from qlda.runtime_core.autonomy_runtime import (
+        SUPERVISOR_SCHEMA_VERSION,
         get_autonomy_platform,
         get_autonomy_repository,
         run_project_supervisor,
@@ -168,6 +162,14 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
     repository = get_autonomy_repository(db)
     latest = repository.latest_snapshot(project_id=tenant_id, snapshot_type="DAILY_SUPERVISOR")
     payload = latest.get("payload") if isinstance(latest, dict) else None
+    legacy_snapshot = bool(
+        isinstance(payload, dict)
+        and str(payload.get("supervisor_schema") or "") != SUPERVISOR_SCHEMA_VERSION
+    )
+    if legacy_snapshot:
+        # Old snapshots used unpaid balance as payment-overdue and may contain the
+        # false warning that triggered this correction. Never render them as current.
+        payload = None
 
     title = "### 🧠 AI Project Supervisor"
     if label:
@@ -175,7 +177,7 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
     st.markdown(title)
     if contractor:
         st.caption(
-            f"AI tenant: workspace #{tenant_id}. Dữ liệu, memory, event, approval và Digital Twin được cô lập theo nhà thầu."
+            f"AI tenant: workspace #{tenant_id}. Dữ liệu, memory, event và approval được cô lập theo nhà thầu."
         )
 
     if isinstance(payload, dict):
@@ -198,7 +200,10 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
                 })
             st.dataframe(rows, hide_index=True, use_container_width=True)
     else:
-        st.info("AI Supervisor của nhà thầu này chưa có snapshot. Worker sẽ tự chạy sau 06:20 hoặc Admin có thể chạy kiểm tra ngay.")
+        if legacy_snapshot:
+            st.info("Snapshot cũ đã bị vô hiệu vì dùng cách tính thanh toán cũ. Hệ thống sẽ chạy lại AI Supervisor với dữ liệu đến hạn đã xác minh.")
+        else:
+            st.info("AI Supervisor của nhà thầu này chưa có snapshot. Worker sẽ tự chạy sau 06:20 hoặc Admin có thể chạy kiểm tra ngay.")
 
     if not is_admin:
         return
@@ -318,41 +323,6 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
                             note=note,
                         )
                         st.rerun()
-
-        st.markdown("#### V9.0 Digital Twin · What-if")
-        twin = platform.digital_twin.get(tenant_id)
-        if twin is None and isinstance(payload, dict):
-            from qlda.autonomy.digital_twin import TwinState
-
-            saved_twin = payload.get("twin") or {}
-            twin = platform.digital_twin.update(
-                TwinState(
-                    project_id=tenant_id,
-                    schedule_progress=float(saved_twin.get("schedule_progress") or 0),
-                    production_progress=float(saved_twin.get("production_progress") or 0),
-                    cost_progress=float(saved_twin.get("cost_progress") or 0),
-                    cash_exposure=float(saved_twin.get("cash_exposure") or 0),
-                    data_integrity_score=float(saved_twin.get("data_integrity_score") or 0),
-                )
-            )
-        if twin is not None:
-            s1, s2, s3 = st.columns(3)
-            days = s1.number_input("Số ngày mô phỏng", min_value=1, max_value=180, value=14, step=1, key=f"twin_days_{tenant_id}")
-            productivity = s2.number_input("Hệ số năng suất", min_value=0.5, max_value=2.0, value=1.0, step=0.05, key=f"twin_productivity_{tenant_id}")
-            risk = s3.number_input("Rủi ro bổ sung", min_value=0.0, max_value=100.0, value=0.0, step=1.0, key=f"twin_risk_{tenant_id}")
-            if st.button("🔮 Chạy mô phỏng", key=f"twin_simulate_{tenant_id}"):
-                scenario = platform.digital_twin.simulate(
-                    tenant_id,
-                    {
-                        "name": f"{label or 'Contractor'} what-if",
-                        "days": days,
-                        "productivity_multiplier": productivity,
-                        "added_risk": risk,
-                    },
-                )
-                st.json(asdict(scenario))
-        else:
-            st.info("Chạy AI Supervisor của nhà thầu này ít nhất một lần để tạo trạng thái Digital Twin.")
 
 
 def install_autonomy_overview_patch() -> None:
