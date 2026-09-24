@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from qlda.bootstrap import get_application
@@ -52,10 +52,40 @@ def _scope(principal: Principal, project_id: int):
     return get_application().access.require_project(principal.user, int(project_id))
 
 
+def _master_has_contractors(master_project_id: int) -> bool:
+    db = build_db()
+    try:
+        with db.connect() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM project_contractors
+                WHERE master_project_id=? AND status='Đang hoạt động' LIMIT 1""",
+                (int(master_project_id),),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
 def _execution_project_id(scope) -> int:
-    # Project-level users act on the master project; contractor-scoped accounts
-    # remain confined to their authorized workspace.
-    return int(scope.master_project_id if scope.is_master_scope else scope.workspace_project_id)
+    """Return exactly one contractor AI tenant.
+
+    Master projects with active contractor workspaces are intentionally rejected.
+    Admin/BĐH must select the desired contractor workspace. This prevents events,
+    snapshots, approvals, memory and Digital Twin state from mixing contractors.
+    """
+    if bool(scope.is_master_scope) and _master_has_contractors(int(scope.master_project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "contractor_ai_workspace_required",
+                "message": (
+                    "AI nhà thầu chạy riêng biệt. Hãy chọn một nhà thầu đang làm việc "
+                    "trước khi chạy AI Supervisor/Orchestrator."
+                ),
+                "master_project_id": int(scope.master_project_id),
+            },
+        )
+    return int(scope.workspace_project_id or scope.requested_project_id)
 
 
 def _planner_context(principal: Principal) -> dict[str, Any]:
@@ -72,12 +102,13 @@ def capabilities(
     principal: Principal = Depends(require_roles("read", "update", "admin")),
 ):
     scope = _scope(principal, project_id)
+    tenant_id = _execution_project_id(scope)
     platform = get_autonomy_platform(build_db())
     return {
         "ok": True,
-        "project_id": _execution_project_id(scope),
+        "project_id": tenant_id,
         "master_project_id": int(scope.master_project_id),
-        "workspace_project_id": int(scope.workspace_project_id),
+        "workspace_project_id": tenant_id,
         "role": principal.role,
         "target_stage": platform.target_stage.value,
         "capabilities": platform.capabilities,
@@ -98,7 +129,7 @@ def create_plan(
         request.objective,
         context=_planner_context(principal),
     )
-    return {"ok": True, "plan": asdict(plan)}
+    return {"ok": True, "workspace_project_id": project_id, "plan": asdict(plan)}
 
 
 @router.post("/execute")
@@ -112,8 +143,6 @@ def execute_plan(
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
 
-    # V7.7 gate is evaluated immediately before execution; write-capable steps
-    # are blocked if the current synchronized evidence is not reconciled.
     integrity = platform.tools.execute(
         "check_data_integrity",
         project_id=project_id,
@@ -147,6 +176,7 @@ def execute_plan(
             )
     return {
         "ok": True,
+        "workspace_project_id": project_id,
         "integrity": integrity,
         "plan": asdict(plan),
         "approved_steps": sorted(approved_steps),
@@ -167,7 +197,7 @@ def supervisor(
         actor=principal.email or "AI Supervisor",
         extra_indicators=request.indicators,
     )
-    return {"ok": True, "result": result}
+    return {"ok": True, "workspace_project_id": project_id, "result": result}
 
 
 @router.post("/simulate")
@@ -182,7 +212,7 @@ def simulate(
     if platform.digital_twin.get(project_id) is None:
         run_project_supervisor(db, project_id, actor=principal.email or "AI Supervisor")
     result = platform.digital_twin.simulate(project_id, request.scenario)
-    return {"ok": True, "scenario": asdict(result)}
+    return {"ok": True, "workspace_project_id": project_id, "scenario": asdict(result)}
 
 
 @router.get("/{project_id}/approvals")
@@ -194,6 +224,7 @@ def pending_approvals(
     target = _execution_project_id(scope)
     return {
         "ok": True,
+        "workspace_project_id": target,
         "approvals": get_autonomy_repository(build_db()).pending_approvals(project_id=target),
     }
 
@@ -214,4 +245,8 @@ def decide_approval(
         approved_by=principal.email,
         note=request.note,
     )
-    return {"ok": True, "status": "APPROVED" if request.approved else "REJECTED"}
+    return {
+        "ok": True,
+        "workspace_project_id": target,
+        "status": "APPROVED" if request.approved else "REJECTED",
+    }
