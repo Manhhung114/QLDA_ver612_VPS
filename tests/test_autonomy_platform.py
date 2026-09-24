@@ -7,12 +7,11 @@ from qlda.autonomy import (
     DataIntegrityGate,
     DomainEvent,
     EventBus,
-    ProjectDigitalTwin,
     ProjectSupervisor,
     RiskLevel,
     ToolRegistry,
     ToolSpec,
-    TwinState,
+    build_platform,
 )
 from qlda.autonomy.orchestrator import AIOrchestrator
 from qlda.autonomy.policy import AutonomyPolicy
@@ -98,13 +97,11 @@ class AutonomyPlatformTests(unittest.TestCase):
         self.assertTrue(decision.allowed)
         self.assertTrue(decision.requires_approval)
 
-    def test_v90_digital_twin_runs_what_if(self):
-        twin = ProjectDigitalTwin()
-        twin.update(TwinState(1, schedule_progress=50, cost_progress=55, quality_open_items=2, data_integrity_score=100))
-        result = twin.simulate(1, {"name": "boost", "days": 10, "productivity_multiplier": 1.2})
-        self.assertEqual(result.name, "boost")
-        self.assertGreater(result.projected_schedule_progress, 50)
-        self.assertGreaterEqual(result.risk_score, 0)
+    def test_v90_keeps_autonomous_operations_without_digital_twin(self):
+        platform = build_platform()
+        self.assertIn("V9.0", platform.capabilities)
+        self.assertIn("Autonomous Project Operations", platform.capabilities["V9.0"])
+        self.assertFalse(hasattr(platform, "digital_twin"))
 
 
 if __name__ == "__main__":
