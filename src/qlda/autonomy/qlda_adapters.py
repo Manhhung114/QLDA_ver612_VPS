@@ -116,6 +116,60 @@ class QLDAAutomationAdapters:
             "send_notification": self.send_notification,
         }
 
+    def _payment_status(self, workspace_id: int) -> dict[str, Any]:
+        """Return payment facts without inventing an overdue amount.
+
+        ``certified_cumulative`` is cumulative by schema, so summing it across IPC
+        records double-counts earlier periods.  For health/risk evaluation, overdue
+        payment is taken only from existing IPC rows that have a real due date and
+        are still unpaid, using the same finance service as the UI.
+        """
+        certified_cumulative = 0.0
+        paid_total = 0.0
+        try:
+            with self.db.connect() as connection:
+                row = connection.execute(
+                    """SELECT COALESCE(MAX(certified_cumulative),0) AS certified_cumulative,
+                    COALESCE(SUM(paid_amount),0) AS paid_total
+                    FROM payment_tracking WHERE project_id=?""",
+                    (int(workspace_id),),
+                ).fetchone()
+            summary = _rowdict(row)
+            certified_cumulative = float(summary.get("certified_cumulative") or 0)
+            paid_total = float(summary.get("paid_total") or 0)
+        except Exception:
+            pass
+
+        unpaid_rows: list[dict[str, Any]] = []
+        try:
+            from qlda.runtime_core.finance_management_ui import load_unpaid_ipcs
+
+            unpaid_rows = [dict(x) for x in load_unpaid_ipcs(self.db, int(workspace_id))]
+        except Exception:
+            unpaid_rows = []
+
+        unpaid_balance = sum(max(0.0, float(x.get("outstanding") or 0)) for x in unpaid_rows)
+        overdue_rows = [
+            x for x in unpaid_rows
+            if int(x.get("overdue_days") or 0) > 0 and x.get("due_date") is not None
+        ]
+        overdue_amount = sum(max(0.0, float(x.get("outstanding") or 0)) for x in overdue_rows)
+        dated_count = sum(1 for x in unpaid_rows if x.get("due_date") is not None)
+
+        return {
+            # Compatibility fields retained for reports that already consume them.
+            "certified": certified_cumulative,
+            "paid": paid_total,
+            "outstanding": unpaid_balance,
+            # Only this field is allowed to drive PAYMENT_OVERDUE findings.
+            "overdue": overdue_amount,
+            "overdue_count": len(overdue_rows),
+            "due_dated_unpaid_count": dated_count,
+            "unpaid_ipc_count": len(unpaid_rows),
+            "overdue_verified": bool(overdue_rows),
+            "calculation": "verified_ipc_due_dates",
+        }
+
     def get_project_status(self, *, project_id: int, actor: str = "", **_: Any) -> dict[str, Any]:
         scope = self._resolve_scope(int(project_id))
         workspace_id = int(scope["workspace_project_id"])
@@ -135,13 +189,7 @@ class QLDAAutomationAdapters:
                 WHERE project_id=? GROUP BY doc_type,status""",
                 (workspace_id,),
             ).fetchall()
-            payment = connection.execute(
-                """SELECT COALESCE(SUM(certified_cumulative),0) AS certified,
-                COALESCE(SUM(paid_amount),0) AS paid FROM payment_tracking WHERE project_id=?""",
-                (workspace_id,),
-            ).fetchone()
         documents = [_rowdict(x) for x in doc_rows]
-        payment_row = _rowdict(payment)
 
         days_remaining = None
         end_text = str(project.get("end_date") or "")
@@ -165,11 +213,7 @@ class QLDAAutomationAdapters:
                 "critical_delayed_tasks": len(critical_delayed),
             },
             "documents": documents,
-            "payment": {
-                "certified": float(payment_row.get("certified") or 0),
-                "paid": float(payment_row.get("paid") or 0),
-                "outstanding": max(0.0, float(payment_row.get("certified") or 0) - float(payment_row.get("paid") or 0)),
-            },
+            "payment": self._payment_status(workspace_id),
             "contract_days_remaining": days_remaining,
             "actor": actor,
         }
@@ -350,11 +394,12 @@ class QLDAAutomationAdapters:
     def generate_report(self, *, project_id: int, actor: str = "", **arguments: Any) -> dict[str, Any]:
         status = self.get_project_status(project_id=project_id, actor=actor)
         integrity = self.check_data_integrity(project_id=project_id, actor=actor)
+        payment = status.get("payment") or {}
         indicators = {
             "data_integrity_score": integrity["score"],
             "schedule_delay_percent": status["schedule"]["delay_percent"],
             "contract_days_remaining": status.get("contract_days_remaining"),
-            "payment_overdue_value": status["payment"]["outstanding"],
+            "payment_overdue_value": float(payment.get("overdue") or 0),
             "ncr_overdue": int(arguments.get("ncr_overdue", 0) or 0),
             "rfi_overdue": int(arguments.get("rfi_overdue", 0) or 0),
             "inspection_rejected": int(arguments.get("inspection_rejected", 0) or 0),
