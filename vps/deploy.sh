@@ -27,6 +27,7 @@ postgres_configured() {
 }
 
 excel_background_enabled() { local_storage_enabled && postgres_configured; }
+contractor_data_background_enabled() { postgres_configured; }
 
 github_ipv4() { getent ahostsv4 github.com 2>/dev/null | awk '$2 == "STREAM" {print $1; exit}'; }
 
@@ -104,6 +105,9 @@ install_runtime_units() {
     install -m 0644 "$APP_DIR/vps/qlda-excel-worker.service" /etc/systemd/system/qlda-excel-worker.service
     install -m 0644 "$APP_DIR/vps/qlda-api.service" /etc/systemd/system/qlda-api.service
   fi
+  if contractor_data_background_enabled; then
+    install -m 0644 "$APP_DIR/vps/qlda-contractor-data-worker.service" /etc/systemd/system/qlda-contractor-data-worker.service
+  fi
   systemctl daemon-reload
 }
 
@@ -113,6 +117,10 @@ restart_optional_services() {
     systemctl enable qlda-excel-worker.service >/dev/null 2>&1 || true
     systemctl restart qlda-excel-worker.service
     bash "$APP_DIR/vps/reconcile_api.sh"
+  fi
+  if contractor_data_background_enabled; then
+    systemctl enable qlda-contractor-data-worker.service >/dev/null 2>&1 || true
+    systemctl restart qlda-contractor-data-worker.service
   fi
 }
 
@@ -140,7 +148,8 @@ run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m compileall -q
 run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m py_compile \
   "$APP_DIR/src/qlda/presentation/streamlit/app.py" \
   "$APP_DIR/src/qlda/presentation/api/app.py" \
-  "$APP_DIR/src/qlda/modules/excel/worker.py"
+  "$APP_DIR/src/qlda/modules/excel/worker.py" \
+  "$APP_DIR/src/qlda/modules/contractor_data/worker.py"
 install_runtime_units
 restart_optional_services
 systemctl enable "$SERVICE" >/dev/null 2>&1 || true
@@ -155,6 +164,9 @@ if [[ "$ok" -eq 1 ]] && local_storage_enabled && ! curl -fsS http://127.0.0.1:85
 if [[ "$ok" -eq 1 ]] && excel_background_enabled; then
   systemctl is-active --quiet qlda-excel-worker.service || ok=0
   curl -fsS http://127.0.0.1:8001/api/health >/dev/null 2>&1 || ok=0
+fi
+if [[ "$ok" -eq 1 ]] && contractor_data_background_enabled; then
+  systemctl is-active --quiet qlda-contractor-data-worker.service || ok=0
 fi
 
 if [[ "$ok" -eq 1 ]]; then
