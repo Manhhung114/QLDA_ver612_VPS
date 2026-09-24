@@ -58,6 +58,14 @@ def _execution_project_id(scope) -> int:
     return int(scope.master_project_id if scope.is_master_scope else scope.workspace_project_id)
 
 
+def _planner_context(principal: Principal) -> dict[str, Any]:
+    return {
+        "default_assignee_email": str(principal.email or ""),
+        "default_assignee_name": str((principal.user or {}).get("name") or principal.email or ""),
+        "requester_role": str(principal.role or "read"),
+    }
+
+
 @router.get("/{project_id}/capabilities")
 def capabilities(
     project_id: int,
@@ -85,7 +93,11 @@ def create_plan(
     scope = _scope(principal, request.project_id)
     project_id = _execution_project_id(scope)
     platform = get_autonomy_platform(build_db())
-    plan = platform.orchestrator.create_plan(project_id, request.objective)
+    plan = platform.orchestrator.create_plan(
+        project_id,
+        request.objective,
+        context=_planner_context(principal),
+    )
     return {"ok": True, "plan": asdict(plan)}
 
 
@@ -108,7 +120,11 @@ def execute_plan(
         actor=principal.email,
         role=principal.role,
     )
-    plan = platform.orchestrator.create_plan(project_id, request.objective)
+    plan = platform.orchestrator.create_plan(
+        project_id,
+        request.objective,
+        context=_planner_context(principal),
+    )
     approved_steps = repository.approved_steps(project_id=project_id, plan_id=plan.plan_id)
     approved_steps.update(str(x) for x in request.approvals)
     results = platform.orchestrator.execute_plan(
