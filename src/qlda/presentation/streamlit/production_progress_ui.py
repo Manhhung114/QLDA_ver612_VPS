@@ -172,30 +172,6 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
         )
 
         oauth_ready = GoogleSheetsClient.oauth_available()
-        if client.authorized:
-            c1, c2 = st.columns([3, 1])
-            c1.success("Google đã được kết nối trong phiên QLDA hiện tại.")
-            if c2.button("Đăng xuất Google", key=f"production_google_logout_{project_id}", use_container_width=True):
-                st.session_state.pop("production_google_oauth", None)
-                st.rerun()
-        elif oauth_ready:
-            try:
-                state = make_oauth_state(project_id, _actor(identity))
-                auth_url = GoogleSheetsClient.build_authorization_url(state)
-                st.link_button(
-                    "🔐 Đăng nhập Google để đọc Sheet riêng tư",
-                    auth_url,
-                    type="primary",
-                    use_container_width=False,
-                )
-                st.caption("QLDA chỉ xin quyền đọc Google Sheets; không xin quyền sửa hoặc xóa file.")
-            except Exception as exc:
-                st.warning(str(exc))
-        else:
-            st.caption(
-                "Chế độ dán link công khai dùng ngay, không cần cấu hình. Để bật đăng nhập Google cho Sheet riêng tư, "
-                "Admin VPS cấu hình GOOGLE_OAUTH_CLIENT_ID và GOOGLE_OAUTH_CLIENT_SECRET."
-            )
 
         if can_admin:
             access_mode = st.radio(
@@ -203,8 +179,58 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                 ["Dán link đã chia sẻ", "Đăng nhập Google"],
                 horizontal=True,
                 key=f"production_access_mode_{project_id}",
-                help="Link đã chia sẻ không cần credential. Đăng nhập Google dùng cho file riêng tư được chia sẻ cho tài khoản Google của người dùng.",
+                help=(
+                    "Đây là lựa chọn phương thức kết nối, không phải nút đăng nhập. "
+                    "Khi chọn Đăng nhập Google, nút đăng nhập thật sẽ xuất hiện ngay bên dưới nếu Google OAuth đã được cấu hình."
+                ),
             )
+
+            if access_mode == "Đăng nhập Google":
+                if client.authorized:
+                    c1, c2 = st.columns([3, 1])
+                    c1.success("✅ Google đã được kết nối trong phiên QLDA hiện tại.")
+                    if c2.button(
+                        "Đăng xuất Google",
+                        key=f"production_google_logout_{project_id}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.pop("production_google_oauth", None)
+                        st.rerun()
+                elif oauth_ready:
+                    try:
+                        state = make_oauth_state(project_id, _actor(identity))
+                        auth_url = GoogleSheetsClient.build_authorization_url(state)
+                        st.link_button(
+                            "🔐 ĐĂNG NHẬP GOOGLE",
+                            auth_url,
+                            type="primary",
+                            use_container_width=True,
+                        )
+                        st.caption(
+                            "Bấm nút trên để mở trang Google. QLDA chỉ xin quyền đọc Google Sheets; "
+                            "không xin quyền sửa hoặc xóa file."
+                        )
+                    except Exception as exc:
+                        st.error(f"Không tạo được liên kết đăng nhập Google: {exc}")
+                else:
+                    st.error(
+                        "🔒 Google OAuth chưa được cấu hình trên VPS nên QLDA chưa thể mở cửa sổ đăng nhập Google. "
+                        "Dòng 'Đăng nhập Google' phía trên chỉ là lựa chọn phương thức kết nối."
+                    )
+                    st.warning(
+                        "Admin cần cấu hình OAuth Client một lần trên VPS. Sau khi cấu hình và restart qlda.service, "
+                        "nút **🔐 ĐĂNG NHẬP GOOGLE** sẽ xuất hiện tại đây."
+                    )
+                    st.code(
+                        "GOOGLE_OAUTH_CLIENT_ID=...\n"
+                        "GOOGLE_OAUTH_CLIENT_SECRET=...\n"
+                        f"GOOGLE_OAUTH_REDIRECT_URI={GoogleSheetsClient.oauth_redirect_uri()}",
+                        language="text",
+                    )
+                    st.caption(
+                        "Trong Google Cloud Console, Authorized redirect URI phải đúng tuyệt đối với "
+                        "GOOGLE_OAUTH_REDIRECT_URI hiển thị ở trên."
+                    )
 
             with st.form(f"production_add_sheet_{project_id}"):
                 c1, c2 = st.columns([2, 3])
@@ -219,7 +245,16 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                     key=f"production_sheet_url_{project_id}",
                 )
                 test_label = "🔎 Kiểm tra link" if access_mode == "Dán link đã chia sẻ" else "🔎 Đọc danh sách worksheet"
-                test = st.form_submit_button(test_label, type="primary")
+                google_blocked = access_mode == "Đăng nhập Google" and not client.authorized
+                test = st.form_submit_button(
+                    test_label,
+                    type="primary",
+                    disabled=google_blocked,
+                )
+                if google_blocked:
+                    st.caption(
+                        "Đăng nhập Google thành công trước, sau đó nút đọc danh sách worksheet sẽ được bật."
+                    )
 
             if test:
                 try:
@@ -239,8 +274,12 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                         }
                         st.success(f"Đọc link thành công: nhận diện {len(preview):,} điểm sản lượng.")
                     else:
+                        if not oauth_ready:
+                            raise RuntimeError(
+                                "Google OAuth chưa được cấu hình trên VPS. Admin cần cấu hình Client ID/Secret trước."
+                            )
                         if not client.authorized:
-                            raise RuntimeError("Hãy bấm Đăng nhập Google trước khi đọc Sheet riêng tư.")
+                            raise RuntimeError("Chưa đăng nhập Google. Hãy bấm nút ĐĂNG NHẬP GOOGLE phía trên.")
                         meta = client.metadata(sid)
                         _save_oauth_state(st, client)
                         st.session_state[f"production_sheet_candidate_{project_id}"] = {
@@ -291,6 +330,8 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                     st.rerun()
                 c2.caption("Một dự án có thể khai báo nhiều Google Sheet hoặc nhiều tab của cùng một file.")
         else:
+            if client.authorized:
+                st.success("✅ Google đã được kết nối trong phiên QLDA hiện tại.")
             st.caption("Chỉ Admin được thêm/xóa nguồn Google Sheets. Người có quyền Cập nhật được phép đồng bộ dữ liệu.")
 
         sources = store.list_sources(project_id)
