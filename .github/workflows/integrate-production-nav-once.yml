@@ -41,32 +41,45 @@ jobs:
                   raise SystemExit('Import anchor not found in app.py')
               text = text.replace(import_anchor, import_anchor + import_line, 1)
 
-          old_nav = '''        "🏗️ Thi công": [
-              ("📅 Tiến độ", lambda: render_schedule(pid)),
-              ("📦 Vật tư", lambda: render_material_management(pid)),
-              ("📷 Nhật ký", lambda: render_site_diary(pid)),
-          ],'''
-          new_nav = '''        "🏗️ Thi công": [
-              ("📅 Tiến độ", lambda: render_schedule(pid)),
-              ("📊 Sản lượng", lambda: render_production_progress(st, db, _master_pid, identity=_v7_identity)),
-              ("📦 Vật tư", lambda: render_material_management(pid)),
-              ("📷 Nhật ký", lambda: render_site_diary(pid)),
-          ],'''
           if '"📊 Sản lượng", lambda: render_production_progress' not in text:
-              if old_nav not in text:
-                  raise SystemExit('Construction navigation anchor not found in app.py')
-              text = text.replace(old_nav, new_nav, 1)
+              lines = text.splitlines(keepends=True)
+              construction_idx = next(
+                  (i for i, line in enumerate(lines) if '"🏗️ Thi công": [' in line),
+                  None,
+              )
+              if construction_idx is None:
+                  raise SystemExit('Construction navigation section not found in app.py')
+              schedule_idx = next(
+                  (
+                      i for i in range(construction_idx + 1, min(len(lines), construction_idx + 10))
+                      if '("📅 Tiến độ", lambda: render_schedule(pid)),' in lines[i]
+                  ),
+                  None,
+              )
+              if schedule_idx is None:
+                  raise SystemExit('Schedule navigation item not found under Construction')
+              indent = lines[schedule_idx][: len(lines[schedule_idx]) - len(lines[schedule_idx].lstrip())]
+              lines.insert(
+                  schedule_idx + 1,
+                  indent + '("📊 Sản lượng", lambda: render_production_progress(st, db, _master_pid, identity=_v7_identity)),\n',
+              )
+              text = ''.join(lines)
 
           app_path.write_text(text, encoding='utf-8')
 
-          standalone = Path('src/qlda/presentation/streamlit/pages/1_📊_San_luong.py')
-          if standalone.exists():
-              standalone.unlink()
+          pages_dir = Path('src/qlda/presentation/streamlit/pages')
+          if pages_dir.exists():
+              for standalone in pages_dir.iterdir():
+                  if standalone.is_file() and 'San_luong' in standalone.name:
+                      standalone.unlink()
 
           final = app_path.read_text(encoding='utf-8')
           assert import_line.strip() in final
           assert '("📊 Sản lượng", lambda: render_production_progress' in final
-          assert not standalone.exists()
+          assert not any(
+              p.is_file() and 'San_luong' in p.name
+              for p in pages_dir.iterdir()
+          ) if pages_dir.exists() else True
           PY
 
       - name: Static validation
