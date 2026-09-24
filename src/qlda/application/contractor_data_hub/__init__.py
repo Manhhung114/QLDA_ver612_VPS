@@ -9,13 +9,67 @@ from .service import ContractorDataHubService as _BaseContractorDataHubService
 
 
 class ContractorDataHubService(_BaseContractorDataHubService):
-    """Public application service with corrected anonymous-Sheet ingestion."""
+    """Public application service with resilient multi-tab Google Sheet ingestion.
+
+    The legacy implementation could persist one worksheet name/gid and then keep
+    restricting every later synchronization to that single tab.  The UI itself is
+    a multiselect, so users saw only one choice even when the Google workbook had
+    many worksheets.  OAuth sources now always rescan all visible tabs from Google
+    metadata.  Public-link sources also use the full workbook whenever an OAuth
+    connection is available, while preserving anonymous gid-only fallback.
+    """
+
+    def _sheet_file_records(
+        self,
+        source: dict[str, Any],
+        spreadsheet_id: str,
+        *,
+        external_path: str = "",
+        modified_time: str = "",
+        worksheet_names: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+        # Do not let stale/legacy worksheet_names permanently pin an OAuth
+        # spreadsheet to one tab.  There is currently no UI that intentionally
+        # configures a private source to a subset of worksheets, therefore the
+        # authoritative list is the current Google metadata on every sync.
+        records, production_points, snapshot = super()._sheet_file_records(
+            source,
+            spreadsheet_id,
+            external_path=external_path,
+            modified_time=modified_time,
+            worksheet_names=None,
+        )
+        snapshot = dict(snapshot or {})
+        snapshot["worksheet_discovery"] = "ALL_VISIBLE_TABS"
+        if worksheet_names:
+            snapshot["legacy_worksheet_filter_ignored"] = list(worksheet_names)
+        return records, production_points, snapshot
 
     def _public_sheet_records(
         self,
         source: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
         spreadsheet_id = str(source.get("external_id") or "")
+
+        # If QLDA has an authorized Google session, prefer Sheets API metadata.
+        # This discovers every visible worksheet and keeps the real worksheet
+        # titles in the normalized records, even when the source was originally
+        # saved from a public URL containing only one #gid.
+        if self.client is not None and self.client.authorized:
+            try:
+                records, production_points, snapshot = self._sheet_file_records(
+                    source,
+                    spreadsheet_id,
+                    worksheet_names=None,
+                )
+                snapshot = dict(snapshot or {})
+                snapshot["access_mode"] = "PUBLIC_LINK_WITH_OAUTH_DISCOVERY"
+                return records, production_points, snapshot
+            except Exception:
+                # A public source must remain usable anonymously if the connected
+                # Google account cannot access it or its token is temporarily bad.
+                pass
+
         tabs = list(source.get("worksheet_names") or [])
         gids: list[int] = []
         for value in tabs:
@@ -25,6 +79,8 @@ class ContractorDataHubService(_BaseContractorDataHubService):
         if not gids:
             gids = [0]
 
+        # Preserve insertion order while avoiding duplicate gids left by old data.
+        gids = list(dict.fromkeys(gids))
         records: list[dict[str, Any]] = []
         production_points = 0
         for gid in gids:
@@ -55,8 +111,11 @@ class ContractorDataHubService(_BaseContractorDataHubService):
         return records, production_points, {
             "spreadsheet_id": spreadsheet_id,
             "gids": gids,
+            "worksheets": [f"gid={gid}" for gid in gids],
             "record_count": len(records),
             "production_points": production_points,
+            "worksheet_discovery": "CONFIGURED_GIDS_ONLY",
+            "access_mode": "PUBLIC_LINK_ANONYMOUS",
         }
 
 
