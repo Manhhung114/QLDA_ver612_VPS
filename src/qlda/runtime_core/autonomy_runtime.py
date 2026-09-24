@@ -16,7 +16,7 @@ _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-SUPERVISOR_SCHEMA_VERSION = "V3_PAYMENT_DUE_SEMANTICS_NO_TWIN"
+SUPERVISOR_SCHEMA_VERSION = "V4_NO_PAYMENT_HEALTH_NO_TWIN"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -135,7 +135,12 @@ def run_project_supervisor(
     actor: str = "AI Supervisor",
     extra_indicators: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run the contractor-isolated V8/V9 supervisor and persist a verified snapshot."""
+    """Run the contractor-isolated supervisor and persist a verified snapshot.
+
+    Finance/payment amounts are intentionally not used to calculate Project Health.
+    The legacy payment data may contain cumulative/requested IPC values and is not
+    safe as a project-health alarm until a verified payment ledger is available.
+    """
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
     status = platform.tools.execute(
@@ -150,16 +155,16 @@ def run_project_supervisor(
         actor=actor,
         role="admin",
     )
-    payment = status.get("payment") or {}
     indicators = {
         "data_integrity_score": float(integrity.get("score") or 0),
         "schedule_delay_percent": float((status.get("schedule") or {}).get("delay_percent") or 0),
         "contract_days_remaining": status.get("contract_days_remaining"),
-        # Never equate unpaid balance with overdue. This is populated only from
-        # IPCs that have a real due date in the finance/payment data.
-        "payment_overdue_value": float(payment.get("overdue") or 0),
     }
-    indicators.update(dict(extra_indicators or {}))
+    # Do not accept payment_overdue_value from caller overrides either. This keeps
+    # stale/external values from re-introducing the false health warning.
+    extra = dict(extra_indicators or {})
+    extra.pop("payment_overdue_value", None)
+    indicators.update(extra)
     health = platform.supervisor.evaluate(int(project_id), indicators)
 
     for finding in health.findings:
