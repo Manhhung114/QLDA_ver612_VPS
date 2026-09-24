@@ -24,7 +24,7 @@ class GoogleSheetsClient:
 
     Supported access modes:
     1. Public/link-only: spreadsheet is shared as "Anyone with the link - Viewer".
-       QLDA reads the selected worksheet through Google's CSV endpoint.
+       QLDA reads the selected worksheet anonymously through Google's CSV endpoints.
     2. Google OAuth: a QLDA user signs in with a Google account that already has
        access to the spreadsheet. OAuth tokens are intended to stay in the
        Streamlit session, not in the project database.
@@ -34,7 +34,8 @@ class GoogleSheetsClient:
     API = "https://sheets.googleapis.com/v4/spreadsheets"
     AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
     TOKEN_URL = "https://oauth2.googleapis.com/token"
-    PUBLIC_CSV_URL = "https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq"
+    PUBLIC_GVIZ_URL = "https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq"
+    PUBLIC_EXPORT_URL = "https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export"
 
     def __init__(self, token_state: dict[str, Any] | None = None):
         state = dict(token_state or {})
@@ -245,35 +246,90 @@ class GoogleSheetsClient:
             for item in (data.get("valueRanges") or [])
         }
 
+    @staticmethod
+    def _looks_like_google_login(response) -> bool:
+        content_type = str(response.headers.get("content-type") or "").lower()
+        head = str(response.text or "")[:1000].lower()
+        final_url = str(getattr(response, "url", "") or "").lower()
+        return (
+            "accounts.google.com" in final_url
+            or "serviceLogin".lower() in final_url
+            or (
+                "text/html" in content_type
+                and (
+                    "sign in" in head
+                    or "đăng nhập" in head
+                    or "accounts.google.com" in head
+                    or "servicelogin" in head
+                )
+            )
+        )
+
     @classmethod
     def public_values(cls, spreadsheet_id: str, gid: int = 0) -> list[list[Any]]:
-        """Read one anonymously accessible worksheet without API credentials."""
-        url = cls.PUBLIC_CSV_URL.format(spreadsheet_id=quote(str(spreadsheet_id), safe=""))
-        try:
-            response = requests.get(
-                url,
-                params={"gid": int(gid), "tqx": "out:csv"},
-                headers={"User-Agent": "QLDA/7 GoogleSheetsLinkReader"},
-                timeout=60,
-                allow_redirects=True,
-            )
-        except requests.RequestException as exc:
-            raise GoogleSheetsConfigError(f"Không đọc được Google Sheet từ link: {exc}") from exc
-        if response.status_code >= 400:
-            raise GoogleSheetsConfigError(
-                f"Google Sheet HTTP {response.status_code}. Kiểm tra quyền chia sẻ của file."
-            )
-        content_type = str(response.headers.get("content-type") or "").lower()
-        head = response.text[:500].lower()
-        if "text/html" in content_type and ("accounts.google.com" in response.url or "sign in" in head):
-            raise GoogleSheetsConfigError(
-                "Google Sheet chưa cho phép đọc bằng link. Hãy bật 'Anyone with the link - Viewer' "
-                "hoặc chọn chế độ Đăng nhập Google."
-            )
-        try:
-            return [list(row) for row in csv.reader(io.StringIO(response.text))]
-        except Exception as exc:
-            raise GoogleSheetsConfigError("Không phân tích được dữ liệu CSV từ Google Sheet.") from exc
+        """Read one anonymously accessible worksheet without API credentials.
+
+        Google currently exposes more than one anonymous CSV path. Some Workspace
+        configurations return 401 on gviz while the standard export endpoint is
+        still available, so QLDA tries both before declaring that authentication
+        is required.
+        """
+        spreadsheet_id = quote(str(spreadsheet_id), safe="")
+        attempts = [
+            (
+                cls.PUBLIC_GVIZ_URL.format(spreadsheet_id=spreadsheet_id),
+                {"gid": int(gid), "tqx": "out:csv"},
+                "gviz",
+            ),
+            (
+                cls.PUBLIC_EXPORT_URL.format(spreadsheet_id=spreadsheet_id),
+                {"format": "csv", "gid": int(gid)},
+                "export",
+            ),
+        ]
+        failures: list[str] = []
+
+        for url, params, label in attempts:
+            try:
+                response = requests.get(
+                    url,
+                    params=params,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 QLDA/7 GoogleSheetsLinkReader",
+                        "Accept": "text/csv,text/plain,*/*",
+                        "Cache-Control": "no-cache",
+                    },
+                    timeout=60,
+                    allow_redirects=True,
+                )
+            except requests.RequestException as exc:
+                failures.append(f"{label}: network {exc}")
+                continue
+
+            if response.status_code >= 400:
+                failures.append(f"{label}: HTTP {response.status_code}")
+                continue
+            if cls._looks_like_google_login(response):
+                failures.append(f"{label}: yêu cầu đăng nhập Google")
+                continue
+
+            try:
+                rows = [list(row) for row in csv.reader(io.StringIO(response.text))]
+            except Exception as exc:
+                failures.append(f"{label}: CSV {exc}")
+                continue
+            if rows:
+                return rows
+            failures.append(f"{label}: dữ liệu rỗng")
+
+        detail = "; ".join(failures[-2:])
+        raise GoogleSheetsConfigError(
+            "Google Sheet không cho phép QLDA đọc ẩn danh từ link"
+            + (f" ({detail})" if detail else "")
+            + ". Kiểm tra Share → General access phải là 'Anyone with the link' → Viewer. "
+            "Nếu file thuộc Google Workspace bị chặn chia sẻ công khai hoặc chỉ chia sẻ cho email cụ thể, "
+            "hãy chọn 'Đăng nhập Google' trong QLDA; không cần Service Account."
+        )
 
 
 def _state_secret() -> str:
