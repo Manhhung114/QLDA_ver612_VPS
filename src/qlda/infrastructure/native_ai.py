@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-"""V7.6 native AI infrastructure adapter.
+"""V7.6 native AI infrastructure adapter with contractor-tenant isolation.
 
-AI provider selection, workspace scoping and domain error translation are handled
-through packaged production modules under ``src/qlda``. There is no repository-root
-loader, qlda.runtime dependency or versioned module lookup in this adapter.
+Every normal assistant request is scoped to one ``workspace_project_id``. Callers
+may still pass an explicit scope, but omitting it no longer opens an implicit
+multi-contractor project context: the requested project id becomes the AI tenant.
+A separate explicit Project Control service can aggregate contractor summaries in
+future without weakening this default boundary.
 """
 
 import os
@@ -59,6 +61,13 @@ class NativeAIAdapter:
         finally:
             access.set_ai_workspace_scope(None)
 
+    @staticmethod
+    def _tenant(project_id: int, workspace_scope: int | None) -> int:
+        value = int(workspace_scope or project_id or 0)
+        if value <= 0:
+            raise ValueError("AI cần workspace_project_id hợp lệ.")
+        return value
+
     @classmethod
     def _run(
         cls,
@@ -86,10 +95,11 @@ class NativeAIAdapter:
         use_web: bool | None = None,
         workspace_scope: int | None = None,
     ) -> str:
+        tenant = self._tenant(project_id, workspace_scope)
         return self._run(
             provider,
             "ask_project",
-            workspace_scope,
+            tenant,
             int(project_id),
             question,
             history=history,
@@ -105,10 +115,11 @@ class NativeAIAdapter:
         status_date: date | None = None,
         workspace_scope: int | None = None,
     ) -> str:
+        tenant = self._tenant(project_id, workspace_scope)
         return self._run(
             provider,
             "analyze_schedule_risk",
-            workspace_scope,
+            tenant,
             int(project_id),
             status_date=status_date,
         )
@@ -122,10 +133,11 @@ class NativeAIAdapter:
         status_date: date | None = None,
         workspace_scope: int | None = None,
     ) -> str:
+        tenant = self._tenant(project_id, workspace_scope)
         return self._run(
             provider,
             "draft_report",
-            workspace_scope,
+            tenant,
             int(project_id),
             period=period,
             status_date=status_date,
@@ -141,10 +153,11 @@ class NativeAIAdapter:
         use_web: bool = True,
         workspace_scope: int | None = None,
     ) -> str:
+        tenant = self._tenant(project_id, workspace_scope)
         return self._run(
             provider,
             "legal_qa",
-            workspace_scope,
+            tenant,
             int(project_id),
             question,
             status_date=status_date,
