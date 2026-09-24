@@ -37,6 +37,13 @@ MODULES: dict[str, ModuleSpec] = {
         owns=("Schedule Excel", "schedule task persistence"),
         dependencies=("infrastructure",),
     ),
+    "production_progress": ModuleSpec(
+        name="production_progress",
+        package="qlda.application.google_sheets",
+        owns=("Google Sheets source registry", "production progress normalization", "progress history"),
+        dependencies=("infrastructure",),
+        migration_state="native-module",
+    ),
     "excel": ModuleSpec(
         name="excel",
         package="qlda.modules.excel",
