@@ -7,7 +7,6 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from qlda.autonomy.ai_planner import StructuredAIPlanner
-from qlda.autonomy.digital_twin import TwinState
 from qlda.autonomy.events import DomainEvent
 from qlda.autonomy.persistence import AutomationRepository
 from qlda.autonomy.platform import AutomationPlatform, build_platform
@@ -17,6 +16,7 @@ _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+SUPERVISOR_SCHEMA_VERSION = "V3_PAYMENT_DUE_SEMANTICS_NO_TWIN"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -51,12 +51,7 @@ def _install_common_ai_planner(platform: AutomationPlatform) -> None:
 
 
 def _native_google_sync(db) -> Callable[..., Any]:
-    """Return the production Google sync adapter used by the AI ToolRegistry.
-
-    This is the same read-only Contractor Data Hub service used by the UI/worker.
-    Public links work without OAuth; private sources reuse the persisted project
-    OAuth connection and persist refreshed tokens afterward.
-    """
+    """Return the production Google sync adapter used by the AI ToolRegistry."""
 
     def sync(*, project_id: int, actor: str = "", workspace_ids=None, **_: Any) -> dict[str, Any]:
         from qlda.application.contractor_data_hub import ContractorDataHubService
@@ -122,8 +117,6 @@ def get_autonomy_platform(
         platform = build_platform(handlers=adapters.handlers(), audit_sink=repository.audit)
         _install_common_ai_planner(platform)
 
-        # Every drained event is durably recorded. EventBus itself remains small
-        # and deterministic while PostgreSQL/SQLite retains the audit history.
         platform.events.subscribe("*", repository.save_event)
         _PLATFORMS[key] = platform
         _REPOSITORIES[key] = repository
@@ -135,8 +128,14 @@ def get_autonomy_repository(db) -> AutomationRepository:
     return _REPOSITORIES[id(db)]
 
 
-def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor", extra_indicators: dict[str, Any] | None = None) -> dict[str, Any]:
-    """V8.1 supervisor run with V9 twin update, snapshot and durable events."""
+def run_project_supervisor(
+    db,
+    project_id: int,
+    *,
+    actor: str = "AI Supervisor",
+    extra_indicators: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run the contractor-isolated V8/V9 supervisor and persist a verified snapshot."""
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
     status = platform.tools.execute(
@@ -151,28 +150,17 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
         actor=actor,
         role="admin",
     )
+    payment = status.get("payment") or {}
     indicators = {
         "data_integrity_score": float(integrity.get("score") or 0),
         "schedule_delay_percent": float((status.get("schedule") or {}).get("delay_percent") or 0),
         "contract_days_remaining": status.get("contract_days_remaining"),
-        "payment_overdue_value": float((status.get("payment") or {}).get("outstanding") or 0),
+        # Never equate unpaid balance with overdue. This is populated only from
+        # IPCs that have a real due date in the finance/payment data.
+        "payment_overdue_value": float(payment.get("overdue") or 0),
     }
     indicators.update(dict(extra_indicators or {}))
     health = platform.supervisor.evaluate(int(project_id), indicators)
-
-    schedule = status.get("schedule") or {}
-    twin = TwinState(
-        project_id=int(project_id),
-        schedule_progress=float(schedule.get("actual_progress") or 0),
-        production_progress=float((extra_indicators or {}).get("production_progress", 0) or 0),
-        cost_progress=float((extra_indicators or {}).get("cost_progress", 0) or 0),
-        quality_open_items=int((extra_indicators or {}).get("quality_open_items", 0) or 0),
-        safety_open_items=int((extra_indicators or {}).get("safety_open_items", 0) or 0),
-        cash_exposure=float((status.get("payment") or {}).get("outstanding") or 0),
-        data_integrity_score=float(integrity.get("score") or 0),
-        dimensions={"health_score": health.score},
-    )
-    platform.digital_twin.update(twin)
 
     for finding in health.findings:
         platform.events.publish(
@@ -192,6 +180,7 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
 
     result = {
         "project_id": int(project_id),
+        "supervisor_schema": SUPERVISOR_SCHEMA_VERSION,
         "health_score": health.score,
         "findings": [
             {
@@ -206,13 +195,6 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
         "proposed_actions": platform.supervisor.proposed_actions(health),
         "integrity": integrity,
         "status": status,
-        "twin": {
-            "schedule_progress": twin.schedule_progress,
-            "production_progress": twin.production_progress,
-            "cost_progress": twin.cost_progress,
-            "cash_exposure": twin.cash_exposure,
-            "data_integrity_score": twin.data_integrity_score,
-        },
         "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
     repository.save_snapshot(
@@ -231,13 +213,26 @@ def run_daily_supervisor_if_due(
     extra_indicators: dict[str, Any] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Run at most once per Vietnam-local day unless `force=True`."""
+    """Run at most once per Vietnam-local day for the current supervisor schema."""
     repository = get_autonomy_repository(db)
     today = datetime.now(_VN_TZ).date().isoformat()
     latest = repository.latest_snapshot(project_id=int(project_id), snapshot_type="DAILY_SUPERVISOR")
     payload = latest.get("payload") if isinstance(latest, dict) else None
-    if not force and isinstance(payload, dict) and str(payload.get("local_day") or "") == today:
-        return {"project_id": int(project_id), "skipped": True, "reason": "already_ran_today", "snapshot": payload}
+    current_schema = (
+        isinstance(payload, dict)
+        and str(payload.get("supervisor_schema") or "") == SUPERVISOR_SCHEMA_VERSION
+    )
+    if (
+        not force
+        and current_schema
+        and str(payload.get("local_day") or "") == today
+    ):
+        return {
+            "project_id": int(project_id),
+            "skipped": True,
+            "reason": "already_ran_today",
+            "snapshot": payload,
+        }
     return run_project_supervisor(
         db,
         int(project_id),
@@ -247,6 +242,7 @@ def run_daily_supervisor_if_due(
 
 
 __all__ = [
+    "SUPERVISOR_SCHEMA_VERSION",
     "get_autonomy_platform",
     "get_autonomy_repository",
     "run_project_supervisor",
