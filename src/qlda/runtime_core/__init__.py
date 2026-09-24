@@ -1,28 +1,48 @@
 """QLDA V7.6 packaged production runtime core."""
 
-# Install the Contractor Data Hub completeness guard as soon as the packaged
-# runtime_core namespace is imported. This keeps Streamlit and background sync
-# workers on the same row-ingestion semantics without duplicating boot logic.
+# Install Data Hub ingestion semantics as soon as runtime_core is imported so
+# Streamlit and background workers parse Google Sheets identically.
 from qlda.runtime_core.contractor_data_complete_rows import install_contractor_data_complete_rows
+from qlda.runtime_core.contractor_data_source_semantics import install_contractor_data_source_semantics
 
 install_contractor_data_complete_rows()
+install_contractor_data_source_semantics()
 
-# The Data Hub UI is composed later by initialize_runtime(): first the all-sheet
-# overview patch, then the shared-AI UI patch. Wrap the full runtime initializer
-# so the Admin visibility policy is installed last and cannot be overwritten by
-# those earlier UI composition steps.
+# Compose late UI/AI policies around bootstrap without duplicating its large
+# initializer.  Order matters:
+# 1) bootstrap installs the base shared-AI + all-worksheet UI;
+# 2) source-exact renderer replaces the old mean-based pivot;
+# 3) Admin visibility installs last so management tabs/warnings stay Admin-only.
 from qlda.runtime_core import bootstrap as _bootstrap
 
-if not getattr(_bootstrap, "_qlda_admin_visibility_bootstrap_v1", False):
+if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
+    _original_initialize_ai_runtime = _bootstrap.initialize_ai_runtime
     _original_initialize_runtime = _bootstrap.initialize_runtime
 
-    def _initialize_runtime_with_admin_visibility() -> None:
+    def _initialize_ai_runtime_with_official_totals() -> None:
+        # Replace the Data Hub appendix function before bootstrap installs the
+        # shared ProjectContextBuilder wrapper. Reinstall afterward as a guard in
+        # case import order changes in a future release.
+        from qlda.runtime_core.contractor_data_official_ai import install_contractor_data_official_ai
+
+        install_contractor_data_official_ai()
+        _original_initialize_ai_runtime()
+        install_contractor_data_official_ai()
+
+    def _initialize_runtime_with_source_exact_ui() -> None:
         _original_initialize_runtime()
+
+        from qlda.runtime_core.production_progress_source_exact import (
+            install_production_progress_source_exact,
+        )
         from qlda.runtime_core.contractor_data_admin_visibility import (
             install_contractor_data_admin_visibility,
         )
 
+        install_production_progress_source_exact()
         install_contractor_data_admin_visibility()
 
-    _bootstrap.initialize_runtime = _initialize_runtime_with_admin_visibility
+    _bootstrap.initialize_ai_runtime = _initialize_ai_runtime_with_official_totals
+    _bootstrap.initialize_runtime = _initialize_runtime_with_source_exact_ui
+    _bootstrap._qlda_source_exact_bootstrap_v2 = True
     _bootstrap._qlda_admin_visibility_bootstrap_v1 = True
