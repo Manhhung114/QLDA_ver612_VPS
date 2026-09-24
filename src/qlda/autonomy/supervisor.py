@@ -20,6 +20,11 @@ class ProjectSupervisor:
 
     AI can explain/prioritize the findings, but the base alarms are calculated by
     transparent rules so the system remains auditable and testable.
+
+    Payment-overdue is intentionally excluded from Project Health. Legacy payment
+    tables can contain cumulative/requested IPC values that are not a trustworthy
+    overdue balance. Finance remains available in its dedicated module, but it does
+    not reduce Health or create an AI alarm until a verified payment ledger exists.
     """
 
     def evaluate(self, project_id: int, indicators: dict[str, Any]) -> ProjectHealthReport:
@@ -71,9 +76,10 @@ class ProjectSupervisor:
             weight = 20.0 if days <= 7 else 12.0 if days <= 18 else 6.0
             add("CONTRACT_EXPIRING", "Hợp đồng sắp hết hiệu lực", f"Còn {days} ngày hiệu lực.", weight, metric=days, threshold=30, action="Kiểm tra gia hạn/phụ lục và nghĩa vụ còn lại.")
 
-        payment_overdue = float(indicators.get("payment_overdue_value", 0.0) or 0.0)
-        if payment_overdue > 0:
-            add("PAYMENT_OVERDUE", "Thanh toán quá hạn", f"Giá trị quá hạn {payment_overdue:,.0f}.", 10.0, metric=payment_overdue, threshold=0, action="Đối chiếu hồ sơ thanh toán và kỳ hạn hợp đồng.")
+        # PAYMENT_OVERDUE intentionally disabled. The old calculation could use
+        # cumulative/requested IPC values and produce amounts greater than BOQ.
+        # Keep finance data out of Project Health until a verified ledger with
+        # unique payment obligations, due dates and paid allocations is available.
 
         score = max(0.0, 100.0 - min(100.0, penalty))
         findings.sort(key=lambda item: {RiskLevel.CRITICAL: 4, RiskLevel.HIGH: 3, RiskLevel.MEDIUM: 2, RiskLevel.LOW: 1}[item.severity], reverse=True)
@@ -85,7 +91,7 @@ class ProjectSupervisor:
             tool = "create_work_task"
             if finding.code == "DATA_INTEGRITY":
                 tool = "check_data_integrity"
-            elif finding.code in {"NCR_OVERDUE", "RFI_OVERDUE", "CONTRACT_EXPIRING", "PAYMENT_OVERDUE"}:
+            elif finding.code in {"NCR_OVERDUE", "RFI_OVERDUE", "CONTRACT_EXPIRING"}:
                 tool = "send_notification"
             actions.append({
                 "tool": tool,
