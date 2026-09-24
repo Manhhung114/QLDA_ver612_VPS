@@ -209,4 +209,9 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.document_selection_autopen import install_document_selection_autopen
         install_document_selection_autopen()
 
+        # Production Data Hub overview must expose every synchronized Google
+        # worksheet, even when a tab has raw rows but is not normalized yet.
+        from qlda.runtime_core.production_progress_overview_patch import install_production_progress_overview_patch
+        install_production_progress_overview_patch()
+
         _UI_READY = True
