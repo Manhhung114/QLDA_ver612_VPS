@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from threading import RLock
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from qlda.autonomy.digital_twin import TwinState
 from qlda.autonomy.events import DomainEvent
@@ -12,6 +14,7 @@ from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
 _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
+_VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def get_autonomy_platform(
@@ -54,8 +57,9 @@ def get_autonomy_repository(db) -> AutomationRepository:
 
 
 def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor", extra_indicators: dict[str, Any] | None = None) -> dict[str, Any]:
-    """V8.1 daily supervisor run with V9 twin update and durable events."""
+    """V8.1 supervisor run with V9 twin update, snapshot and durable events."""
     platform = get_autonomy_platform(db)
+    repository = get_autonomy_repository(db)
     status = platform.tools.execute(
         "get_project_status",
         project_id=int(project_id),
@@ -78,19 +82,18 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
     health = platform.supervisor.evaluate(int(project_id), indicators)
 
     schedule = status.get("schedule") or {}
-    platform.digital_twin.update(
-        TwinState(
-            project_id=int(project_id),
-            schedule_progress=float(schedule.get("actual_progress") or 0),
-            production_progress=float((extra_indicators or {}).get("production_progress", 0) or 0),
-            cost_progress=float((extra_indicators or {}).get("cost_progress", 0) or 0),
-            quality_open_items=int((extra_indicators or {}).get("quality_open_items", 0) or 0),
-            safety_open_items=int((extra_indicators or {}).get("safety_open_items", 0) or 0),
-            cash_exposure=float((status.get("payment") or {}).get("outstanding") or 0),
-            data_integrity_score=float(integrity.get("score") or 0),
-            dimensions={"health_score": health.score},
-        )
+    twin = TwinState(
+        project_id=int(project_id),
+        schedule_progress=float(schedule.get("actual_progress") or 0),
+        production_progress=float((extra_indicators or {}).get("production_progress", 0) or 0),
+        cost_progress=float((extra_indicators or {}).get("cost_progress", 0) or 0),
+        quality_open_items=int((extra_indicators or {}).get("quality_open_items", 0) or 0),
+        safety_open_items=int((extra_indicators or {}).get("safety_open_items", 0) or 0),
+        cash_exposure=float((status.get("payment") or {}).get("outstanding") or 0),
+        data_integrity_score=float(integrity.get("score") or 0),
+        dimensions={"health_score": health.score},
     )
+    platform.digital_twin.update(twin)
 
     for finding in health.findings:
         platform.events.publish(
@@ -107,7 +110,8 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
             )
         )
     platform.events.drain()
-    return {
+
+    result = {
         "project_id": int(project_id),
         "health_score": health.score,
         "findings": [
@@ -123,7 +127,49 @@ def run_project_supervisor(db, project_id: int, *, actor: str = "AI Supervisor",
         "proposed_actions": platform.supervisor.proposed_actions(health),
         "integrity": integrity,
         "status": status,
+        "twin": {
+            "schedule_progress": twin.schedule_progress,
+            "production_progress": twin.production_progress,
+            "cost_progress": twin.cost_progress,
+            "cash_exposure": twin.cash_exposure,
+            "data_integrity_score": twin.data_integrity_score,
+        },
+        "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
+    repository.save_snapshot(
+        project_id=int(project_id),
+        snapshot_type="DAILY_SUPERVISOR",
+        payload=result,
+    )
+    return result
 
 
-__all__ = ["get_autonomy_platform", "get_autonomy_repository", "run_project_supervisor"]
+def run_daily_supervisor_if_due(
+    db,
+    project_id: int,
+    *,
+    actor: str = "AI Supervisor",
+    extra_indicators: dict[str, Any] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Run at most once per Vietnam-local day unless `force=True`."""
+    repository = get_autonomy_repository(db)
+    today = datetime.now(_VN_TZ).date().isoformat()
+    latest = repository.latest_snapshot(project_id=int(project_id), snapshot_type="DAILY_SUPERVISOR")
+    payload = latest.get("payload") if isinstance(latest, dict) else None
+    if not force and isinstance(payload, dict) and str(payload.get("local_day") or "") == today:
+        return {"project_id": int(project_id), "skipped": True, "reason": "already_ran_today", "snapshot": payload}
+    return run_project_supervisor(
+        db,
+        int(project_id),
+        actor=actor,
+        extra_indicators=extra_indicators,
+    )
+
+
+__all__ = [
+    "get_autonomy_platform",
+    "get_autonomy_repository",
+    "run_project_supervisor",
+    "run_daily_supervisor_if_due",
+]
