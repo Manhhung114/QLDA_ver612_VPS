@@ -7,7 +7,6 @@ adapters register existing QLDA services as tools; AI never writes storage
 outside those services.
 """
 
-from .digital_twin import ProjectDigitalTwin, ScenarioResult, TwinState
 from .events import DEFAULT_EVENT_TYPES, EventBus
 from .integrity import DataIntegrityGate, evidence_id, make_evidence
 from .models import (
@@ -51,17 +50,14 @@ __all__ = [
     "HeuristicPlanner",
     "IntegrityReport",
     "PlanStep",
-    "ProjectDigitalTwin",
     "ProjectHealthReport",
     "ProjectSupervisor",
     "QLDAAutomationAdapters",
     "ReleaseStage",
     "RiskLevel",
-    "ScenarioResult",
     "ScheduledJob",
     "ToolRegistry",
     "ToolSpec",
-    "TwinState",
     "build_platform",
     "default_tool_specs",
     "evidence_id",
