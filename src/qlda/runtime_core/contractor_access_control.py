@@ -7,7 +7,7 @@ from typing import Any
 from qlda.runtime_core.contractor_workspace import list_contractors, resolve_master_project_id_connection
 
 
-PATCH_MARKER = "V6.22 CONTRACTOR ACCESS CONTROL V1"
+PATCH_MARKER = "V6.22 CONTRACTOR ACCESS CONTROL V2 AI TENANT ISOLATION"
 TABLE_NAME = "project_user_contractor_access"
 PROJECT_VIEWER = "PROJECT_VIEWER"
 CONTRACTOR = "CONTRACTOR"
@@ -15,6 +15,9 @@ ALL = "ALL"
 
 _AI_WORKSPACE_SCOPE: ContextVar[int | None] = ContextVar(
     "qlda_ai_contractor_workspace_scope", default=None
+)
+_AI_PINNED_WORKSPACE_SCOPE: ContextVar[int | None] = ContextVar(
+    "qlda_ai_pinned_contractor_workspace_scope", default=None
 )
 
 
@@ -246,6 +249,43 @@ def user_contractor_scope_label(
     return f"{contractor.get('contractor_code','')} - {contractor.get('contractor_name','')}"
 
 
+def _pin_ai_workspace_scope(workspace_project_id: int | None) -> None:
+    """Pin the selected contractor as the AI tenant for the current request/session."""
+    value = int(workspace_project_id or 0)
+    scoped = value if value > 0 else None
+    _AI_PINNED_WORKSPACE_SCOPE.set(scoped)
+    _AI_WORKSPACE_SCOPE.set(scoped)
+
+
+def current_ai_workspace_scope() -> int | None:
+    return _AI_WORKSPACE_SCOPE.get()
+
+
+def _swap_admin_ai_history(st, master_project_id: int, previous_workspace: int, selected_workspace: int) -> None:
+    """Keep the legacy master-key UI while storing one chat history per contractor.
+
+    Older Streamlit code opens the assistant with the master project id for users
+    who can see every contractor.  Rebinding the shared history on contractor
+    switches preserves backward compatibility without allowing one contractor's
+    conversation to appear in another contractor's AI workspace.
+    """
+    master_id = int(master_project_id)
+    previous = int(previous_workspace or 0)
+    selected = int(selected_workspace or 0)
+    shared_key = f"ai_history_{master_id}"
+    if previous > 0 and previous != selected:
+        st.session_state[f"ai_history_workspace_{previous}"] = list(
+            st.session_state.get(shared_key) or []
+        )
+        st.session_state[shared_key] = list(
+            st.session_state.get(f"ai_history_workspace_{selected}") or []
+        )
+    elif shared_key not in st.session_state:
+        stored = st.session_state.get(f"ai_history_workspace_{selected}")
+        if stored is not None:
+            st.session_state[shared_key] = list(stored or [])
+
+
 def render_authorized_contractor_selector(
     db,
     master_project_id: int,
@@ -268,16 +308,19 @@ def render_authorized_contractor_selector(
         return int(master_project_id), {}
 
     if not rows:
+        _pin_ai_workspace_scope(int(master_project_id))
         return int(master_project_id), {}
 
     # CONTRACTOR accounts never receive a selector containing other contractors.
     if _approval(approval_role) == CONTRACTOR:
         info = dict(rows[0])
+        workspace_id = int(info["workspace_project_id"])
+        _pin_ai_workspace_scope(workspace_id)
         st.sidebar.markdown(
             f"**Nhà thầu:** {info.get('contractor_code','')} - {info.get('contractor_name','')}"
         )
         st.sidebar.caption("🔒 Phạm vi tài khoản: chỉ dữ liệu của nhà thầu này.")
-        return int(info["workspace_project_id"]), info
+        return workspace_id, info
 
     by_workspace = {int(row["workspace_project_id"]): row for row in rows}
     ids = list(by_workspace)
@@ -295,15 +338,27 @@ def render_authorized_contractor_selector(
         ),
         key=f"contractor_workspace_select_{int(master_project_id)}",
     )
-    st.session_state[state_key] = int(selected)
-    info = dict(by_workspace[int(selected)])
-    st.sidebar.caption("👁 Có quyền xem/chuyển giữa toàn bộ nhà thầu của dự án.")
-    return int(selected), info
+    selected = int(selected)
+    _swap_admin_ai_history(st, int(master_project_id), current, selected)
+    st.session_state[state_key] = selected
+    _pin_ai_workspace_scope(selected)
+    info = dict(by_workspace[selected])
+    st.sidebar.caption("🧠 AI đang khóa theo nhà thầu được chọn; không dùng dữ liệu nhà thầu khác.")
+    return selected, info
 
 
 def set_ai_workspace_scope(workspace_project_id: int | None) -> None:
+    """Set an explicit temporary AI scope, or restore the session-pinned tenant.
+
+    NativeAIAdapter calls this with a concrete workspace for API requests and then
+    with ``None`` in ``finally``. In Streamlit, ``None`` restores the contractor
+    selected in the sidebar instead of accidentally reopening project-wide AI.
+    """
     value = int(workspace_project_id or 0)
-    _AI_WORKSPACE_SCOPE.set(value if value > 0 else None)
+    if value > 0:
+        _AI_WORKSPACE_SCOPE.set(value)
+    else:
+        _AI_WORKSPACE_SCOPE.set(_AI_PINNED_WORKSPACE_SCOPE.get())
 
 
 def capture_single_contractor_ai_context() -> None:
@@ -319,9 +374,9 @@ def capture_single_contractor_ai_context() -> None:
 def install_ai_access_guard() -> None:
     """Apply a ContextVar guard after the project-wide multi-contractor AI patch.
 
-    Streamlit sessions execute in separate contexts. A CONTRACTOR screen sets its
-    authorized workspace in this ContextVar; all AI snapshot/file catalog calls
-    then bypass the project aggregate and use only the captured single workspace.
+    The selected contractor workspace is the AI tenant for every role, including
+    Admin/Project Viewer. Project-wide aggregation remains available only through
+    an explicit Project Control path that deliberately clears/bypasses this guard.
     """
     import qlda.runtime_core.ai_service as ai_service
     cls = ai_service.ProjectContextBuilder
