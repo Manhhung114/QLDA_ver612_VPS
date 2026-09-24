@@ -12,14 +12,48 @@ from qlda.presentation.api.schemas import (
     AIReportRequest,
     AITestRequest,
 )
+from qlda.modules.contractor_data.worker import build_db
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
 
-def _scope(principal: Principal, project_id: int) -> tuple[int, int | None]:
-    scope = get_application().access.require_project(principal.user, project_id)
-    workspace_scope = None if scope.is_master_scope else scope.workspace_project_id
-    return scope.requested_project_id, workspace_scope
+def _master_has_contractors(master_project_id: int) -> bool:
+    db = build_db()
+    try:
+        with db.connect() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM project_contractors
+                WHERE master_project_id=? AND status='Đang hoạt động' LIMIT 1""",
+                (int(master_project_id),),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _scope(principal: Principal, project_id: int) -> tuple[int, int]:
+    """Resolve exactly one AI tenant.
+
+    Contractor AI is tenant-isolated by ``workspace_project_id``. A master project
+    that owns active contractor workspaces cannot be used implicitly for normal AI
+    requests, even by Admin. Admin/BĐH must select one contractor workspace first.
+    Cross-contractor analysis belongs to a separate explicit Project Control path.
+    """
+    scope = get_application().access.require_project(principal.user, int(project_id))
+    if scope.is_master_scope and _master_has_contractors(int(scope.master_project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "contractor_ai_workspace_required",
+                "message": (
+                    "AI nhà thầu chạy độc lập. Hãy chọn một nhà thầu đang làm việc "
+                    "trước khi sử dụng Trợ lý AI."
+                ),
+                "master_project_id": int(scope.master_project_id),
+            },
+        )
+    tenant = int(scope.workspace_project_id or scope.requested_project_id)
+    return tenant, tenant
 
 
 def _ai_error(exc: AIApplicationError) -> HTTPException:
@@ -52,7 +86,12 @@ def ask_ai(
         )
     except AIApplicationError as exc:
         raise _ai_error(exc) from exc
-    return {"ok": True, "answer": answer, "provider": request.provider}
+    return {
+        "ok": True,
+        "answer": answer,
+        "provider": request.provider,
+        "workspace_project_id": workspace_scope,
+    }
 
 
 @router.post("/schedule-risk")
@@ -70,7 +109,12 @@ def schedule_risk(
         )
     except AIApplicationError as exc:
         raise _ai_error(exc) from exc
-    return {"ok": True, "answer": answer, "provider": request.provider}
+    return {
+        "ok": True,
+        "answer": answer,
+        "provider": request.provider,
+        "workspace_project_id": workspace_scope,
+    }
 
 
 @router.post("/report")
@@ -89,7 +133,12 @@ def draft_report(
         )
     except AIApplicationError as exc:
         raise _ai_error(exc) from exc
-    return {"ok": True, "answer": answer, "provider": request.provider}
+    return {
+        "ok": True,
+        "answer": answer,
+        "provider": request.provider,
+        "workspace_project_id": workspace_scope,
+    }
 
 
 @router.post("/legal")
@@ -109,7 +158,12 @@ def legal_qa(
         )
     except AIApplicationError as exc:
         raise _ai_error(exc) from exc
-    return {"ok": True, "answer": answer, "provider": request.provider}
+    return {
+        "ok": True,
+        "answer": answer,
+        "provider": request.provider,
+        "workspace_project_id": workspace_scope,
+    }
 
 
 @router.post("/test")
