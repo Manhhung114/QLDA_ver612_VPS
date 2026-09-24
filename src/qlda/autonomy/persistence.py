@@ -58,7 +58,23 @@ _SCHEMA = (
         evidence_json TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )""",
+    "CREATE INDEX IF NOT EXISTS idx_qlda_ai_snapshot_project ON qlda_ai_project_snapshots(project_id,snapshot_type,created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_qlda_ai_events_project ON qlda_ai_events(project_id,status,occurred_at)",
 )
+
+
+def _rowdict(row: Any) -> dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    try:
+        return {str(k): row[k] for k in row.keys()}
+    except Exception:
+        try:
+            return dict(row)
+        except Exception:
+            return {}
 
 
 class AutomationRepository:
@@ -111,6 +127,17 @@ class AutomationRepository:
             if callable(commit):
                 commit()
         return event.event_id
+
+    def mark_event_processed(self, event_id: str, *, status: str = "PROCESSED") -> None:
+        self.ensure_schema()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE qlda_ai_events SET status=?,processed_at=CURRENT_TIMESTAMP WHERE event_id=?",
+                (str(status), str(event_id)),
+            )
+            commit = getattr(conn, "commit", None)
+            if callable(commit):
+                commit()
 
     def audit(self, row: dict[str, Any]) -> None:
         self.ensure_schema()
@@ -170,4 +197,70 @@ class AutomationRepository:
                 "SELECT step_id FROM qlda_ai_approvals WHERE project_id=? AND plan_id=? AND status='APPROVED'",
                 (int(project_id), plan_id),
             ).fetchall()
-        return {str(row[0]) for row in rows}
+        out: set[str] = set()
+        for row in rows:
+            item = _rowdict(row)
+            value = item.get("step_id")
+            if value is None:
+                try:
+                    value = row[0]
+                except Exception:
+                    value = None
+            if value is not None:
+                out.add(str(value))
+        return out
+
+    def save_snapshot(
+        self,
+        *,
+        project_id: int,
+        snapshot_type: str,
+        payload: Any,
+        evidence: Any = None,
+    ) -> int:
+        self.ensure_schema()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO qlda_ai_project_snapshots(project_id,snapshot_type,payload_json,evidence_json)
+                VALUES(?,?,?,?)""",
+                (
+                    int(project_id),
+                    str(snapshot_type),
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                    json.dumps(evidence or [], ensure_ascii=False, default=str),
+                ),
+            )
+            commit = getattr(conn, "commit", None)
+            if callable(commit):
+                commit()
+            try:
+                return int(cur.lastrowid or 0)
+            except Exception:
+                return 0
+
+    def latest_snapshot(self, *, project_id: int, snapshot_type: str) -> dict[str, Any]:
+        self.ensure_schema()
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM qlda_ai_project_snapshots
+                WHERE project_id=? AND snapshot_type=? ORDER BY created_at DESC,id DESC LIMIT 1""",
+                (int(project_id), str(snapshot_type)),
+            ).fetchone()
+        item = _rowdict(row)
+        for key in ("payload_json", "evidence_json"):
+            if key in item:
+                try:
+                    item[key.removesuffix("_json")] = json.loads(str(item.get(key) or "{}" if key == "payload_json" else "[]"))
+                except Exception:
+                    item[key.removesuffix("_json")] = {} if key == "payload_json" else []
+        return item
+
+    def pending_approvals(self, *, project_id: int, limit: int = 100) -> list[dict[str, Any]]:
+        self.ensure_schema()
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM qlda_ai_approvals WHERE project_id=? AND status='PENDING'
+                ORDER BY created_at,id LIMIT ?""",
+                (int(project_id), max(1, min(int(limit), 500))),
+            ).fetchall()
+        return [_rowdict(row) for row in rows]
