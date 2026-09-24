@@ -158,6 +158,12 @@ def initialize_ai_runtime() -> None:
         # and after-tax Project Cost patch chain.
         install_finance_consistency_core()
         install_project_cost_ai_context()
+
+        # Contractor Data Hub no longer owns a separate AI. Its Google Sheet/Drive
+        # records are injected into the same app-wide assistant context and keep
+        # the existing contractor RBAC ContextVar boundary.
+        from qlda.runtime_core.contractor_data_shared_ai import install_contractor_data_shared_ai_context
+        install_contractor_data_shared_ai_context()
         _AI_READY = True
 
 
@@ -213,5 +219,10 @@ def initialize_runtime() -> None:
         # worksheet, even when a tab has raw rows but is not normalized yet.
         from qlda.runtime_core.production_progress_overview_patch import install_production_progress_overview_patch
         install_production_progress_overview_patch()
+
+        # Remove the Data Hub's standalone AI tab. The common app assistant is the
+        # single AI entry point and already receives this Data Hub's live context.
+        from qlda.runtime_core.contractor_data_shared_ai import install_production_progress_shared_ai_ui
+        install_production_progress_shared_ai_ui()
 
         _UI_READY = True
