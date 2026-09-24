@@ -249,8 +249,9 @@ class AutomationRepository:
         item = _rowdict(row)
         for key in ("payload_json", "evidence_json"):
             if key in item:
+                default = "{}" if key == "payload_json" else "[]"
                 try:
-                    item[key.removesuffix("_json")] = json.loads(str(item.get(key) or "{}" if key == "payload_json" else "[]"))
+                    item[key.removesuffix("_json")] = json.loads(str(item.get(key) or default))
                 except Exception:
                     item[key.removesuffix("_json")] = {} if key == "payload_json" else []
         return item
