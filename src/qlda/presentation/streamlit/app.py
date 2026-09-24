@@ -39,6 +39,7 @@ from qlda.runtime_core.work_tasks_v1 import render_work_tasks_v1
 from qlda.runtime_core.vps_status import render_vps_status_v622
 from qlda.runtime_core.system_settings import render_system_settings_admin
 from qlda.runtime_core.contract_management import can_access_contract_management, render_contract_management_v622
+from qlda.presentation.streamlit.production_progress_ui import render_production_progress
 import streamlit.components.v1 as components
 
 from qlda.runtime_core.project_store import CloudDatabase, progress_delta, planned_progress, calculate_delay_days
@@ -5769,6 +5770,7 @@ else:
     _v7_sections = {
         "🏗️ Thi công": [
             ("📅 Tiến độ", lambda: render_schedule(pid)),
+            ("📊 Sản lượng", lambda: render_production_progress(st, db, _master_pid, identity=_v7_identity)),
             ("📦 Vật tư", lambda: render_material_management(pid)),
             ("📷 Nhật ký", lambda: render_site_diary(pid)),
         ],
