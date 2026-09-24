@@ -89,26 +89,83 @@ def _is_zone_header(value: object) -> bool:
     )
 
 
-def _zone_header_row(rows: list[list[object]]) -> tuple[int, list[str]]:
-    best_index = -1
-    best_headers: list[str] = []
-    best_zone_count = 0
-    # Some contractor sheets put logos/titles/notes above the real table.
-    # Scan deeper than the old 30-row limit so upper-floor worksheets are not
-    # silently skipped when their header starts farther down.
+def _is_floor_progress_header(value: object) -> bool:
+    """Recognize floor columns used by SME tower production matrices.
+
+    Real contractor workbooks often do not have Zone columns outside the basement.
+    Their upper-tower sheets instead look like::
+
+        Công tác | T1 | TL | T2 | T3 | ... | T19A | ... | T36 | TỔNG
+
+    Those T*/TL columns are progress dimensions, not worksheet names.  We map
+    them to the existing ``zone`` field so the current normalized data model and
+    dashboard can consume them without a database migration.
+    """
+    text = _norm(value).replace(" ", "")
+    if not text:
+        return False
+    return bool(
+        re.fullmatch(r"t(?:l|\d+[a-z]?)", text)
+        or re.fullmatch(r"(?:tang|floor)(?:l|\d+[a-z]?)", text)
+    )
+
+
+def _is_work_item_header(value: object) -> bool:
+    text = _norm(value)
+    if not text:
+        return False
+    preferred = (
+        "cong tac",
+        "noi dung cong tac",
+        "noi dung",
+        "hang muc",
+        "mo ta",
+        "description",
+        "work item",
+        "workitem",
+        "task",
+    )
+    return any(text == target or text.startswith(target + " ") for target in preferred)
+
+
+def _progress_header_row(rows: list[list[object]]) -> tuple[int, list[str], list[tuple[int, str]], str]:
+    """Return header row, progress columns and detected layout.
+
+    Priority is the traditional Zone/Khu-vực layout. If it is absent, fall back
+    to a floor-matrix layout only when the same row also contains an explicit
+    work-item header. This keeps the fallback conservative and prevents random
+    T1/T2 labels in notes from being treated as production data.
+    """
+    best_zone: tuple[int, list[str], list[tuple[int, str]], str] | None = None
+    best_floor: tuple[int, list[str], list[tuple[int, str]], str] | None = None
+
     for idx, row in enumerate(rows[:200]):
         headers = [str(cell or "").strip() for cell in row]
-        zone_count = sum(1 for h in headers if _is_zone_header(h))
-        if zone_count > best_zone_count:
-            best_index = idx
-            best_headers = headers
-            best_zone_count = zone_count
-    if best_index < 0 or best_zone_count <= 0:
-        raise ValueError("Không nhận diện được dòng tiêu đề Zone/Khu vực trong worksheet.")
-    return best_index, best_headers
+        zone_columns = [(i, h) for i, h in enumerate(headers) if _is_zone_header(h)]
+        if zone_columns and (best_zone is None or len(zone_columns) > len(best_zone[2])):
+            best_zone = (idx, headers, zone_columns, "ZONE")
+
+        floor_columns = [
+            (i, h) for i, h in enumerate(headers) if _is_floor_progress_header(h)
+        ]
+        if (
+            len(floor_columns) >= 2
+            and any(_is_work_item_header(h) for h in headers)
+            and (best_floor is None or len(floor_columns) > len(best_floor[2]))
+        ):
+            best_floor = (idx, headers, floor_columns, "FLOOR_MATRIX")
+
+    if best_zone is not None:
+        return best_zone
+    if best_floor is not None:
+        return best_floor
+    raise ValueError(
+        "Không nhận diện được ma trận sản lượng. Cần dòng tiêu đề có Zone/Khu vực "
+        "hoặc dạng Công tác + các cột tầng T1/TL/T2/..."
+    )
 
 
-def _work_item_column(headers: list[str], zone_indexes: set[int]) -> int:
+def _work_item_column(headers: list[str], progress_indexes: set[int]) -> int:
     preferred = (
         "cong tac",
         "noi dung cong tac",
@@ -123,7 +180,7 @@ def _work_item_column(headers: list[str], zone_indexes: set[int]) -> int:
     normalized = [_norm(x) for x in headers]
     for target in preferred:
         for idx, value in enumerate(normalized):
-            if idx in zone_indexes:
+            if idx in progress_indexes:
                 continue
             if value == target or value.startswith(target + " "):
                 return idx
@@ -131,7 +188,7 @@ def _work_item_column(headers: list[str], zone_indexes: set[int]) -> int:
     # Ignore common numbering/code columns when no explicit work-item header is found.
     ignored = {"stt", "tt", "no", "number", "ma", "ma cong tac", "code"}
     for idx, value in enumerate(normalized):
-        if idx in zone_indexes or not value or value in ignored:
+        if idx in progress_indexes or not value or value in ignored:
             continue
         return idx
     return 0
@@ -142,12 +199,8 @@ def normalize_production_sheet(worksheet: str, values: Iterable[Iterable[object]
     if not rows:
         return []
 
-    header_idx, headers = _zone_header_row(rows)
-    zone_columns = [(i, h) for i, h in enumerate(headers) if _is_zone_header(h)]
-    if not zone_columns:
-        raise ValueError("Worksheet không có cột Zone/Khu vực.")
-
-    work_col = _work_item_column(headers, {idx for idx, _ in zone_columns})
+    header_idx, headers, progress_columns, _layout = _progress_header_row(rows)
+    work_col = _work_item_column(headers, {idx for idx, _ in progress_columns})
     result: list[ProductionRow] = []
     last_work_item = ""
 
@@ -155,17 +208,22 @@ def normalize_production_sheet(worksheet: str, values: Iterable[Iterable[object]
         raw_work = row[work_col] if work_col < len(row) else None
         work_item = str(raw_work or "").strip()
 
-        # Merged cells are common in Google/Excel contractor templates.  When a
+        # Merged cells are common in Google/Excel contractor templates. When a
         # work-item cell is merged vertically Google may return blanks on the
         # following rows, so carry the previous label only if this row actually
-        # contains a numeric progress value.
+        # contains numeric progress values.
         parsed: list[tuple[str, float]] = []
-        for col_idx, zone in zone_columns:
+        for col_idx, progress_dimension in progress_columns:
             raw = row[col_idx] if col_idx < len(row) else None
             pct = _percent(raw)
             if pct is None:
                 continue
-            parsed.append((zone, max(0.0, min(100.0, pct))))
+            # Reject quantities or other accidental numeric values outside the
+            # physically meaningful progress range. 0..1 ratios and 0..100
+            # percentage values are both accepted by _percent().
+            if pct < 0.0 or pct > 100.0:
+                continue
+            parsed.append((progress_dimension, pct))
 
         if not parsed:
             if work_item:
@@ -174,15 +232,18 @@ def normalize_production_sheet(worksheet: str, values: Iterable[Iterable[object]
         if not work_item:
             work_item = last_work_item
         if not work_item:
+            # Example: SME row 3 contains apartment counts (1, 12, 12, ...)
+            # under T1/TL/T2/... but no work-item text. It is metadata, not
+            # production progress, and must not enter the normalized table.
             continue
         last_work_item = work_item
 
-        for zone, pct in parsed:
+        for progress_dimension, pct in parsed:
             result.append(
                 ProductionRow(
                     worksheet=str(worksheet or ""),
                     work_item=work_item,
-                    zone=zone,
+                    zone=progress_dimension,
                     progress_percent=pct,
                     source_row=row_idx,
                 )
