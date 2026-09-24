@@ -54,6 +54,8 @@ Canonical events:
 - `DATA_INTEGRITY_FAILED`
 - `APPROVAL_GRANTED`
 
+`PAYMENT_OVERDUE` is generated only from an existing unpaid IPC that has a real payment due date earlier than today. An unpaid balance without a due date is not treated as overdue. Cumulative certification fields must never be summed across periods.
+
 Events are replay-safe through deterministic IDs. Durable storage uses `qlda_ai_events`.
 
 ## V8.0 — AI Orchestrator
@@ -73,7 +75,7 @@ The supervisor calculates transparent, testable findings before AI explains them
 - overdue NCR/RFI;
 - rejected inspections;
 - expiring contracts;
-- overdue payments.
+- verified overdue payments.
 
 Output: `ProjectHealthReport` + proposed actions.
 
@@ -102,24 +104,25 @@ Always protected:
 
 Human approval is a feature, not a limitation: the system may prepare and validate everything before presenting the final decision.
 
-## V9.0 — Autonomous Construction Management + Digital Twin
+## V9.0 — Contractor-Isolated Autonomous Project Operations
 
-`ProjectDigitalTwin` represents current schedule, production, cost, quality, safety, cash exposure and data integrity. The scenario engine can evaluate what-if assumptions such as productivity, time horizon and added risk.
+V9.0 runs each contractor as a separate AI tenant keyed by `workspace_project_id`. Chat context, supervisor snapshots, events, approvals and tool execution must never mix contractor workspaces implicitly.
 
-The default engine is deterministic and explainable. ML/PINN/optimization models can be injected through the predictor interface without changing business controls.
+The V9 control loop is deterministic around business state and may use model-backed reasoning only through the existing planner/tool boundary.
 
 ### Target V9 loop
 
-1. ingest project data;
+1. ingest contractor/project data;
 2. reconcile and issue evidence IDs;
-3. update digital-twin state;
-4. detect changes/events;
-5. supervisor finds anomalies;
-6. orchestrator creates a multi-step plan;
-7. low-risk steps execute automatically;
-8. protected steps wait for approval;
-9. results are audited;
-10. twin is updated and the loop repeats.
+3. detect changes/events;
+4. supervisor finds anomalies;
+5. orchestrator creates a multi-step plan;
+6. low-risk steps execute automatically;
+7. protected steps wait for approval;
+8. results are audited;
+9. the verified supervisor snapshot is stored and the loop repeats.
+
+Digital Twin / What-if simulation is intentionally not part of the active QLDA autonomy platform.
 
 ## Persistence
 
