@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from threading import RLock
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from qlda.autonomy.ai_planner import StructuredAIPlanner
 from qlda.autonomy.digital_twin import TwinState
 from qlda.autonomy.events import DomainEvent
 from qlda.autonomy.persistence import AutomationRepository
@@ -15,6 +17,37 @@ _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _install_common_ai_planner(platform: AutomationPlatform) -> None:
+    """Use the app-wide assistant provider for planning; fall back safely on error."""
+    if not _env_bool("QLDA_AUTONOMY_AI_PLANNER_ENABLED", True):
+        return
+    provider = str(os.environ.get("QLDA_AUTONOMY_AI_PROVIDER", "openai") or "openai").strip().lower()
+
+    def complete(project_id: int, prompt: str) -> str:
+        from qlda.bootstrap import get_application
+
+        return get_application().ai.ask(
+            int(project_id),
+            prompt,
+            provider=provider,
+            history=[],
+            use_web=False,
+        )
+
+    platform.orchestrator.planner = StructuredAIPlanner(
+        complete,
+        platform.tools.list_specs(),
+        fallback=platform.orchestrator.planner,
+    )
 
 
 def get_autonomy_platform(
@@ -42,6 +75,7 @@ def get_autonomy_platform(
             approve_vo=approve_vo,
         )
         platform = build_platform(handlers=adapters.handlers(), audit_sink=repository.audit)
+        _install_common_ai_planner(platform)
 
         # Every drained event is durably recorded. EventBus itself remains small
         # and deterministic while PostgreSQL/SQLite retains the audit history.
