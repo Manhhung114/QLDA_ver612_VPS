@@ -39,6 +39,19 @@ class GoogleSheetsAccessTests(unittest.TestCase):
         self.assertNotIn("Authorization", kwargs["headers"])
 
     @patch("qlda.infrastructure.google_sheets.client.requests.get")
+    def test_public_values_falls_back_from_gviz_401_to_export(self, mocked_get):
+        mocked_get.side_effect = [
+            _Response("Unauthorized", status_code=401),
+            _Response("Cong tac,Zone 1\nOng gio,75%\n"),
+        ]
+        rows = GoogleSheetsClient.public_values("1AbCdEfGhIjKlMnOpQrStUvWxYz123456789", 44)
+        self.assertEqual(rows[1], ["Ong gio", "75%"])
+        self.assertEqual(mocked_get.call_count, 2)
+        second_url = mocked_get.call_args_list[1].args[0]
+        self.assertTrue(second_url.endswith("/export"))
+        self.assertEqual(mocked_get.call_args_list[1].kwargs["params"]["gid"], 44)
+
+    @patch("qlda.infrastructure.google_sheets.client.requests.get")
     def test_public_values_explains_private_sheet(self, mocked_get):
         mocked_get.return_value = _Response(
             "<html>Sign in</html>",
@@ -47,6 +60,7 @@ class GoogleSheetsAccessTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(GoogleSheetsConfigError, "Anyone with the link"):
             GoogleSheetsClient.public_values("1AbCdEfGhIjKlMnOpQrStUvWxYz123456789", 0)
+        self.assertEqual(mocked_get.call_count, 2)
 
     def test_oauth_state_is_signed_and_actor_bound(self):
         env = {
