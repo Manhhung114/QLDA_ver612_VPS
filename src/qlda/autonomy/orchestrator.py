@@ -35,7 +35,15 @@ class HeuristicPlanner:
         if any(key in text for key in ("báo cáo", "report", "đánh giá", "tình hình", "rủi ro")):
             add("generate_report", "Tổng hợp kết quả thành báo cáo có kiểm chứng.")
         if any(key in text for key in ("nhắc", "giao việc", "task", "xử lý")):
-            add("create_work_task", "Tạo công việc xử lý cho vấn đề đã xác minh.")
+            add(
+                "create_work_task",
+                "Tạo công việc xử lý cho vấn đề đã xác minh.",
+                {
+                    "title": f"AI: {str(objective or '').strip()[:160]}",
+                    "description": "Công việc do AI Orchestrator đề xuất từ mục tiêu đã xác minh. Người phụ trách cần kiểm tra nội dung trước khi hoàn tất.",
+                    "priority": "Bình thường",
+                },
+            )
 
         raw = f"{project_id}|{objective}|{'|'.join(x.tool_name for x in steps)}"
         plan_id = "PLAN-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
@@ -73,7 +81,13 @@ class AIOrchestrator:
         role: str,
         approvals: set[str] | None = None,
         dry_run: bool = False,
+        data_valid: bool = True,
     ) -> list[ExecutionResult]:
+        """Execute a validated plan through the service boundary.
+
+        `data_valid=False` is a hard V7.7 safety boundary: only read-only tools may
+        run. Drafts and writes are blocked until the source reconciliation passes.
+        """
         approvals = set(approvals or set())
         results: list[ExecutionResult] = []
         completed: set[str] = set()
@@ -83,6 +97,16 @@ class AIOrchestrator:
                 results.append(ExecutionResult(step.step_id, step.tool_name, "BLOCKED", error="Dependency chưa hoàn tất."))
                 continue
             tool = self.tools.get(step.tool_name)
+            if not data_valid and tool.spec.mode != ActionMode.READ_ONLY:
+                results.append(
+                    ExecutionResult(
+                        step.step_id,
+                        step.tool_name,
+                        "BLOCKED_DATA_INTEGRITY",
+                        error="AI_DATA_VALID=False: tác vụ có thể thay đổi trạng thái bị khóa cho đến khi dữ liệu được đối soát.",
+                    )
+                )
+                continue
             needs_approval = self.approval_policy.requires_approval(
                 risk=tool.spec.risk,
                 mode=tool.spec.mode,
