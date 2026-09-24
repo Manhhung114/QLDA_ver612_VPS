@@ -17,7 +17,7 @@ otherwise be mislabeled as T29/T32/... by the first header row.
 import os
 from typing import Any, Iterable
 
-PATCH_MARKER = "V7 CONTRACTOR DATA COMPLETE ROWS V2"
+PATCH_MARKER = "V7 CONTRACTOR DATA COMPLETE ROWS V3"
 
 
 def _column_label(index: int) -> str:
@@ -50,7 +50,7 @@ def _raw_row_content(row: Iterable[Any]) -> str:
 
 
 def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove duplicate raw rows from the legacy public-sheet AUTO path."""
+    """Remove duplicate raw rows from legacy AUTO/public paths."""
     seen: set[tuple[Any, ...]] = set()
     out: list[dict[str, Any]] = []
     for raw in records:
@@ -71,23 +71,36 @@ def _dedupe(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _include_raw_source(source: dict[str, Any]) -> dict[str, Any]:
-    """Make legacy PRODUCTION branch retain raw rows and structured rows."""
+    """Make legacy PRODUCTION branches retain raw rows and structured rows."""
     item = dict(source or {})
     category = str(item.get("category") or "AUTO").upper()
     if category == "PRODUCTION":
         item["_qlda_original_category"] = category
-        # Existing AUTO branch already stores both generic + normalized rows.
+        # Existing AUTO branches store both generic + normalized rows.
         item["category"] = "AUTO"
     return item
 
 
+def _snapshot_with_raw_count(
+    records: list[dict[str, Any]], snapshot: dict[str, Any] | None
+) -> dict[str, Any]:
+    out = dict(snapshot or {})
+    out["record_count"] = len(records)
+    out["raw_row_count"] = sum(
+        1 for row in records if str(row.get("record_type") or "") == "SHEET_ROW"
+    )
+    return out
+
+
 def install_contractor_data_complete_rows() -> None:
+    import qlda.application.contractor_data_hub as public_hub
     import qlda.application.contractor_data_hub.service as service_mod
     import qlda.application.google_sheets.service as google_sheet_service
     from qlda.infrastructure.contractor_data_hub import ContractorDataHubRepository
 
     service_cls = service_mod.ContractorDataHubService
-    if getattr(service_cls, "_qlda_complete_rows_v2", False):
+    public_service_cls = public_hub.ContractorDataHubService
+    if getattr(service_cls, "_qlda_complete_rows_v3", False):
         return
 
     original_normalize = service_mod.normalize_production_sheet
@@ -162,24 +175,14 @@ def install_contractor_data_complete_rows() -> None:
             self, _include_raw_source(source), spreadsheet_id, **kwargs
         )
         records = _dedupe(records)
-        snapshot = dict(snapshot or {})
-        snapshot["record_count"] = len(records)
-        snapshot["raw_row_count"] = sum(
-            1 for row in records if str(row.get("record_type") or "") == "SHEET_ROW"
-        )
-        return records, production_points, snapshot
+        return records, production_points, _snapshot_with_raw_count(records, snapshot)
 
     def public_sheet_records_complete(self, source: dict[str, Any]):
         records, production_points, snapshot = original_public_sheet_records(
             self, _include_raw_source(source)
         )
         records = _dedupe(records)
-        snapshot = dict(snapshot or {})
-        snapshot["record_count"] = len(records)
-        snapshot["raw_row_count"] = sum(
-            1 for row in records if str(row.get("record_type") or "") == "SHEET_ROW"
-        )
-        return records, production_points, snapshot
+        return records, production_points, _snapshot_with_raw_count(records, snapshot)
 
     @staticmethod
     def xlsx_records_complete(source: dict[str, Any], data: bytes, *, file_meta: dict[str, Any]):
@@ -199,7 +202,29 @@ def install_contractor_data_complete_rows() -> None:
     service_cls._xlsx_records = xlsx_records_complete
     service_cls._qlda_complete_rows_v1 = True
     service_cls._qlda_complete_rows_v2 = True
+    service_cls._qlda_complete_rows_v3 = True
     service_cls._qlda_complete_rows_marker = PATCH_MARKER
+
+    # The exported public application class has its own _public_sheet_records
+    # implementation for OAuth/XLSX/GID discovery. Wrap that entrypoint too so a
+    # final direct-GID fallback cannot revert PRODUCTION sources to
+    # `production or generic` and silently discard raw source rows.
+    if (
+        public_service_cls is not service_cls
+        and not getattr(public_service_cls, "_qlda_complete_rows_public_v1", False)
+    ):
+        original_public_entry = public_service_cls._public_sheet_records
+
+        def public_entry_complete(self, source: dict[str, Any]):
+            records, production_points, snapshot = original_public_entry(
+                self, _include_raw_source(source)
+            )
+            records = _dedupe(records)
+            return records, production_points, _snapshot_with_raw_count(records, snapshot)
+
+        public_service_cls._public_sheet_records = public_entry_complete
+        public_service_cls._qlda_complete_rows_public_v1 = True
+        public_service_cls._qlda_complete_rows_public_marker = PATCH_MARKER
 
     # Current overview asks for 20k records. That ceiling can truncate a project
     # as soon as several worksheets/contractors are synchronized. Preserve small
