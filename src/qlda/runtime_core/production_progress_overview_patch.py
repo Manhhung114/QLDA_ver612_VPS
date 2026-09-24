@@ -55,6 +55,36 @@ def _sanitize_multiselect_state(st, key: str, options: list[str]) -> None:
         pass
 
 
+def _sync_dependent_multiselect_state(
+    st,
+    *,
+    key: str,
+    options: list[str],
+    signature_key: str,
+    signature: str,
+) -> None:
+    """Keep a dependent multiselect aligned with its parent worksheet filter.
+
+    When the selected contractor/worksheet set changes, previously selected
+    dimensions may belong to a different worksheet (for example Zone 1/2/3 from
+    Hầm while S2/S3/S4 use T1/TL/T2/...). Reset the dependent selection to the
+    dimensions available for the new worksheet scope. On later reruns with the
+    same worksheet scope, preserve the user's manual subset selection.
+    """
+    try:
+        previous_signature = str(st.session_state.get(signature_key) or "")
+        if previous_signature != signature:
+            st.session_state[signature_key] = signature
+            st.session_state[key] = list(options)
+            return
+        if key not in st.session_state:
+            st.session_state[key] = list(options)
+            return
+        _sanitize_multiselect_state(st, key, options)
+    except Exception:
+        pass
+
+
 def worksheet_catalog(
     records: Iterable[dict[str, Any]],
     contractors: Iterable[dict[str, Any]],
@@ -199,10 +229,11 @@ def _render_overview_all_worksheets(
     worksheet_key = f"cdh_overview_worksheets_{int(project_id)}"
     _sanitize_multiselect_state(st, worksheet_key, worksheet_options)
     selected_ws = f2.multiselect(
-        "Tầng / worksheet",
+        "Worksheet",
         worksheet_options,
         default=worksheet_options,
         key=worksheet_key,
+        help="Chọn một hoặc nhiều worksheet cần sử dụng. Dữ liệu tiến độ bên phải sẽ tự thay đổi theo lựa chọn này.",
     )
 
     production_rows: list[dict[str, Any]] = []
@@ -236,16 +267,28 @@ def _render_overview_all_worksheets(
             ),
             key=_progress_dimension_sort_key,
         )
+
     zone_key = f"cdh_overview_zones_{int(project_id)}"
-    _sanitize_multiselect_state(st, zone_key, zone_options)
+    zone_signature_key = f"cdh_overview_zone_scope_{int(project_id)}"
+    zone_signature = repr((
+        tuple(sorted(selected_contractors)),
+        tuple(sorted(selected_ws)),
+    ))
+    _sync_dependent_multiselect_state(
+        st,
+        key=zone_key,
+        options=zone_options,
+        signature_key=zone_signature_key,
+        signature=zone_signature,
+    )
     selected_zones = f3.multiselect(
         "Zone / tầng dữ liệu",
         zone_options,
-        default=zone_options,
         key=zone_key,
         help=(
-            "Sheet Hầm dùng Zone 1/2/3. Các sheet S2/S3/S4 dạng ma trận dùng T1, TL, T2, ... "
-            "làm chiều tiến độ."
+            "Tự động lấy đúng chiều dữ liệu của worksheet đã chọn: Hầm dùng Zone 1/2/3; "
+            "các sheet dạng ma trận dùng T1, TL, T2, ... Nếu chọn nhiều worksheet, app hiển thị hợp nhất "
+            "các chiều dữ liệu của các worksheet đang chọn."
         ),
     )
 
