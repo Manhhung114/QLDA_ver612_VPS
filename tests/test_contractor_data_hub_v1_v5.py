@@ -123,7 +123,7 @@ class ContractorDataHubV1V5Tests(unittest.TestCase):
         }]
         first = self.repo.replace_records(source, record)
         second = self.repo.replace_records(source, record)
-        changed = [dict(record[0]), progress_percent=75.0, content="Tiến độ 75%"]
+        changed = dict(record[0], progress_percent=75.0, content="Tiến độ 75%")
         third = self.repo.replace_records(source, [changed])
         self.assertTrue(first["snapshot_created"])
         self.assertFalse(second["snapshot_created"])
