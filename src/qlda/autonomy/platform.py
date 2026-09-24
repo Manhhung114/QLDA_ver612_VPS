@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .digital_twin import ProjectDigitalTwin
 from .events import EventBus
 from .integrity import DataIntegrityGate
 from .models import ReleaseStage
@@ -21,7 +20,6 @@ class AutomationPlatform:
     orchestrator: AIOrchestrator
     supervisor: ProjectSupervisor
     autonomy_policy: AutonomyPolicy
-    digital_twin: ProjectDigitalTwin
     target_stage: ReleaseStage = ReleaseStage.V9_0
 
     @property
@@ -33,7 +31,7 @@ class AutomationPlatform:
             "V8.0": "AI Router/Planner/Executor + Approval Gate",
             "V8.1": "AI Project Supervisor",
             "V8.2": "Semi-Autonomous Policy",
-            "V9.0": "Project Digital Twin + What-if Engine",
+            "V9.0": "Contractor-isolated Autonomous Project Operations",
         }
 
 
@@ -63,5 +61,4 @@ def build_platform(
         orchestrator=AIOrchestrator(registry),
         supervisor=ProjectSupervisor(),
         autonomy_policy=AutonomyPolicy(),
-        digital_twin=ProjectDigitalTwin(),
     )
