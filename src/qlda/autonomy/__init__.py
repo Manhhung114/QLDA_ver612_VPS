@@ -24,8 +24,11 @@ from .models import (
     ToolSpec,
 )
 from .orchestrator import AIOrchestrator, ApprovalPolicy, HeuristicPlanner
+from .persistence import AutomationRepository
 from .platform import AutomationPlatform, build_platform
 from .policy import AutonomyDecision, AutonomyPolicy
+from .qlda_adapters import QLDAAutomationAdapters
+from .scheduler import DailyAutomationScheduler, ScheduledJob, recommended_daily_schedule
 from .services import ToolRegistry, default_tool_specs
 from .supervisor import ProjectSupervisor
 
@@ -36,7 +39,9 @@ __all__ = [
     "AutonomyDecision",
     "AutonomyPolicy",
     "AutomationPlatform",
+    "AutomationRepository",
     "DEFAULT_EVENT_TYPES",
+    "DailyAutomationScheduler",
     "DataIntegrityGate",
     "DomainEvent",
     "EventBus",
@@ -49,9 +54,11 @@ __all__ = [
     "ProjectDigitalTwin",
     "ProjectHealthReport",
     "ProjectSupervisor",
+    "QLDAAutomationAdapters",
     "ReleaseStage",
     "RiskLevel",
     "ScenarioResult",
+    "ScheduledJob",
     "ToolRegistry",
     "ToolSpec",
     "TwinState",
@@ -59,4 +66,5 @@ __all__ = [
     "default_tool_specs",
     "evidence_id",
     "make_evidence",
+    "recommended_daily_schedule",
 ]
