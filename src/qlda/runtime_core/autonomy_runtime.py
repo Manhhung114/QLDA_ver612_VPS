@@ -11,12 +11,13 @@ from qlda.autonomy.events import DomainEvent
 from qlda.autonomy.persistence import AutomationRepository
 from qlda.autonomy.platform import AutomationPlatform, build_platform
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
+from qlda.autonomy.supervisor_data_collector import collect_supervisor_data
 
 _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-SUPERVISOR_SCHEMA_VERSION = "V4_NO_PAYMENT_HEALTH_NO_TWIN"
+SUPERVISOR_SCHEMA_VERSION = "V5_AUTO_DATA_NO_PAYMENT_NO_TWIN"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -135,56 +136,78 @@ def run_project_supervisor(
     actor: str = "AI Supervisor",
     extra_indicators: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run the contractor-isolated supervisor and persist a verified snapshot.
+    """Run the contractor-isolated supervisor using live data collected by itself.
 
-    Finance/payment amounts are intentionally not used to calculate Project Health.
-    The legacy payment data may contain cumulative/requested IPC values and is not
-    safe as a project-health alarm until a verified payment ledger is available.
+    The Supervisor reads schedule, contract, Data Integrity, NCR/RFI/inspection and
+    production-source freshness directly from the selected contractor workspace.
+    Finance/payment amounts are intentionally excluded from Project Health.
     """
+    tenant_id = int(project_id)
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
     status = platform.tools.execute(
         "get_project_status",
-        project_id=int(project_id),
+        project_id=tenant_id,
         actor=actor,
         role="admin",
     )
     integrity = platform.tools.execute(
         "check_data_integrity",
-        project_id=int(project_id),
+        project_id=tenant_id,
         actor=actor,
         role="admin",
     )
-    indicators = {
+
+    try:
+        auto_data = collect_supervisor_data(
+            db,
+            tenant_id,
+            status=status,
+            now=datetime.now(_VN_TZ).replace(tzinfo=None),
+        )
+    except Exception as exc:
+        # Optional source collection must not make the whole project dashboard fail.
+        # The error is persisted in the snapshot so Admin can inspect it.
+        auto_data = {
+            "workspace_project_id": tenant_id,
+            "collected_at": datetime.now(_VN_TZ).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds"),
+            "indicators": {},
+            "evidence": {"collector_error": str(exc)},
+        }
+
+    # Explicit indicators remain useful for future plugins, but verified live
+    # workspace facts always win for the built-in Supervisor fields.
+    indicators = dict(extra_indicators or {})
+    indicators.pop("payment_overdue_value", None)
+    indicators.update({
         "data_integrity_score": float(integrity.get("score") or 0),
         "schedule_delay_percent": float((status.get("schedule") or {}).get("delay_percent") or 0),
         "contract_days_remaining": status.get("contract_days_remaining"),
-    }
-    # Do not accept payment_overdue_value from caller overrides either. This keeps
-    # stale/external values from re-introducing the false health warning.
-    extra = dict(extra_indicators or {})
-    extra.pop("payment_overdue_value", None)
-    indicators.update(extra)
-    health = platform.supervisor.evaluate(int(project_id), indicators)
+    })
+    indicators.update(dict(auto_data.get("indicators") or {}))
+    health = platform.supervisor.evaluate(tenant_id, indicators)
 
     for finding in health.findings:
         platform.events.publish(
             DomainEvent(
                 event_type=finding.code,
-                project_id=int(project_id),
+                project_id=tenant_id,
+                workspace_project_id=tenant_id,
                 actor=actor,
                 payload={
                     "title": finding.title,
                     "detail": finding.detail,
                     "severity": finding.severity.value,
                     "recommended_action": finding.recommended_action,
+                    "supervisor_schema": SUPERVISOR_SCHEMA_VERSION,
                 },
             )
         )
     platform.events.drain()
 
     result = {
-        "project_id": int(project_id),
+        "project_id": tenant_id,
+        "workspace_project_id": tenant_id,
         "supervisor_schema": SUPERVISOR_SCHEMA_VERSION,
         "health_score": health.score,
         "findings": [
@@ -200,10 +223,12 @@ def run_project_supervisor(
         "proposed_actions": platform.supervisor.proposed_actions(health),
         "integrity": integrity,
         "status": status,
+        "indicators": indicators,
+        "auto_data": auto_data,
         "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
     repository.save_snapshot(
-        project_id=int(project_id),
+        project_id=tenant_id,
         snapshot_type="DAILY_SUPERVISOR",
         payload=result,
     )
