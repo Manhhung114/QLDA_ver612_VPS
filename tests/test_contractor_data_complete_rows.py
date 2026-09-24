@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-# Importing runtime_core installs the production completeness guard used by both
-# Streamlit and sync workers.
+# Importing runtime_core installs the production completeness/source-semantics
+# guards used by both Streamlit and sync workers.
 import qlda.runtime_core  # noqa: F401
 import qlda.application.contractor_data_hub.service as hub_service
 from qlda.application.contractor_data_hub.service import ContractorDataHubService
@@ -50,10 +50,14 @@ class ContractorDataCompleteRowsTests(unittest.TestCase):
             ["A1", "Phần trục kín", 0.8, None, 0.9],
         ]
         normalized = hub_service.normalize_production_sheet("S2 (update)", values)
-        self.assertEqual(len(normalized), 2)
+        # Keep the workbook-authored row total as a structured dimension, but do
+        # not leak the later summary block back into the primary floor matrix.
+        self.assertEqual(len(normalized), 3)
         self.assertEqual({row.source_row for row in normalized}, {4})
-        self.assertEqual({row.zone for row in normalized}, {"T1", "T2"})
+        self.assertEqual({row.zone for row in normalized}, {"T1", "T2", "TỔNG"})
         self.assertEqual({row.work_item for row in normalized}, {"Lắp đặt ống"})
+        total = next(row for row in normalized if row.zone == "TỔNG")
+        self.assertEqual(total.progress_percent, 75.0)
 
 
 if __name__ == "__main__":
