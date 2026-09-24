@@ -5,14 +5,17 @@ import logging
 import os
 import signal
 import time
+from datetime import datetime, time as dt_time
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from qlda.runtime_core.bootstrap import initialize_database_runtime
 
 
 LOG = logging.getLogger("qlda.contractor_data.worker")
 _STOP = False
+_VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def _signal_handler(signum, frame) -> None:  # pragma: no cover - OS integration
@@ -24,6 +27,13 @@ def _signal_handler(signum, frame) -> None:  # pragma: no cover - OS integration
 def _db_path() -> Path:
     root = Path(os.environ.get("QLDA_RUNTIME_DATA_ROOT", "/opt/qlda/data/runtime"))
     return Path(os.environ.get("QLDA_DB_PATH", str(root / "qlda_cloud.db")))
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _row_value(row: Any, key: str, index: int = 0):
@@ -61,6 +71,30 @@ def project_ids_with_data_spaces(db) -> list[int]:
         except Exception:
             pid = 0
         if pid > 0:
+            out.append(pid)
+    return out
+
+
+def project_ids_for_supervisor(db) -> list[int]:
+    """Return master/standalone projects, excluding contractor child workspaces."""
+    with db.connect() as connection:
+        try:
+            rows = connection.execute(
+                """SELECT p.id FROM projects p
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM project_contractors pc
+                    WHERE pc.workspace_project_id=p.id AND pc.master_project_id<>p.id
+                ) ORDER BY p.id"""
+            ).fetchall()
+        except Exception:
+            rows = connection.execute("SELECT id FROM projects ORDER BY id").fetchall()
+    out: list[int] = []
+    for row in rows:
+        try:
+            pid = int(_row_value(row, "id", 0) or 0)
+        except Exception:
+            pid = 0
+        if pid > 0 and pid not in out:
             out.append(pid)
     return out
 
@@ -105,6 +139,37 @@ def run_project(db, master_project_id: int) -> dict[str, Any]:
     }
 
 
+def run_daily_supervisor_pass(db) -> list[dict[str, Any]]:
+    """Run V8.1 supervisor once/day after 06:20 Vietnam time."""
+    if not _env_bool("QLDA_AUTONOMY_SUPERVISOR_ENABLED", True):
+        return []
+    now = datetime.now(_VN_TZ)
+    if (now.hour, now.minute) < (6, 20):
+        return []
+
+    from qlda.runtime_core.autonomy_runtime import run_daily_supervisor_if_due
+
+    results: list[dict[str, Any]] = []
+    for project_id in project_ids_for_supervisor(db):
+        try:
+            result = run_daily_supervisor_if_due(db, project_id, actor="AI Supervisor")
+            results.append(result)
+            if result.get("skipped"):
+                LOG.debug("AI supervisor project=%s already ran today", project_id)
+            else:
+                LOG.info(
+                    "AI supervisor project=%s health=%s findings=%s integrity=%s",
+                    project_id,
+                    result.get("health_score"),
+                    len(result.get("findings") or []),
+                    (result.get("integrity") or {}).get("score"),
+                )
+        except Exception as exc:
+            LOG.exception("AI supervisor failed for project=%s: %s", project_id, exc)
+            results.append({"project_id": project_id, "error": str(exc)})
+    return results
+
+
 def run_once(db=None) -> list[dict[str, Any]]:
     db = db or build_db()
     results: list[dict[str, Any]] = []
@@ -127,18 +192,22 @@ def run_once(db=None) -> list[dict[str, Any]]:
         except Exception as exc:
             LOG.exception("Contractor data sync failed for project=%s: %s", project_id, exc)
             results.append({"project_id": project_id, "error": str(exc)})
+
+    # The existing worker becomes the V7.9 automation heartbeat. Data sources are
+    # synchronized first; then V8.1 evaluates the project against the latest data.
+    run_daily_supervisor_pass(db)
     return results
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="QLDA contractor data hub background sync worker")
+    parser = argparse.ArgumentParser(description="QLDA contractor data + AI automation background worker")
     parser.add_argument(
         "--poll-seconds",
         type=int,
         default=int(os.environ.get("QLDA_CONTRACTOR_DATA_SYNC_POLL_SECONDS", "300") or 300),
-        help="How often to check due contractor data spaces (minimum 60 seconds).",
+        help="How often to check due contractor data spaces and automation jobs (minimum 60 seconds).",
     )
-    parser.add_argument("--once", action="store_true", help="Run one due-sync pass then exit.")
+    parser.add_argument("--once", action="store_true", help="Run one due-sync/automation pass then exit.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -154,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         run_once(db)
         return 0
 
-    LOG.info("Contractor data worker started, poll=%ss", poll_seconds)
+    LOG.info("Contractor data + AI automation worker started, poll=%ss", poll_seconds)
     while not _STOP:
         started = time.monotonic()
         run_once(db)
@@ -163,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         deadline = time.monotonic() + remaining
         while not _STOP and time.monotonic() < deadline:
             time.sleep(min(1.0, deadline - time.monotonic()))
-    LOG.info("Contractor data worker stopped")
+    LOG.info("Contractor data + AI automation worker stopped")
     return 0
 
 
