@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+# Runtime installs the source-faithful Data Hub parser used in production.
+import qlda.runtime_core  # noqa: F401
 from qlda.application.google_sheets.service import normalize_production_sheet
 
 
@@ -56,19 +58,19 @@ class GoogleSheetsProductionMultiLayoutTests(unittest.TestCase):
         ]
         result = normalize_production_sheet("S2 (update)", rows)
 
-        self.assertEqual(len(result), 6)
+        self.assertEqual(len(result), 7)
         self.assertEqual(
             [x.zone for x in result],
-            ["T1", "TL", "T2", "T3", "T19A", "T36"],
+            ["T1", "TL", "T2", "T3", "T19A", "T36", "TỔNG"],
         )
         self.assertTrue(all(x.work_item == "Lắp đặt ống điện" for x in result))
         self.assertEqual(
             [round(x.progress_percent, 1) for x in result],
-            [50.0, 72.5, 82.5, 100.0, 80.0, 60.0],
+            [50.0, 72.5, 82.5, 100.0, 80.0, 60.0, 82.0],
         )
-        # TỔNG is deliberately excluded; it is a calculated summary, not a
-        # progress dimension shown in the filter/pivot.
-        self.assertNotIn("TỔNG", {x.zone for x in result})
+        # TỔNG is a workbook-authored value. Preserve it instead of replacing it
+        # later with an arithmetic mean of floors or duplicate hierarchy rows.
+        self.assertIn("TỔNG", {x.zone for x in result})
 
     def test_floor_count_metadata_row_is_not_imported_as_progress(self):
         rows = [
@@ -77,9 +79,13 @@ class GoogleSheetsProductionMultiLayoutTests(unittest.TestCase):
             ["THÔ", "A5", "Kéo cáp", 0, 0.6, 0.9, 1, 0.7],
         ]
         result = normalize_production_sheet("S3 (update)", rows)
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 5)
         self.assertTrue(all(x.source_row == 3 for x in result))
-        self.assertEqual([x.progress_percent for x in result], [0.0, 60.0, 90.0, 100.0])
+        self.assertEqual(
+            [x.progress_percent for x in result],
+            [0.0, 60.0, 90.0, 100.0, 70.0],
+        )
+        self.assertEqual([x.zone for x in result], ["T1", "TL", "T2", "T3", "TỔNG"])
 
 
 if __name__ == "__main__":
