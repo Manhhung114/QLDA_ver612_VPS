@@ -14,6 +14,7 @@ from qlda.infrastructure.google_sheets.client import (
     make_oauth_state,
     verify_oauth_state,
 )
+from qlda.runtime_core.google_oauth_settings import apply_to_environment
 from qlda.runtime_core.production_progress import ProductionProgressStore
 
 
@@ -142,6 +143,11 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
     can_update = role in {"update", "admin"}
     can_admin = role == "admin"
 
+    # Apply encrypted Admin-managed OAuth settings before any OAuth callback or
+    # authorization check. This does not edit qlda.env and also preserves legacy
+    # env/Streamlit Secret fallbacks for older deployments.
+    apply_to_environment()
+
     store = ProductionProgressStore(db)
     _handle_oauth_callback(st, project_id, identity)
     client = _oauth_client(st)
@@ -214,22 +220,15 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                         st.error(f"Không tạo được liên kết đăng nhập Google: {exc}")
                 else:
                     st.error(
-                        "🔒 Google OAuth chưa được cấu hình trên VPS nên QLDA chưa thể mở cửa sổ đăng nhập Google. "
+                        "🔒 Google OAuth chưa được cấu hình nên QLDA chưa thể mở cửa sổ đăng nhập Google. "
                         "Dòng 'Đăng nhập Google' phía trên chỉ là lựa chọn phương thức kết nối."
                     )
                     st.warning(
-                        "Admin cần cấu hình OAuth Client một lần trên VPS. Sau khi cấu hình và restart qlda.service, "
-                        "nút **🔐 ĐĂNG NHẬP GOOGLE** sẽ xuất hiện tại đây."
-                    )
-                    st.code(
-                        "GOOGLE_OAUTH_CLIENT_ID=...\n"
-                        "GOOGLE_OAUTH_CLIENT_SECRET=...\n"
-                        f"GOOGLE_OAUTH_REDIRECT_URI={GoogleSheetsClient.oauth_redirect_uri()}",
-                        language="text",
+                        "Admin vào **Công cụ → Hệ thống → 🔐 Google OAuth**, nhập Client ID, Client Secret và "
+                        "Redirect URI rồi bấm **Lưu Google OAuth**. Không cần sửa qlda.env."
                     )
                     st.caption(
-                        "Trong Google Cloud Console, Authorized redirect URI phải đúng tuyệt đối với "
-                        "GOOGLE_OAUTH_REDIRECT_URI hiển thị ở trên."
+                        f"Redirect URI đề xuất cho hệ thống hiện tại: {GoogleSheetsClient.oauth_redirect_uri()}"
                     )
 
             with st.form(f"production_add_sheet_{project_id}"):
@@ -276,7 +275,7 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                     else:
                         if not oauth_ready:
                             raise RuntimeError(
-                                "Google OAuth chưa được cấu hình trên VPS. Admin cần cấu hình Client ID/Secret trước."
+                                "Google OAuth chưa được cấu hình. Admin vào Công cụ → Hệ thống → Google OAuth để cấu hình."
                             )
                         if not client.authorized:
                             raise RuntimeError("Chưa đăng nhập Google. Hãy bấm nút ĐĂNG NHẬP GOOGLE phía trên.")
