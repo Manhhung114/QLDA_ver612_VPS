@@ -50,6 +50,51 @@ def _install_common_ai_planner(platform: AutomationPlatform) -> None:
     )
 
 
+def _native_google_sync(db) -> Callable[..., Any]:
+    """Return the production Google sync adapter used by the AI ToolRegistry.
+
+    This is the same read-only Contractor Data Hub service used by the UI/worker.
+    Public links work without OAuth; private sources reuse the persisted project
+    OAuth connection and persist refreshed tokens afterward.
+    """
+
+    def sync(*, project_id: int, actor: str = "", workspace_ids=None, **_: Any) -> dict[str, Any]:
+        from qlda.application.contractor_data_hub import ContractorDataHubService
+        from qlda.infrastructure.google_sheets.drive import GoogleWorkspaceClient
+        from qlda.runtime_core.google_connection_store import (
+            load_project_connection,
+            save_project_connection,
+        )
+        from qlda.runtime_core.google_oauth_settings import apply_to_environment
+
+        apply_to_environment()
+        stored = load_project_connection(int(project_id))
+        token_state = dict(stored.get("token_state") or {})
+        client = GoogleWorkspaceClient(token_state) if token_state else None
+        service = ContractorDataHubService(db, client=client)
+        result = service.sync_project(
+            int(project_id),
+            workspace_ids=workspace_ids,
+            trigger_type="AI_AUTOMATION",
+        )
+        if client is not None and client.authorized:
+            save_project_connection(
+                int(project_id),
+                client.token_state(),
+                account_email=str(stored.get("account_email") or ""),
+                account_name=str(stored.get("account_name") or ""),
+                scopes=[GoogleWorkspaceClient.SHEETS_SCOPE, GoogleWorkspaceClient.DRIVE_SCOPE],
+            )
+        return {
+            "project_id": int(project_id),
+            "actor": actor,
+            "oauth_connected": bool(token_state),
+            **dict(result or {}),
+        }
+
+    return sync
+
+
 def get_autonomy_platform(
     db,
     *,
@@ -69,7 +114,7 @@ def get_autonomy_platform(
         repository.ensure_schema()
         adapters = QLDAAutomationAdapters(
             db,
-            google_sync=google_sync,
+            google_sync=google_sync or _native_google_sync(db),
             notify=notify,
             approve_ipc=approve_ipc,
             approve_vo=approve_vo,
