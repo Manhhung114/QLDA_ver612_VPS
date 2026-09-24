@@ -51,6 +51,12 @@ def parse_drive_file_id(value: str) -> str:
 class GoogleWorkspaceClient(GoogleSheetsClient):
     """Google Sheets + Drive read-only client sharing the same OAuth token."""
 
+    SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
+    DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+    # GoogleSheetsClient.build_authorization_url is a classmethod and therefore
+    # uses this combined scope when called on GoogleWorkspaceClient.
+    SCOPE = f"{SHEETS_SCOPE} {DRIVE_SCOPE}"
+
     DRIVE_API = "https://www.googleapis.com/drive/v3/files"
     USERINFO_API = "https://www.googleapis.com/oauth2/v2/userinfo"
 
