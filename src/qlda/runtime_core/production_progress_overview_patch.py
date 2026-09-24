@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 import pandas as pd
@@ -9,6 +10,49 @@ def _contractor_label(row: dict[str, Any]) -> str:
     code = str(row.get("contractor_code") or "").strip()
     name = str(row.get("contractor_name") or "").strip()
     return f"{code} - {name}".strip(" -") or f"Nhà thầu #{row.get('id','')}"
+
+
+def _progress_dimension_sort_key(value: object) -> tuple[int, float, str]:
+    """Natural order for Zone 1/2/3 and SME floor labels T1/TL/T2/.../T19A."""
+    text = str(value or "").strip()
+    compact = re.sub(r"\s+", "", text).upper()
+
+    floor = re.fullmatch(r"T(\d+)([A-Z]?)", compact)
+    if floor:
+        number = float(floor.group(1))
+        suffix = floor.group(2)
+        if suffix:
+            number += (ord(suffix) - ord("A") + 1) / 10.0
+        return (0, number, text)
+    if compact == "TL":
+        # SME source places TL between T1 and T2.
+        return (0, 1.5, text)
+
+    zone = re.fullmatch(r"(?:ZONE|KV|KHU|AREA)(\d+)", compact)
+    if zone:
+        return (1, float(zone.group(1)), text)
+    return (2, 0.0, text.casefold())
+
+
+def _sanitize_multiselect_state(st, key: str, options: list[str]) -> None:
+    """Drop stale selections when synchronized worksheets change their dimensions.
+
+    Before floor-matrix support a user could have Zone 1/2/3 stored in session
+    state while switching to S2/S3/S4, whose dimensions are T1/TL/T2/... . If all
+    old values are invalid, select the currently available dimensions once so the
+    table does not appear empty after a successful re-sync. A deliberately empty
+    selection remains empty.
+    """
+    try:
+        if key not in st.session_state:
+            return
+        current = list(st.session_state.get(key) or [])
+        valid = [x for x in current if x in options]
+        if current and not valid and options:
+            valid = list(options)
+        st.session_state[key] = valid
+    except Exception:
+        pass
 
 
 def worksheet_catalog(
@@ -134,28 +178,31 @@ def _render_overview_all_worksheets(
         return
 
     catalog_df = pd.DataFrame(catalog)
-    contractor_options = [
+    contractor_options = sorted(
         x for x in catalog_df["Nhà thầu"].dropna().astype(str).unique().tolist() if x
-    ]
-    contractor_options = sorted(contractor_options)
+    )
 
     f1, f2, f3 = st.columns(3)
+    contractor_key = f"cdh_overview_contractors_{int(project_id)}"
+    _sanitize_multiselect_state(st, contractor_key, contractor_options)
     selected_contractors = f1.multiselect(
         "Nhà thầu",
         contractor_options,
         default=contractor_options,
-        key=f"cdh_overview_contractors_{int(project_id)}",
+        key=contractor_key,
     )
 
     catalog_scope = catalog_df[catalog_df["Nhà thầu"].isin(selected_contractors)].copy()
     worksheet_options = sorted(
         x for x in catalog_scope["Worksheet"].dropna().astype(str).unique().tolist() if x
     )
+    worksheet_key = f"cdh_overview_worksheets_{int(project_id)}"
+    _sanitize_multiselect_state(st, worksheet_key, worksheet_options)
     selected_ws = f2.multiselect(
         "Tầng / worksheet",
         worksheet_options,
         default=worksheet_options,
-        key=f"cdh_overview_worksheets_{int(project_id)}",
+        key=worksheet_key,
     )
 
     production_rows: list[dict[str, Any]] = []
@@ -184,13 +231,22 @@ def _render_overview_all_worksheets(
             & production_df["Worksheet"].isin(selected_ws)
         ]
         zone_options = sorted(
-            x for x in zone_scope["Zone"].dropna().astype(str).unique().tolist() if x
+            (
+                x for x in zone_scope["Zone"].dropna().astype(str).unique().tolist() if x
+            ),
+            key=_progress_dimension_sort_key,
         )
+    zone_key = f"cdh_overview_zones_{int(project_id)}"
+    _sanitize_multiselect_state(st, zone_key, zone_options)
     selected_zones = f3.multiselect(
-        "Zone",
+        "Zone / tầng dữ liệu",
         zone_options,
         default=zone_options,
-        key=f"cdh_overview_zones_{int(project_id)}",
+        key=zone_key,
+        help=(
+            "Sheet Hầm dùng Zone 1/2/3. Các sheet S2/S3/S4 dạng ma trận dùng T1, TL, T2, ... "
+            "làm chiều tiến độ."
+        ),
     )
 
     selected_catalog = catalog_scope[catalog_scope["Worksheet"].isin(selected_ws)].copy()
@@ -207,7 +263,8 @@ def _render_overview_all_worksheets(
         st.warning(
             "Các worksheet đã đọc từ Google nhưng chưa nhận diện được dữ liệu sản lượng: "
             + names
-            + ". Kiểm tra tiêu đề Zone/Khu vực và cột Công tác nếu cần."
+            + ". App hỗ trợ cả dạng Zone/Khu vực và dạng ma trận Công tác + T1/TL/T2/...; "
+            "hãy kiểm tra dòng tiêu đề hoặc dữ liệu phần trăm nếu sheet vẫn ở trạng thái này."
         )
 
     with st.expander("Trạng thái đồng bộ worksheet", expanded=False):
@@ -239,6 +296,9 @@ def _render_overview_all_worksheets(
         values="Tiến độ (%)",
         aggfunc="mean",
     )
+    ordered_columns = [x for x in selected_zones if x in pivot.columns]
+    if ordered_columns:
+        pivot = pivot.reindex(columns=ordered_columns)
     st.dataframe(pivot.round(1), use_container_width=True, height=480)
 
     st.markdown("#### Tiến độ trung bình theo nhà thầu")
