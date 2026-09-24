@@ -16,8 +16,6 @@ from qlda.infrastructure.google_sheets.client import (
 )
 from qlda.runtime_core.production_progress import ProductionProgressStore
 
-_PUBLIC_PREFIX = "__gid__:\"
-
 
 def _actor(identity: dict[str, Any]) -> str:
     for key in ("email", "username", "user_id", "id", "name"):
@@ -118,8 +116,6 @@ def _sync_source(
             all_rows.extend(normalize_production_sheet(label, values))
     else:
         if not client.authorized:
-            # Compatibility for sources created before OAuth/link-only support:
-            # if the old source is now shared publicly, allow the first tab to sync.
             if mode == "PRODUCTION_PROGRESS":
                 values = GoogleSheetsClient.public_values(spreadsheet_id, 0)
                 label = str(source.get("name") or "Google Sheet")
@@ -252,9 +248,7 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                             "spreadsheet_id": sid,
                             "name": source_name.strip() or meta.get("title") or "Google Sheet",
                             "title": meta.get("title") or "",
-                            "worksheets": [
-                                x["title"] for x in meta.get("sheets", []) if not x.get("hidden")
-                            ],
+                            "worksheets": [x["title"] for x in meta.get("sheets", []) if not x.get("hidden")],
                         }
                         st.success(f"Đã kết nối: {meta.get('title') or sid}")
                 except Exception as exc:
@@ -297,9 +291,7 @@ def render_production_progress(st, db, project_id: int, *, identity: dict | None
                     st.rerun()
                 c2.caption("Một dự án có thể khai báo nhiều Google Sheet hoặc nhiều tab của cùng một file.")
         else:
-            st.caption(
-                "Chỉ Admin được thêm/xóa nguồn Google Sheets. Người có quyền Cập nhật được phép đồng bộ dữ liệu."
-            )
+            st.caption("Chỉ Admin được thêm/xóa nguồn Google Sheets. Người có quyền Cập nhật được phép đồng bộ dữ liệu.")
 
         sources = store.list_sources(project_id)
         if not sources:
