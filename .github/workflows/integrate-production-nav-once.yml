@@ -1,0 +1,89 @@
+name: Integrate Production Navigation Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/integrate-production-nav-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Integrate production progress into QLDA navigation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app_path = Path('src/qlda/presentation/streamlit/app.py')
+          text = app_path.read_text(encoding='utf-8')
+
+          import_anchor = (
+              'from qlda.runtime_core.contract_management import '
+              'can_access_contract_management, render_contract_management_v622\n'
+          )
+          import_line = (
+              'from qlda.presentation.streamlit.production_progress_ui '
+              'import render_production_progress\n'
+          )
+          if import_line not in text:
+              if import_anchor not in text:
+                  raise SystemExit('Import anchor not found in app.py')
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+
+          old_nav = '''        "🏗️ Thi công": [
+              ("📅 Tiến độ", lambda: render_schedule(pid)),
+              ("📦 Vật tư", lambda: render_material_management(pid)),
+              ("📷 Nhật ký", lambda: render_site_diary(pid)),
+          ],'''
+          new_nav = '''        "🏗️ Thi công": [
+              ("📅 Tiến độ", lambda: render_schedule(pid)),
+              ("📊 Sản lượng", lambda: render_production_progress(st, db, _master_pid, identity=_v7_identity)),
+              ("📦 Vật tư", lambda: render_material_management(pid)),
+              ("📷 Nhật ký", lambda: render_site_diary(pid)),
+          ],'''
+          if '"📊 Sản lượng", lambda: render_production_progress' not in text:
+              if old_nav not in text:
+                  raise SystemExit('Construction navigation anchor not found in app.py')
+              text = text.replace(old_nav, new_nav, 1)
+
+          app_path.write_text(text, encoding='utf-8')
+
+          standalone = Path('src/qlda/presentation/streamlit/pages/1_📊_San_luong.py')
+          if standalone.exists():
+              standalone.unlink()
+
+          final = app_path.read_text(encoding='utf-8')
+          assert import_line.strip() in final
+          assert '("📊 Sản lượng", lambda: render_production_progress' in final
+          assert not standalone.exists()
+          PY
+
+      - name: Static validation
+        run: |
+          python -m compileall -q src/qlda
+          git diff --check
+          git diff -- src/qlda/presentation/streamlit/app.py src/qlda/presentation/streamlit/pages
+
+      - name: Commit integration
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/qlda/presentation/streamlit/app.py src/qlda/presentation/streamlit/pages
+          git commit -m "integrate production progress into main QLDA navigation"
+          git push origin HEAD:main
