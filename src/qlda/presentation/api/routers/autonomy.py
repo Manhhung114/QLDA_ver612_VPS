@@ -98,6 +98,7 @@ def execute_plan(
     project_id = _execution_project_id(scope)
     db = build_db()
     platform = get_autonomy_platform(db)
+    repository = get_autonomy_repository(db)
 
     # V7.7 gate is evaluated immediately before execution; write-capable steps
     # are blocked if the current synchronized evidence is not reconciled.
@@ -108,16 +109,17 @@ def execute_plan(
         role=principal.role,
     )
     plan = platform.orchestrator.create_plan(project_id, request.objective)
+    approved_steps = repository.approved_steps(project_id=project_id, plan_id=plan.plan_id)
+    approved_steps.update(str(x) for x in request.approvals)
     results = platform.orchestrator.execute_plan(
         plan,
         actor=principal.email,
         role=principal.role,
-        approvals=set(request.approvals),
+        approvals=approved_steps,
         dry_run=bool(request.dry_run),
         data_valid=bool(integrity.get("valid", False)),
     )
 
-    repository = get_autonomy_repository(db)
     for result in results:
         if result.status == "PENDING_APPROVAL":
             repository.request_approval(
@@ -131,6 +133,7 @@ def execute_plan(
         "ok": True,
         "integrity": integrity,
         "plan": asdict(plan),
+        "approved_steps": sorted(approved_steps),
         "results": [asdict(x) for x in results],
     }
 
