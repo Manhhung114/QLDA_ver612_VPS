@@ -4,8 +4,14 @@ import unittest
 
 from qlda.runtime_core.production_progress_overview_patch import (
     _progress_dimension_sort_key,
+    _sync_dependent_multiselect_state,
     worksheet_catalog,
 )
+
+
+class _FakeStreamlit:
+    def __init__(self):
+        self.session_state = {}
 
 
 class ProductionProgressOverviewPatchTests(unittest.TestCase):
@@ -47,6 +53,42 @@ class ProductionProgressOverviewPatchTests(unittest.TestCase):
             ordered,
             ["T1", "TL", "T2", "T3", "T3A", "T10", "T19A", "T20"],
         )
+
+    def test_dimension_selection_follows_selected_worksheet_scope(self):
+        st = _FakeStreamlit()
+        key = "zones"
+        signature_key = "zone_scope"
+
+        _sync_dependent_multiselect_state(
+            st,
+            key=key,
+            options=["Zone 1", "Zone 2", "Zone 3"],
+            signature_key=signature_key,
+            signature="Hầm",
+        )
+        self.assertEqual(st.session_state[key], ["Zone 1", "Zone 2", "Zone 3"])
+
+        # Same worksheet scope: preserve a user's manual subset.
+        st.session_state[key] = ["Zone 2"]
+        _sync_dependent_multiselect_state(
+            st,
+            key=key,
+            options=["Zone 1", "Zone 2", "Zone 3"],
+            signature_key=signature_key,
+            signature="Hầm",
+        )
+        self.assertEqual(st.session_state[key], ["Zone 2"])
+
+        # Changed worksheet scope: discard stale Zone values and select the new
+        # worksheet's progress dimensions.
+        _sync_dependent_multiselect_state(
+            st,
+            key=key,
+            options=["T1", "TL", "T2"],
+            signature_key=signature_key,
+            signature="S2 (update)",
+        )
+        self.assertEqual(st.session_state[key], ["T1", "TL", "T2"])
 
 
 if __name__ == "__main__":
