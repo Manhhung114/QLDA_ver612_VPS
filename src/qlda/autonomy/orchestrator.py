@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from .models import ActionMode, ExecutionPlan, ExecutionResult, PlanStep, RiskLevel
@@ -21,6 +22,7 @@ class HeuristicPlanner:
 
     def plan(self, project_id: int, objective: str, context: dict[str, Any] | None = None) -> ExecutionPlan:
         text = str(objective or "").lower()
+        context = dict(context or {})
         steps: list[PlanStep] = []
 
         def add(tool: str, reason: str, arguments: dict[str, Any] | None = None) -> None:
@@ -35,15 +37,23 @@ class HeuristicPlanner:
         if any(key in text for key in ("báo cáo", "report", "đánh giá", "tình hình", "rủi ro")):
             add("generate_report", "Tổng hợp kết quả thành báo cáo có kiểm chứng.")
         if any(key in text for key in ("nhắc", "giao việc", "task", "xử lý")):
-            add(
-                "create_work_task",
-                "Tạo công việc xử lý cho vấn đề đã xác minh.",
-                {
-                    "title": f"AI: {str(objective or '').strip()[:160]}",
-                    "description": "Công việc do AI Orchestrator đề xuất từ mục tiêu đã xác minh. Người phụ trách cần kiểm tra nội dung trước khi hoàn tất.",
-                    "priority": "Bình thường",
-                },
-            )
+            assignee_email = str(context.get("default_assignee_email") or "").strip()
+            if assignee_email:
+                due_at = str(context.get("default_due_at") or "").strip()
+                if not due_at:
+                    due_at = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+                add(
+                    "create_work_task",
+                    "Tạo công việc xử lý cho vấn đề đã xác minh.",
+                    {
+                        "title": f"AI: {str(objective or '').strip()[:160]}",
+                        "description": "Công việc do AI Orchestrator đề xuất từ mục tiêu đã xác minh. Người phụ trách cần kiểm tra nội dung trước khi hoàn tất.",
+                        "assignee_email": assignee_email,
+                        "assignee_name": str(context.get("default_assignee_name") or assignee_email),
+                        "due_at": due_at,
+                        "priority": str(context.get("default_priority") or "Bình thường"),
+                    },
+                )
 
         raw = f"{project_id}|{objective}|{'|'.join(x.tool_name for x in steps)}"
         plan_id = "PLAN-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
