@@ -175,16 +175,18 @@ def run_project_supervisor(
             "evidence": {"collector_error": str(exc)},
         }
 
-    # Explicit indicators remain useful for future plugins, but verified live
-    # workspace facts always win for the built-in Supervisor fields.
-    indicators = dict(extra_indicators or {})
-    indicators.pop("payment_overdue_value", None)
-    indicators.update({
+    # Built-in live indicators are the default. Explicit extras are retained as a
+    # compatibility/plugin extension layer and may intentionally override a field,
+    # except payment overdue which remains forbidden from Project Health.
+    indicators = {
         "data_integrity_score": float(integrity.get("score") or 0),
         "schedule_delay_percent": float((status.get("schedule") or {}).get("delay_percent") or 0),
         "contract_days_remaining": status.get("contract_days_remaining"),
-    })
+    }
     indicators.update(dict(auto_data.get("indicators") or {}))
+    extra = dict(extra_indicators or {})
+    extra.pop("payment_overdue_value", None)
+    indicators.update(extra)
     health = platform.supervisor.evaluate(tenant_id, indicators)
 
     for finding in health.findings:
@@ -225,6 +227,7 @@ def run_project_supervisor(
         "status": status,
         "indicators": indicators,
         "auto_data": auto_data,
+        "extra_indicators": extra,
         "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
     repository.save_snapshot(
