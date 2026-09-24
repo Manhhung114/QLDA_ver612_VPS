@@ -146,7 +146,7 @@ def initialize_ai_runtime() -> None:
         # scanned PDFs, owner-supplied materials, unpaid IPC cash plan and project costs.
         from qlda.runtime_core.ai_vps_pdf_fullscan import install_ai_vps_pdf_fullscan
         from qlda.runtime_core.ai_vps_pdf_vision import install_ai_vps_pdf_vision
-        from qlda.runtime_core.owner_material_ai_context import install_owner_material_ai_context
+        from qlda.runtime_core.owner_supplied_materials import install_owner_material_ai_context
         from qlda.runtime_core.cashflow_ai_context import install_cashflow_ai_context
         from qlda.runtime_core.finance_consistency import install_finance_consistency_core
         from qlda.runtime_core.project_cost_ai_context import install_project_cost_ai_context
@@ -224,5 +224,10 @@ def initialize_runtime() -> None:
         # single AI entry point and already receives this Data Hub's live context.
         from qlda.runtime_core.contractor_data_shared_ai import install_production_progress_shared_ai_ui
         install_production_progress_shared_ai_ui()
+
+        # Keep multiselect selections readable: selected values use light neutral
+        # chips instead of Streamlit/BaseWeb's saturated blue background.
+        from qlda.runtime_core.multiselect_tag_style import install_multiselect_tag_style_patch
+        install_multiselect_tag_style_patch()
 
         _UI_READY = True
