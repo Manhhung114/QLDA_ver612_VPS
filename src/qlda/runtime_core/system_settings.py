@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import qlda.runtime_core.settings_store as ss
+from qlda.runtime_core.google_oauth_admin_ui import render_google_oauth_settings
+
 PATCH_MARKER = "V6.22 ADMIN SYSTEM SETTINGS V1"
 _ALLOWED_STORAGE_ROOT = Path(
     str(os.environ.get("QLDA_ADMIN_STORAGE_ALLOWED_ROOT", "/opt/qlda") or "/opt/qlda")
@@ -426,7 +428,7 @@ def _render_performance(st: Any, actor: str) -> None:
     ):
         ss.save_app_settings({"managed_performance": False})
         ss.append_settings_audit(actor, "reset_performance_to_env", ["managed_performance"])
-        st.success("Đã trả cấu hình hiệu năng về qlda.env.")
+        st.success("Đã trả hiệu năng về qlda.env.")
         st.rerun()
 
 
@@ -503,7 +505,7 @@ def render_system_settings_admin(
     is_admin: bool = False,
     actor: str = "",
 ) -> None:
-    """Admin-only system console for AI, storage, app limits and VPS status."""
+    """Admin-only system console for AI, Google OAuth, storage, app limits and VPS status."""
     if not bool(is_admin):
         st.error("🔒 Cài đặt hệ thống chỉ dành cho Admin.")
         return
@@ -514,11 +516,13 @@ def render_system_settings_admin(
         "upload signing secret và SSH vẫn được giữ ngoài app."
     )
 
-    tab_ai, tab_storage, tab_perf, tab_vps, tab_audit = st.tabs(
-        ["🤖 AI", "💾 Lưu trữ", "⚙️ Hiệu năng", "🖥️ VPS", "🧾 Nhật ký"]
+    tab_ai, tab_google, tab_storage, tab_perf, tab_vps, tab_audit = st.tabs(
+        ["🤖 AI", "🔐 Google OAuth", "💾 Lưu trữ", "⚙️ Hiệu năng", "🖥️ VPS", "🧾 Nhật ký"]
     )
     with tab_ai:
         _render_ai(st, actor)
+    with tab_google:
+        render_google_oauth_settings(st, actor)
     with tab_storage:
         _render_storage(st, actor)
     with tab_perf:
