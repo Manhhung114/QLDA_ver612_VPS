@@ -35,11 +35,6 @@ class SupervisorRequest(BaseModel):
     indicators: dict[str, Any] = Field(default_factory=dict)
 
 
-class TwinScenarioRequest(BaseModel):
-    project_id: int
-    scenario: dict[str, Any] = Field(default_factory=dict)
-
-
 class ApprovalDecisionRequest(BaseModel):
     project_id: int
     plan_id: str
@@ -71,7 +66,7 @@ def _execution_project_id(scope) -> int:
 
     Master projects with active contractor workspaces are intentionally rejected.
     Admin/BĐH must select the desired contractor workspace. This prevents events,
-    snapshots, approvals, memory and Digital Twin state from mixing contractors.
+    snapshots, approvals and AI state from mixing contractors.
     """
     if bool(scope.is_master_scope) and _master_has_contractors(int(scope.master_project_id)):
         raise HTTPException(
@@ -198,21 +193,6 @@ def supervisor(
         extra_indicators=request.indicators,
     )
     return {"ok": True, "workspace_project_id": project_id, "result": result}
-
-
-@router.post("/simulate")
-def simulate(
-    request: TwinScenarioRequest,
-    principal: Principal = Depends(require_roles("read", "update", "admin")),
-):
-    scope = _scope(principal, request.project_id)
-    project_id = _execution_project_id(scope)
-    db = build_db()
-    platform = get_autonomy_platform(db)
-    if platform.digital_twin.get(project_id) is None:
-        run_project_supervisor(db, project_id, actor=principal.email or "AI Supervisor")
-    result = platform.digital_twin.simulate(project_id, request.scenario)
-    return {"ok": True, "workspace_project_id": project_id, "scenario": asdict(result)}
 
 
 @router.get("/{project_id}/approvals")
