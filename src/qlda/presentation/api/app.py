@@ -4,13 +4,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 import qlda
-from qlda.presentation.api.routers import ai, files, health, jobs, search
+from qlda.presentation.api.routers import ai, autonomy, files, health, jobs, search
 
 
 def create_app() -> FastAPI:
     application = FastAPI(
         title="QLDA API",
-        description="QLDA V7.2 clean-architecture HTTP adapter for jobs, files, AI and search.",
+        description="QLDA packaged HTTP API for jobs, files, AI, search and the V7.7→V9.0 automation platform.",
         version=qlda.__version__,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     application.include_router(jobs.router)
     application.include_router(files.router)
     application.include_router(ai.router)
+    application.include_router(autonomy.router)
     application.include_router(search.router)
     return application
 
