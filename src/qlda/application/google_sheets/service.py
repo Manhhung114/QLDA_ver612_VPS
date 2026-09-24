@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Iterable
+from urllib.parse import parse_qs, urlparse
 
 _SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
 
@@ -26,6 +27,28 @@ def parse_spreadsheet_id(value: str) -> str:
     if re.fullmatch(r"[a-zA-Z0-9-_]{20,}", text):
         return text
     raise ValueError("Link Google Sheets / Spreadsheet ID không hợp lệ.")
+
+
+def parse_sheet_gid(value: str, *, default: int = 0) -> int:
+    """Return the worksheet gid from a normal Google Sheets URL.
+
+    Google usually places gid in the URL fragment (``#gid=123``), but some
+    generated links use a query parameter. A bare spreadsheet ID has no gid,
+    therefore the first worksheet (gid=0) is used.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return int(default)
+    try:
+        parsed = urlparse(text)
+        for part in (parsed.query, parsed.fragment):
+            values = parse_qs(part).get("gid") or []
+            if values and str(values[0]).isdigit():
+                return int(values[0])
+    except Exception:
+        pass
+    match = re.search(r"(?:[?#&])gid=(\d+)", text)
+    return int(match.group(1)) if match else int(default)
 
 
 def _percent(value) -> float | None:
