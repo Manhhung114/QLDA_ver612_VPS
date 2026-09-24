@@ -92,10 +92,12 @@ class ProductionProgressStore:
         spreadsheet_id: str,
         spreadsheet_title: str,
         worksheet_names: list[str],
+        data_type: str = "PRODUCTION_PROGRESS",
         enabled: bool = True,
     ) -> str:
         source_id = str(source_id or uuid.uuid4().hex)
         now = _now()
+        mode = str(data_type or "PRODUCTION_PROGRESS").strip().upper()
         with self.db.connect() as conn:
             current = conn.execute(
                 "SELECT source_id FROM production_sheet_sources WHERE source_id=? AND project_id=?",
@@ -104,23 +106,23 @@ class ProductionProgressStore:
             if current:
                 conn.execute(
                     """UPDATE production_sheet_sources
-                    SET name=?, spreadsheet_id=?, spreadsheet_title=?, worksheet_names=?, enabled=?, updated_at=?
+                    SET name=?, spreadsheet_id=?, spreadsheet_title=?, worksheet_names=?, data_type=?, enabled=?, updated_at=?
                     WHERE source_id=? AND project_id=?""",
                     (
                         str(name).strip(), str(spreadsheet_id).strip(), str(spreadsheet_title or "").strip(),
-                        json.dumps(list(worksheet_names), ensure_ascii=False), 1 if enabled else 0, now,
+                        json.dumps(list(worksheet_names), ensure_ascii=False), mode, 1 if enabled else 0, now,
                         source_id, int(project_id),
                     ),
                 )
             else:
                 conn.execute(
                     """INSERT INTO production_sheet_sources
-                    (source_id, project_id, name, spreadsheet_id, spreadsheet_title, worksheet_names, enabled, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (source_id, project_id, name, spreadsheet_id, spreadsheet_title, worksheet_names, data_type, enabled, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         source_id, int(project_id), str(name).strip(), str(spreadsheet_id).strip(),
                         str(spreadsheet_title or "").strip(), json.dumps(list(worksheet_names), ensure_ascii=False),
-                        1 if enabled else 0, now, now,
+                        mode, 1 if enabled else 0, now, now,
                     ),
                 )
         return source_id
