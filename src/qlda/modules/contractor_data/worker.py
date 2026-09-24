@@ -77,20 +77,20 @@ def run_project(db, master_project_id: int) -> dict[str, Any]:
     apply_to_environment()
     stored = load_project_connection(int(master_project_id))
     token_state = dict(stored.get("token_state") or {})
-    if not token_state:
-        return {
-            "project_id": int(master_project_id),
-            "skipped": True,
-            "reason": "Chưa có Google OAuth connection đã lưu",
-        }
 
-    client = GoogleWorkspaceClient(token_state)
+    # Public/link-only Google Sheets do not need OAuth. The old worker skipped the
+    # whole project when no saved Google token existed, which meant public Sheet
+    # sources could be synchronized manually in Streamlit but never by the
+    # background worker. Use client=None in that case: PUBLIC_LINK sources still
+    # sync, while private Sheets/Drive sources are reported individually as errors
+    # by ContractorDataHubService.sync_space().
+    client = GoogleWorkspaceClient(token_state) if token_state else None
     service = ContractorDataHubService(db, client=client)
     result = service.sync_due_spaces(int(master_project_id))
 
     # Refresh may have rotated the access token. Persist the latest state so the
     # next worker cycle remains independent of Streamlit sessions.
-    if client.authorized:
+    if client is not None and client.authorized:
         save_project_connection(
             int(master_project_id),
             client.token_state(),
@@ -98,7 +98,11 @@ def run_project(db, master_project_id: int) -> dict[str, Any]:
             account_name=str(stored.get("account_name") or ""),
             scopes=[GoogleWorkspaceClient.SHEETS_SCOPE, GoogleWorkspaceClient.DRIVE_SCOPE],
         )
-    return {"project_id": int(master_project_id), **result}
+    return {
+        "project_id": int(master_project_id),
+        "oauth_connected": bool(token_state),
+        **result,
+    }
 
 
 def run_once(db=None) -> list[dict[str, Any]]:
@@ -112,8 +116,9 @@ def run_once(db=None) -> list[dict[str, Any]]:
                 LOG.info("project=%s skipped=%s", project_id, result.get("reason"))
             else:
                 LOG.info(
-                    "project=%s due=%s success=%s errors=%s records=%s",
+                    "project=%s oauth=%s due=%s success=%s errors=%s records=%s",
                     project_id,
+                    result.get("oauth_connected", False),
                     result.get("due", 0),
                     result.get("success", 0),
                     result.get("errors", 0),
