@@ -9,10 +9,11 @@ install_contractor_data_complete_rows()
 install_contractor_data_source_semantics()
 
 # Compose late UI/AI policies around bootstrap without duplicating its large
-# initializer.  Order matters:
+# initializer. Order matters:
 # 1) bootstrap installs the base shared-AI + all-worksheet UI;
 # 2) source-exact renderer replaces the old mean-based pivot;
-# 3) Admin visibility installs last so management tabs/warnings stay Admin-only.
+# 3) autonomy appends its project-supervisor control center to V7 Overview;
+# 4) Admin visibility installs last so Data Hub management/warnings stay Admin-only.
 from qlda.runtime_core import bootstrap as _bootstrap
 
 if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
@@ -35,14 +36,17 @@ if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
         from qlda.runtime_core.production_progress_source_exact import (
             install_production_progress_source_exact,
         )
+        from qlda.runtime_core.autonomy_overview_patch import install_autonomy_overview_patch
         from qlda.runtime_core.contractor_data_admin_visibility import (
             install_contractor_data_admin_visibility,
         )
 
         install_production_progress_source_exact()
+        install_autonomy_overview_patch()
         install_contractor_data_admin_visibility()
 
     _bootstrap.initialize_ai_runtime = _initialize_ai_runtime_with_official_totals
     _bootstrap.initialize_runtime = _initialize_runtime_with_source_exact_ui
     _bootstrap._qlda_source_exact_bootstrap_v2 = True
     _bootstrap._qlda_admin_visibility_bootstrap_v1 = True
+    _bootstrap._qlda_autonomy_overview_bootstrap_v1 = True
