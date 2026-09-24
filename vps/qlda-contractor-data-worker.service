@@ -1,0 +1,34 @@
+[Unit]
+Description=QLDA Contractor Data Hub Sync Worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qlda
+Group=qlda
+WorkingDirectory=/opt/qlda/app
+EnvironmentFile=/opt/qlda/shared/qlda.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/qlda/app/src
+Environment=HOME=/opt/qlda/shared
+Environment=QLDA_SETTINGS_DIR=/opt/qlda/shared/config
+Environment=QLDA_CONTRACTOR_DATA_SYNC_POLL_SECONDS=300
+ExecStart=/opt/qlda/venv/bin/python -m qlda.modules.contractor_data.worker --poll-seconds 300
+Restart=always
+RestartSec=10
+TimeoutStopSec=45
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/qlda /var/log/qlda
+CPUQuota=100%
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=48
+
+[Install]
+WantedBy=multi-user.target
