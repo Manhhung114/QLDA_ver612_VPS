@@ -43,7 +43,7 @@ def install_runtime_settings_bridge() -> None:
                     value = float(ss.get_runtime_value(name, str(default)))
                 except Exception:
                     value = float(default)
-                return max(float(minimum), min(int(maximum), value))
+                return max(float(minimum), min(float(maximum), value))
 
             original_start_method = mc._start_method
 
