@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qlda.runtime_core.contractor_data_admin_visibility import (
+from qlda.presentation.streamlit.contractor_data_admin_visibility import (
     _RestrictedRepo,
     _RestrictedService,
     _RestrictedStreamlit,
