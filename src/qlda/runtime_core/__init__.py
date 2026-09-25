@@ -12,9 +12,10 @@ install_contractor_data_source_semantics()
 # initializer. Order matters:
 # 1) bootstrap installs the base shared-AI + all-worksheet UI;
 # 2) source-exact renderer replaces the old mean-based pivot;
-# 3) autonomy appends its contractor-isolated project-supervisor control center;
+# 3) autonomy installs the contractor-isolated project-supervisor control center;
 # 4) V9.1→V9.6 Admin UI appends advanced automation controls;
-# 5) Admin visibility installs last so Data Hub management/warnings stay Admin-only.
+# 5) AI Supervisor is exposed as its own navigation item;
+# 6) Admin visibility installs last so Data Hub management/warnings stay Admin-only.
 from qlda.runtime_core import bootstrap as _bootstrap
 
 if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
@@ -39,6 +40,7 @@ if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
         )
         from qlda.runtime_core.autonomy_overview_patch import install_autonomy_overview_patch
         from qlda.runtime_core.advanced_automation_ui import install_advanced_automation_ui
+        from qlda.runtime_core.ai_supervisor_navigation import install_ai_supervisor_navigation
         from qlda.runtime_core.contractor_data_admin_visibility import (
             install_contractor_data_admin_visibility,
         )
@@ -46,6 +48,7 @@ if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
         install_production_progress_source_exact()
         install_autonomy_overview_patch()
         install_advanced_automation_ui()
+        install_ai_supervisor_navigation()
         install_contractor_data_admin_visibility()
 
     _bootstrap.initialize_ai_runtime = _initialize_ai_runtime_with_official_totals
@@ -54,3 +57,4 @@ if not getattr(_bootstrap, "_qlda_source_exact_bootstrap_v2", False):
     _bootstrap._qlda_admin_visibility_bootstrap_v1 = True
     _bootstrap._qlda_autonomy_overview_bootstrap_v1 = True
     _bootstrap._qlda_advanced_automation_ui_v1 = True
+    _bootstrap._qlda_ai_supervisor_navigation_v1 = True
