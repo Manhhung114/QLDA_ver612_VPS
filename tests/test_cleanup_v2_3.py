@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src/qlda"
 RUNTIME = SRC / "runtime_core"
+COMPOSITION = SRC / "composition/runtime_features.py"
 
 
 class CleanupV23Tests(unittest.TestCase):
@@ -46,17 +47,17 @@ class CleanupV23Tests(unittest.TestCase):
                             offenders.append(f"{path.relative_to(ROOT)}: import {alias.name}")
         self.assertEqual(offenders, [])
 
-    def test_bootstrap_has_single_finance_consistency_chain(self):
-        bootstrap = (RUNTIME / "bootstrap.py").read_text(encoding="utf-8")
-        self.assertEqual(bootstrap.count("install_finance_consistency_core()"), 1)
-        self.assertEqual(bootstrap.count("install_finance_consistency_ui()"), 1)
+    def test_composition_has_single_finance_consistency_chain(self):
+        composition = COMPOSITION.read_text(encoding="utf-8")
+        self.assertEqual(composition.count('"install_finance_consistency_core"'), 1)
+        self.assertEqual(composition.count('"install_finance_consistency_ui"'), 1)
         for old in (
             "install_project_cost_signed_adjustments",
             "install_vo_value_consistency",
             "install_boq_after_tax_budget_policy",
             "install_project_cost_budget_ui_simplify",
         ):
-            self.assertNotIn(old, bootstrap)
+            self.assertNotIn(old, composition)
 
     def test_signed_and_after_tax_semantics_are_kept(self):
         from qlda.runtime_core.finance_consistency import effective_proposed_value
