@@ -3,16 +3,16 @@ from __future__ import annotations
 """Deterministic runtime feature composition.
 
 Historically QLDA accumulated behavior by importing ``runtime_core`` and then
-wrapping/bootstrap-patching functions from ``runtime_core.__init__``.  That made
+wrapping/bootstrap-patching functions from ``runtime_core.__init__``. That made
 import order part of the application contract and made production failures hard
 to diagnose.
 
 This module turns that hidden behavior into an explicit, inspectable composition
-root.  Every compatibility installer is named, ordered and attached to one stage.
+root. Every compatibility installer is named, ordered and attached to one stage.
 Importing this module has no side effects; callers must invoke ``install_stage``.
 
 The compatibility installers remain idempotent while native replacements are
-migrated into domain/application/presentation packages.  New product features
+migrated into domain/application/presentation packages. New product features
 must not be added here as ad-hoc ``*_fix``/``*_patch`` modules; the architecture
 guard in CI enforces that rule.
 """
@@ -45,7 +45,7 @@ class RuntimeFeature:
         return fn
 
 
-# Order is intentional and therefore source-controlled.  It replaces the old
+# Order is intentional and therefore source-controlled. It replaces the old
 # nested monkey-patch order hidden in runtime_core.__init__ + bootstrap.py.
 FEATURES: tuple[RuntimeFeature, ...] = (
     # Data ingestion semantics are required by Streamlit *and* background workers.
@@ -78,7 +78,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("boq-claim-price-recovery", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_recovery", "install_boq_claim_price_recovery"),
     RuntimeFeature("boq-claim-price-header-guard", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_header_guard", "install_boq_claim_price_header_guard"),
 
-    # AI composition.  Official Data Hub semantics are installed both before and
+    # AI composition. Official Data Hub semantics are installed both before and
     # after context wrapping, matching the proven production order without
     # replacing initialize_ai_runtime itself.
     RuntimeFeature("contractor-data-official-ai-pre", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
@@ -92,7 +92,9 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("claim-component-fullscan", RuntimeStage.AI, "qlda.runtime_core.claim_component_fullscan", "install_claim_component_fullscan"),
     RuntimeFeature("claim-material-period-guard", RuntimeStage.AI, "qlda.runtime_core.claim_material_period_guard", "install_claim_material_period_guard"),
     RuntimeFeature("project-remaining-components", RuntimeStage.AI, "qlda.runtime_core.project_remaining_components", "install_project_remaining_components"),
+    RuntimeFeature("contractor-ai-capture-scope", RuntimeStage.AI, "qlda.runtime_core.contractor_access_control", "capture_single_contractor_ai_context"),
     RuntimeFeature("contractor-ai-context", RuntimeStage.AI, "qlda.runtime_core.contractor_ai_context", "install_contractor_ai_context"),
+    RuntimeFeature("contractor-ai-access-guard", RuntimeStage.AI, "qlda.runtime_core.contractor_access_control", "install_ai_access_guard"),
     RuntimeFeature("ai-vps-pdf-fullscan", RuntimeStage.AI, "qlda.runtime_core.ai_vps_pdf_fullscan", "install_ai_vps_pdf_fullscan"),
     RuntimeFeature("ai-vps-pdf-vision", RuntimeStage.AI, "qlda.runtime_core.ai_vps_pdf_vision", "install_ai_vps_pdf_vision"),
     RuntimeFeature("owner-material-ai-context", RuntimeStage.AI, "qlda.runtime_core.owner_material_ai_context", "install_owner_material_ai_context"),
@@ -102,7 +104,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("contractor-data-shared-ai", RuntimeStage.AI, "qlda.runtime_core.contractor_data_shared_ai", "install_contractor_data_shared_ai_context"),
     RuntimeFeature("contractor-data-official-ai-post", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
 
-    # Streamlit presentation composition.  The order is visible, testable and
+    # Streamlit presentation composition. The order is visible, testable and
     # deterministic; Admin visibility stays last by design.
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.runtime_core.upload_ui_200mb_policy", "install_upload_ui_200mb_policy"),
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.runtime_core.document_management_vps_ui", "install_document_management_vps_ui"),
