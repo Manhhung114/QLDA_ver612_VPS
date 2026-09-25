@@ -1,37 +1,27 @@
 from __future__ import annotations
 
-"""V7.6 native AI infrastructure adapter with contractor-tenant isolation.
+"""Native AI adapter with contractor-tenant isolation and optional grounded RAG.
 
-Every normal assistant request is scoped to one ``workspace_project_id``. Callers
-may still pass an explicit scope, but omitting it no longer opens an implicit
-multi-contractor project context: the requested project id becomes the AI tenant.
-A separate explicit Project Control service can aggregate contractor summaries in
-future without weakening this default boundary.
+Application callers no longer import ``runtime_core.ai_service`` through this
+module. The remaining legacy provider dependency is isolated behind
+``qlda.infrastructure.ai.legacy_provider`` and can be removed independently.
 """
 
 import os
-from contextlib import contextmanager
+import time
 from datetime import date
-from pathlib import Path
 from typing import Any, Sequence
 
+from qlda.application.ai import AIContextService
 from qlda.domain.errors import AIApplicationError
-from qlda.runtime_core import ai_service as engine
-from qlda.runtime_core import contractor_access_control as access
-from qlda.runtime_core.bootstrap import initialize_ai_runtime
+from qlda.infrastructure.ai.embeddings import ProviderEmbeddingAdapter
+from qlda.infrastructure.ai.legacy_provider import AIProviderError, LegacyAIProvider
+from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
+from qlda.infrastructure.ai.vector_store import PostgresVectorContextStore
 
 
 class NativeAIAdapter:
-    """AIPort implementation backed by packaged OpenAI/Gemini engines."""
-
-    @staticmethod
-    def _db_label() -> Path:
-        return Path(
-            os.environ.get(
-                "QLDA_AI_DB_LABEL",
-                os.environ.get("QLDA_WORKER_DB_LABEL", "/opt/qlda/shared/qlda-ai.db"),
-            )
-        )
+    """AIPort implementation backed by native infrastructure boundaries."""
 
     @staticmethod
     def _domain_error(exc: BaseException) -> AIApplicationError:
@@ -42,31 +32,44 @@ class NativeAIAdapter:
             action=str(getattr(exc, "action", "") or ""),
         )
 
-    @classmethod
-    def _assistant(cls, provider: str):
-        initialize_ai_runtime()
-        value = str(provider or "openai").strip().lower()
-        if value in {"openai", "gpt"}:
-            return engine.OpenAIProjectAssistant(cls._db_label())
-        if value in {"gemini", "google"}:
-            return engine.GeminiProjectAssistant(cls._db_label())
-        raise ValueError("provider phải là openai hoặc gemini.")
-
-    @staticmethod
-    @contextmanager
-    def _scope(workspace_scope: int | None):
-        access.set_ai_workspace_scope(workspace_scope)
-        try:
-            yield
-        finally:
-            access.set_ai_workspace_scope(None)
-
     @staticmethod
     def _tenant(project_id: int, workspace_scope: int | None) -> int:
         value = int(workspace_scope or project_id or 0)
         if value <= 0:
             raise ValueError("AI cần workspace_project_id hợp lệ.")
         return value
+
+    @staticmethod
+    def _rag_enabled() -> bool:
+        return str(os.environ.get("QLDA_AI_RAG_ENABLED", "1") or "1").strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _ground_question(cls, tenant: int, question: str, provider: str) -> tuple[str, list[str]]:
+        if not cls._rag_enabled() or not str(question or "").strip():
+            return str(question or ""), []
+        try:
+            embedder = ProviderEmbeddingAdapter(provider if provider in {"openai", "gemini", "google"} else None)
+            store = PostgresVectorContextStore(embed=embedder.embed)
+            service = AIContextService(
+                store,
+                max_chars=max(2000, min(int(os.environ.get("QLDA_AI_RAG_MAX_CHARS", "18000")), 50000)),
+            )
+            top_k = max(1, min(int(os.environ.get("QLDA_AI_RAG_TOP_K", "8")), 20))
+            context_text, bundle = service.build_grounded_context(tenant, question, top_k=top_k)
+            if not context_text:
+                return str(question or ""), []
+            grounded = (
+                f"{question}\n\n"
+                "NGỮ CẢNH TRUY XUẤT CỦA ĐÚNG WORKSPACE NHÀ THẦU:\n"
+                f"{context_text}\n\n"
+                "YÊU CẦU NGUỒN: chỉ dùng phần ngữ cảnh trên khi phù hợp; khi dựa vào một đoạn, "
+                "hãy nêu lại nhãn [NGUỒN n: ...]. Không suy đoán dữ liệu không có trong nguồn."
+            )
+            return grounded, list(bundle.citations)
+        except Exception:
+            # RAG is an augmentation layer; provider chat remains available when
+            # pgvector/embedding/indexing is temporarily unavailable.
+            return str(question or ""), []
 
     @classmethod
     def _run(
@@ -77,11 +80,9 @@ class NativeAIAdapter:
         *args: Any,
         **kwargs: Any,
     ):
-        assistant = cls._assistant(provider)
         try:
-            with cls._scope(workspace_scope):
-                return getattr(assistant, method)(*args, **kwargs)
-        except engine.AIServiceError as exc:
+            return LegacyAIProvider.run(provider, method, workspace_scope, *args, **kwargs)
+        except AIProviderError as exc:
             raise cls._domain_error(exc) from exc
 
     def ask(
@@ -96,16 +97,43 @@ class NativeAIAdapter:
         workspace_scope: int | None = None,
     ) -> str:
         tenant = self._tenant(project_id, workspace_scope)
-        return self._run(
-            provider,
-            "ask_project",
-            tenant,
-            int(project_id),
-            question,
-            history=history,
-            status_date=status_date,
-            use_web=use_web,
-        )
+        grounded, source_refs = self._ground_question(tenant, str(question or ""), str(provider or "openai").lower())
+        started = time.perf_counter()
+        try:
+            result = self._run(
+                provider,
+                "ask_project",
+                tenant,
+                int(project_id),
+                grounded,
+                history=history,
+                status_date=status_date,
+                use_web=use_web,
+            )
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_CHAT",
+                "provider": provider,
+                "input": question,
+                "input_hash": content_hash(question),
+                "context": {"rag_sources": source_refs, "history_items": len(history or [])},
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": True,
+            })
+            return result
+        except Exception as exc:
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_CHAT",
+                "provider": provider,
+                "input": question,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": False,
+                "error_code": str(getattr(exc, "code", exc.__class__.__name__)),
+            })
+            raise
 
     def schedule_risk(
         self,
@@ -154,15 +182,25 @@ class NativeAIAdapter:
         workspace_scope: int | None = None,
     ) -> str:
         tenant = self._tenant(project_id, workspace_scope)
-        return self._run(
+        grounded, source_refs = self._ground_question(tenant, str(question or ""), str(provider or "openai").lower())
+        result = self._run(
             provider,
             "legal_qa",
             tenant,
             int(project_id),
-            question,
+            grounded,
             status_date=status_date,
             use_web=use_web,
         )
+        record_ai_event({
+            "workspace_project_id": tenant,
+            "event_type": "AI_LEGAL_QA",
+            "provider": provider,
+            "input": question,
+            "source_refs": source_refs,
+            "success": True,
+        })
+        return result
 
     def test_connection(self, *, provider: str = "openai") -> str:
         return self._run(provider, "test_connection", None)
