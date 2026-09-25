@@ -30,7 +30,6 @@ ALLOWED_DEBT_FILENAMES = frozenset(
         "ipc_claim_number_fix.py",
         "ipc_claim_patch.py",
         "ipc_claim_summary_fix.py",
-        "production_progress_overview_patch.py",
     }
 )
 DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
@@ -40,7 +39,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "owner-supplied-materials",
         "project-cost-management",
         "finance-consistency-ui",
-        "production-progress-overview",
         "production-progress-shared-ai",
         "production-progress-source-exact",
     }
@@ -62,6 +60,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.document_management_vps_ui": RUNTIME / "document_management_vps_ui.py",
     "qlda.runtime_core.attachment_upload_reopen_fix": RUNTIME / "attachment_upload_reopen_fix.py",
     "qlda.runtime_core.upload_ui_200mb_policy": RUNTIME / "upload_ui_200mb_policy.py",
+    "qlda.runtime_core.production_progress_overview_patch": RUNTIME / "production_progress_overview_patch.py",
 }
 
 ALLOWED_DYNAMIC_EXECUTION = {
