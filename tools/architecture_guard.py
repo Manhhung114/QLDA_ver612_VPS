@@ -34,12 +34,8 @@ ALLOWED_DEBT_FILENAMES = frozenset(
 )
 DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 
-ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
-    {
-        "project-cost-management",
-        "finance-consistency-ui",
-    }
-)
+# UI is now fully owned by qlda.presentation; runtime_core gets no exceptions.
+ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset()
 
 ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
     {"src/qlda/application/contractor_data_hub/service.py"}
@@ -159,8 +155,8 @@ def check_runtime_ui_feature_budget() -> list[str]:
             seen.add(feature.name)
             continue
         errors.append(
-            f"New UI compatibility feature {feature.name!r} points to {feature.module}; "
-            "new UI must live under qlda.presentation."
+            f"Runtime-owned UI is prohibited: {feature.name!r} points to {feature.module}; "
+            "UI must live under qlda.presentation."
         )
     stale = ALLOWED_RUNTIME_UI_COMPAT_FEATURES - seen
     for name in sorted(stale):
@@ -259,7 +255,7 @@ def main() -> int:
     print(f" - retired compatibility modules locked out: {len(RETIRED_MODULES)}")
     print(f" - tracked legacy dynamic-execution modules: {len(ALLOWED_DYNAMIC_EXECUTION)}")
     print(" - no new domain/application dependency on runtime_core")
-    print(" - no new runtime_core-owned UI feature")
+    print(" - no runtime_core-owned UI feature")
     print(" - retired compatibility imports cannot return")
     print(" - dynamic exec/eval cannot spread or increase")
     print(" - runtime_core import is side-effect free")
