@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
+import inspect
 import unittest
 
+from qlda.infrastructure.ai.project_chat import project_wide_intent
+from qlda.presentation.streamlit import legacy_ai_streaming_contract as contract
 from qlda.presentation.streamlit.legacy_ai_streaming_contract import (
     install_legacy_ai_streaming_contract,
 )
-from qlda.runtime_core.ai_service import (
-    GeminiProjectAssistant,
-    OpenAIProjectAssistant,
-    ProjectContextBuilder,
-)
+from qlda.runtime_core.ai_service import GeminiProjectAssistant, OpenAIProjectAssistant
 
 
 class AIStreamingContractTests(unittest.TestCase):
@@ -25,18 +23,22 @@ class AIStreamingContractTests(unittest.TestCase):
         install_legacy_ai_streaming_contract()
         self.assertIs(GeminiProjectAssistant.ask_project_stream, first)
 
-    def test_legacy_legal_module_alias_maps_to_real_sql_table(self):
+    def test_project_chat_contract_uses_native_live_data_path(self):
         install_legacy_ai_streaming_contract()
-        builder = ProjectContextBuilder(":memory:")
-        connection = sqlite3.connect(":memory:")
-        try:
-            connection.execute("CREATE TABLE legal_documents (id INTEGER PRIMARY KEY)")
-            self.assertTrue(
-                builder.table_exists(connection, "qlda.runtime_core.legal_documents")
+        source = inspect.getsource(contract._ask_project_stream)
+        self.assertIn("qlda.infrastructure.ai.project_chat", source)
+        self.assertNotIn("qlda.runtime_core.ai_streaming", source)
+        self.assertIs(GeminiProjectAssistant.ask_project_stream, contract._ask_project_stream)
+        self.assertIs(OpenAIProjectAssistant.ask_project_stream, contract._ask_project_stream)
+
+    def test_whole_project_intent_matches_current_production_question(self):
+        self.assertTrue(
+            project_wide_intent(
+                "Đánh giá tiến độ hoàn thành lắp đặt các hệ của tháp S4 và tổng quan toàn bộ dự án"
             )
-            self.assertTrue(builder.table_exists(connection, "legal_documents"))
-        finally:
-            connection.close()
+        )
+        self.assertTrue(project_wide_intent("Cho tôi tổng thể dự án và tất cả nhà thầu"))
+        self.assertFalse(project_wide_intent("Tiến độ lắp đặt tháp S4 của nhà thầu đang chọn"))
 
 
 if __name__ == "__main__":
