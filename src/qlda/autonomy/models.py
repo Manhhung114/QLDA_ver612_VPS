@@ -77,6 +77,13 @@ class ToolSpec:
     mode: ActionMode = ActionMode.READ_ONLY
     allowed_roles: tuple[str, ...] = ("admin", "update", "read")
     idempotent: bool = True
+    parameters_schema: dict[str, Any] = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
+    )
 
 
 @dataclass(frozen=True, slots=True)
