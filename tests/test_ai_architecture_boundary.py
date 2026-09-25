@@ -10,7 +10,9 @@ APP_DATA_HUB = ROOT / "src/qlda/application/contractor_data_hub"
 INFRA_AI = ROOT / "src/qlda/infrastructure/ai"
 NATIVE_AI = ROOT / "src/qlda/infrastructure/native_ai.py"
 PLANNER = ROOT / "src/qlda/autonomy/ai_planner.py"
-LEGACY_PROVIDER = INFRA_AI / "legacy_provider.py"
+BOOTSTRAP = ROOT / "src/qlda/runtime_core/bootstrap.py"
+RUNTIME_FEATURES = ROOT / "src/qlda/composition/runtime_features.py"
+RUNTIME_SETTINGS_BRIDGE = ROOT / "src/qlda/runtime_core/runtime_settings_bridge.py"
 
 
 def _runtime_imports(path: Path) -> list[str]:
@@ -46,22 +48,33 @@ def test_native_ai_adapter_does_not_import_runtime_provider() -> None:
     assert not _runtime_imports(NATIVE_AI)
 
 
-def test_only_explicit_legacy_provider_may_bridge_runtime_ai_service() -> None:
+def test_infrastructure_ai_has_zero_runtime_core_bridges() -> None:
     offenders: list[str] = []
     for path in INFRA_AI.glob("*.py"):
         imports = _runtime_imports(path)
-        if imports and path.name != "legacy_provider.py":
+        if imports:
             offenders.append(f"{path.name}: {imports}")
-    assert not offenders, "Unexpected runtime_core imports in infrastructure/ai: " + "; ".join(offenders)
+    assert not offenders, "AI infrastructure must be runtime_core-free: " + "; ".join(offenders)
 
 
-def test_legacy_provider_is_the_single_runtime_ai_bridge() -> None:
-    assert LEGACY_PROVIDER.exists(), "Strangler bridge disappeared before legacy slices were retired"
-    assert _runtime_imports(LEGACY_PROVIDER), "Legacy bridge must remain explicit while compatibility AI exists"
-    bridge_files = sorted(
-        path.name for path in INFRA_AI.glob("*.py") if _runtime_imports(path)
-    )
-    assert bridge_files == ["legacy_provider.py"], bridge_files
+def test_runtime_composition_has_no_ai_stage() -> None:
+    source = RUNTIME_FEATURES.read_text(encoding="utf-8")
+    assert 'AI = "ai"' not in source
+    assert "RuntimeStage.AI" not in source
+    assert "qlda.runtime_core.ai_" not in source
+
+
+def test_bootstrap_never_installs_legacy_ai_stage() -> None:
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "install_stage(RuntimeStage.AI)" not in source
+    assert "initialize_business_runtime()" in source
+
+
+def test_runtime_settings_bridge_does_not_patch_ai_service() -> None:
+    source = RUNTIME_SETTINGS_BRIDGE.read_text(encoding="utf-8")
+    assert "qlda.runtime_core.ai_service" not in source
+    assert "AISettings.from_env" not in source
+    assert "GeminiSettings.from_env" not in source
 
 
 def test_planner_has_no_regex_json_parser() -> None:
