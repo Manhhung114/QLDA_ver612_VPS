@@ -6,7 +6,7 @@ AI_NAV_LABEL = "🤖 AI Supervisor"
 HOME_NAV_LABEL = "🏠 Tổng quan"
 NAV_RADIO_LABEL = "Nhóm chức năng"
 _NAV_ACTIVE_KEY = "qlda_ai_supervisor_navigation_active"
-PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V2 PRESENTATION"
+PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V3 COMPACT"
 
 
 def _inject_ai_nav_option(options: Iterable[Any]) -> list[Any]:
@@ -29,15 +29,9 @@ def _is_main_navigation(label: Any, options: Iterable[Any]) -> bool:
 
 
 def install_ai_supervisor_navigation() -> None:
-    """Expose AI Supervisor as its own sidebar navigation item.
-
-    This presentation-layer adapter is temporary only while the frozen V7.6
-    Streamlit shell is decomposed. Business rules remain outside this module;
-    it only routes the existing sidebar selection to the contractor-isolated
-    Supervisor renderer.
-    """
+    """Expose the compact AI Supervisor page as its own sidebar item."""
     import streamlit as st
-    import qlda.presentation.streamlit.autonomy_overview as overview
+    from qlda.presentation.streamlit.ai_supervisor_page import render_ai_supervisor_page
     import qlda.runtime_core.ui_v7_compact as ui
 
     if getattr(st, "_qlda_ai_supervisor_navigation_installed", False):
@@ -45,7 +39,6 @@ def install_ai_supervisor_navigation() -> None:
 
     original_radio = st.radio
     original_overview_renderer = ui.render_overview_v7
-    final_supervisor_renderer = overview.render_autonomy_control_center
 
     def radio_with_ai_supervisor(label, options, *args, **kwargs):
         try:
@@ -64,7 +57,7 @@ def install_ai_supervisor_navigation() -> None:
 
     def render_overview_or_supervisor(st_obj, db, project_id: int, *args, **kwargs):
         if bool(st_obj.session_state.get(_NAV_ACTIVE_KEY, False)):
-            return final_supervisor_renderer(
+            return render_ai_supervisor_page(
                 st_obj,
                 db,
                 int(project_id),
