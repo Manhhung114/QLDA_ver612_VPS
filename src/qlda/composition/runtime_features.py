@@ -106,7 +106,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("finance-consistency-ui", RuntimeStage.UI, "qlda.runtime_core.finance_consistency", "install_finance_consistency_ui"),
     RuntimeFeature("money-display-format", RuntimeStage.UI, "qlda.presentation.streamlit.money_display", "install_money_display_format"),
     RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.presentation.streamlit.expander_policy", "install_expanders_default_collapsed"),
-    RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.runtime_core.document_selection_autopen", "install_document_selection_autopen"),
+    RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.presentation.streamlit.document_selection_autopen", "install_document_selection_autopen"),
     RuntimeFeature("production-progress-overview", RuntimeStage.UI, "qlda.runtime_core.production_progress_overview_patch", "install_production_progress_overview_patch"),
     RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.runtime_core.contractor_data_shared_ai", "install_production_progress_shared_ai_ui"),
     RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.presentation.streamlit.multiselect_tag_style", "install_multiselect_tag_style_patch"),
