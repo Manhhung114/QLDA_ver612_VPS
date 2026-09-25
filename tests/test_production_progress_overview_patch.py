@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qlda.runtime_core.production_progress_overview_patch import (
+from qlda.presentation.streamlit.production_progress_overview import (
     _progress_dimension_sort_key,
     _sync_dependent_multiselect_state,
     worksheet_catalog,
@@ -68,7 +68,6 @@ class ProductionProgressOverviewPatchTests(unittest.TestCase):
         )
         self.assertEqual(st.session_state[key], ["Zone 1", "Zone 2", "Zone 3"])
 
-        # Same worksheet scope: preserve a user's manual subset.
         st.session_state[key] = ["Zone 2"]
         _sync_dependent_multiselect_state(
             st,
@@ -79,8 +78,6 @@ class ProductionProgressOverviewPatchTests(unittest.TestCase):
         )
         self.assertEqual(st.session_state[key], ["Zone 2"])
 
-        # Changed worksheet scope: discard stale Zone values and select the new
-        # worksheet's progress dimensions.
         _sync_dependent_multiselect_state(
             st,
             key=key,
