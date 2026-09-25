@@ -3,8 +3,8 @@ from __future__ import annotations
 """Stable UI-facing AI surface implemented entirely on the native AI boundary.
 
 The Streamlit application historically imported assistant classes from
-``runtime_core.ai_service``.  This module preserves the small presentation API
-while moving ownership to infrastructure/native AI.  It intentionally does not
+``runtime_core.ai_service``. This module preserves the small presentation API
+while moving ownership to infrastructure/native AI. It intentionally does not
 import any ``qlda.runtime_core`` module.
 """
 
@@ -15,12 +15,30 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from qlda.domain.errors import AIApplicationError
-from qlda.infrastructure.ai.provider_engine import ProviderConfig
+from qlda.infrastructure.ai.provider_engine import _safe_error
 from qlda.infrastructure.native_ai import NativeAIAdapter
 from qlda.infrastructure.postgres import connect
 
 
 AIServiceError = AIApplicationError
+
+
+def _mapped_provider_error(exc: BaseException, provider: str) -> AIApplicationError:
+    mapped = _safe_error(exc, provider)
+    return AIApplicationError(
+        str(mapped),
+        code=str(getattr(mapped, "code", "ai_provider_error") or "ai_provider_error"),
+        retryable=bool(getattr(mapped, "retryable", False)),
+        action=str(getattr(mapped, "action", "") or ""),
+    )
+
+
+def openai_error_to_service_error(exc: BaseException) -> AIApplicationError:
+    return _mapped_provider_error(exc, "openai")
+
+
+def gemini_error_to_service_error(exc: BaseException) -> AIApplicationError:
+    return _mapped_provider_error(exc, "gemini")
 
 
 @dataclass(slots=True)
@@ -70,7 +88,7 @@ class _BaseProjectAssistant:
         self._apply_process_settings()
 
     def _apply_process_settings(self) -> None:
-        # Existing Streamlit settings are server-owned.  Export them only to the
+        # Existing Streamlit settings are server-owned. Export them only to the
         # current process so the native provider engine consumes one source of truth.
         if self.provider == "gemini":
             if self.settings.api_key:
@@ -174,7 +192,7 @@ class GeminiProjectAssistant(_BaseProjectAssistant):
 class ProjectContextBuilder:
     """Narrow native document repository used by the existing Streamlit file picker.
 
-    General AI context is supplied through Unified Context/RAG.  This class only
+    General AI context is supplied through Unified Context/RAG. This class only
     exposes attachment metadata/bytes needed by the presentation flow and uses
     PostgreSQL directly rather than the retired SQLite AI context builder.
     """
@@ -267,4 +285,6 @@ __all__ = [
     "OpenAIProjectAssistant",
     "GeminiProjectAssistant",
     "ProjectContextBuilder",
+    "openai_error_to_service_error",
+    "gemini_error_to_service_error",
 ]
