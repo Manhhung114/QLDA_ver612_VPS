@@ -10,12 +10,11 @@ install_stage(RuntimeStage.DATA)
 
 import qlda.application.contractor_data_hub.service as hub_service
 from qlda.runtime_core.contractor_data_official_ai import extract_official_summaries
-from qlda.runtime_core.production_progress_source_exact import build_source_exact_pivot
+from qlda.presentation.streamlit.production_progress_source_exact import build_source_exact_pivot
 
 
 class ContractorDataSourceExactTests(unittest.TestCase):
     def test_duplicate_work_item_labels_are_not_averaged(self):
-        # Real S2 has this same label at rows 5, 47 and 83 with different values.
         df = pd.DataFrame([
             {"Nhà thầu": "NT-01", "Nguồn": "SME", "Worksheet": "S2 (update)", "Dòng nguồn": 5,
              "Công tác": "I. Thi công lắp đặt phần thô", "Zone": "T1", "Tiến độ (%)": 50.0},
