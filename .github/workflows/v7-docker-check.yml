@@ -22,11 +22,12 @@ jobs:
       - name: Verify non-root packaged runtime
         run: |
           test "$(docker image inspect qlda-v7 --format '{{.Config.User}}')" = "qlda"
-          docker image inspect qlda-v7 --format '{{json .Config.Cmd}}' | grep -Fq 'src/qlda/presentation/streamlit/app.py'
+          docker image inspect qlda-v7 --format '{{json .Config.Cmd}}' | grep -Fq 'src/qlda/presentation/streamlit/main.py'
           docker run --rm --entrypoint python qlda-v7 - <<'PY'
           import qlda
           assert qlda.__version__ == '7.6', qlda.__version__
           assert qlda.LEGACY_ADAPTERS == (), qlda.LEGACY_ADAPTERS
           assert qlda.LEGACY_RUNTIME is False
+          assert qlda.STREAMLIT_ENTRYPOINT == 'qlda.presentation.streamlit.main'
           print('V7 Docker packaged runtime OK')
           PY
