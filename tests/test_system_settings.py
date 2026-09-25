@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
@@ -116,7 +115,7 @@ class SystemSettingsV622Tests(unittest.TestCase):
         self.assertTrue(value["use_web"])
         self.assertFalse(bridge.runtime_bridge_status()["ai"])
 
-    def test_native_provider_settings_migrate_retired_gemini_25_flash(self):
+    def test_native_provider_settings_preserve_explicit_gemini_25_flash(self):
         from qlda.infrastructure.ai.provider_settings import get_provider_settings
 
         ss.save_app_settings(
@@ -128,12 +127,25 @@ class SystemSettingsV622Tests(unittest.TestCase):
             }
         )
         managed = get_provider_settings("gemini")
-        self.assertEqual(managed["model"], "gemini-3.8-flash")
+        self.assertEqual(managed["model"], "gemini-2.5-flash")
 
         ss.save_app_settings({"managed_ai": False})
         with patch.dict(os.environ, {"GEMINI_MODEL": "models/gemini-2.5-flash"}, clear=False):
             runtime = get_provider_settings("gemini")
-        self.assertEqual(runtime["model"], "gemini-3.8-flash")
+        self.assertEqual(runtime["model"], "gemini-2.5-flash")
+
+    def test_gemini_human_label_is_normalized_without_switching_model(self):
+        from qlda.infrastructure.ai.provider_settings import normalize_gemini_model
+
+        self.assertEqual(normalize_gemini_model("Gemini 3.5 Flash"), "gemini-3.5-flash")
+        self.assertEqual(normalize_gemini_model("models/gemini-3.5-flash"), "gemini-3.5-flash")
+        self.assertEqual(syscfg._canonical_gemini_model("Gemini 3.5 Flash"), "gemini-3.5-flash")
+
+    def test_auto_legacy_value_resolves_to_fixed_default(self):
+        from qlda.infrastructure.ai.provider_settings import normalize_gemini_model
+
+        self.assertEqual(normalize_gemini_model("auto"), "gemini-3.8-flash")
+        self.assertEqual(syscfg._canonical_gemini_model("auto"), "gemini-3.8-flash")
 
     def test_audit_contains_metadata_not_values(self):
         ss.append_settings_audit("admin@example.com", "update_ai", ["openai_api_key", "ai_provider"])
