@@ -9,6 +9,9 @@ on:
       - 'src/qlda/infrastructure/native_ai.py'
       - 'src/qlda/autonomy/ai_planner.py'
       - 'src/qlda/application/contractor_data_hub/**'
+      - 'src/qlda/composition/runtime_features.py'
+      - 'src/qlda/runtime_core/bootstrap.py'
+      - 'src/qlda/runtime_core/runtime_settings_bridge.py'
       - 'tests/test_ai_*.py'
       - 'docs/architecture/AI_ARCHITECTURE.md'
       - '.github/workflows/ai-quality.yml'
@@ -19,6 +22,9 @@ on:
       - 'src/qlda/infrastructure/native_ai.py'
       - 'src/qlda/autonomy/ai_planner.py'
       - 'src/qlda/application/contractor_data_hub/**'
+      - 'src/qlda/composition/runtime_features.py'
+      - 'src/qlda/runtime_core/bootstrap.py'
+      - 'src/qlda/runtime_core/runtime_settings_bridge.py'
       - 'tests/test_ai_*.py'
       - 'docs/architecture/AI_ARCHITECTURE.md'
       - '.github/workflows/ai-quality.yml'
@@ -46,7 +52,10 @@ jobs:
             src/qlda/application/ai \
             src/qlda/infrastructure/ai \
             src/qlda/infrastructure/native_ai.py \
-            src/qlda/autonomy/ai_planner.py
+            src/qlda/autonomy/ai_planner.py \
+            src/qlda/composition/runtime_features.py \
+            src/qlda/runtime_core/bootstrap.py \
+            src/qlda/runtime_core/runtime_settings_bridge.py
       - name: Run AI architecture and deterministic quality regressions
         run: |
           python -m unittest -v \
