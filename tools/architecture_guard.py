@@ -23,7 +23,6 @@ ENTRYPOINT_MAX_BYTES = 8_192
 ALLOWED_DEBT_FILENAMES = frozenset(
     {
         "attachment_upload_reopen_fix.py",
-        "autonomy_overview_patch.py",
         "boq_claim_price_header_guard.py",
         "boq_claim_price_recovery.py",
         "claim_material_period_guard.py",
