@@ -2,27 +2,40 @@
 
 ## Trạng thái hiện tại
 
-Roadmap hiện đại hóa AI production đã hoàn thành ở cấp **boundary + retrieval + tool-calling + observability + deterministic quality gate**. Các tiêu chí đã khóa bằng code/test gồm:
+Roadmap hiện đại hóa AI production đã hoàn tất theo chuỗi:
 
-- `application/ai` là boundary native, không phụ thuộc `runtime_core`;
-- RAG tenant-scoped theo `workspace_project_id`, có provenance và lexical fallback;
-- pgvector được dùng khi PostgreSQL cho phép, không làm chat phụ thuộc cứng vào extension;
-- AI Planner ưu tiên native OpenAI/Gemini function calling thay vì regex JSON parsing;
-- RBAC, Data Integrity Gate, Approval Gate và ToolRegistry vẫn nằm downstream, LLM không override được;
-- audit/telemetry theo workspace ghi provider/model/context/source/tool/latency/usage khi khả dụng;
-- deterministic AI quality eval chạy riêng trong **AI Quality Gate**;
-- chỉ `infrastructure/ai/legacy_provider.py` còn được phép bridge tới AI engine compatibility cũ.
+```text
+AI Boundary
+    -> Telemetry + Audit
+    -> Unified Context Port
+    -> Document ingestion + provenance
+    -> pgvector / RAG
+    -> Native Tool Calling
+    -> AI Quality Eval
+    -> Migrate legacy AI modules
+    -> Retire runtime_core AI compatibility
+```
 
-Phần còn lại trong `runtime_core` là **compatibility retirement backlog**, không phải thiếu capability của kiến trúc AI mới. Các slice cũ chỉ được xóa sau khi owner native tương ứng và regression của slice đó đã ổn định.
+Các invariant hiện tại:
 
-## Mục tiêu
+- `application/ai` là boundary native và không import `runtime_core`;
+- `application/contractor_data_hub` không import `runtime_core`;
+- `infrastructure/ai` có **zero runtime_core bridge**;
+- provider execution dùng `NativeProviderGateway` cho OpenAI/Gemini;
+- cấu hình provider/Admin encrypted settings được đọc bởi `provider_settings.py`, không monkey-patch `runtime_core.ai_service`;
+- RAG tenant-scoped theo `workspace_project_id`, có provenance, checksum dedup và lexical fallback;
+- AI Planner dùng native tool/function calling, không regex-parse JSON;
+- telemetry/audit ghi theo workspace và fail-open;
+- deterministic AI quality eval chạy trong AI Quality Gate;
+- `RuntimeStage.AI` đã bị xóa khỏi runtime composition;
+- `initialize_ai_runtime()` chỉ còn là bootstrap alias tương thích, không cài AI patch;
+- `runtime_settings_bridge` không còn import/patch `ai_service`.
 
-AI của QLDA phải hỗ trợ kỹ sư nhưng không được trở thành đường tắt bỏ qua nghiệp vụ.
-Mỗi nhà thầu là một AI tenant độc lập theo `workspace_project_id`. LLM không được
-SQL trực tiếp, không tự phê duyệt IPC/VO/hồ sơ/NCR và không được sửa tiến độ ngoài
-ToolRegistry/Approval Gate.
+Một số file AI lịch sử có thể còn nằm trong `runtime_core` để phục vụ truy vết lịch sử/rollback, nhưng **không còn nằm trong production composition và không còn là dependency được phép của AI native**. Việc thêm lại AI runtime stage hoặc bridge bị regression test chặn.
 
-## Boundary
+## Mục tiêu và boundary
+
+AI của QLDA hỗ trợ kỹ sư nhưng không được trở thành đường tắt bỏ qua nghiệp vụ. Mỗi nhà thầu là một AI tenant độc lập theo `workspace_project_id`. LLM không được SQL trực tiếp, không tự phê duyệt IPC/VO/hồ sơ/NCR và không sửa tiến độ ngoài ToolRegistry/Approval Gate.
 
 ```text
 presentation / autonomy
@@ -37,33 +50,39 @@ application/ai
         |
         v
 infrastructure/ai
+  - NativeProviderGateway
+  - provider_settings
   - OpenAI/Gemini native function calling
   - embeddings
   - PostgreSQL pgvector/lexical retrieval
   - durable telemetry/audit
-  - one explicit legacy provider adapter
+        |
+        v
+external AI providers
 ```
 
-`application/ai` và `application/contractor_data_hub` không được import
-`runtime_core`. `infrastructure/native_ai.py` không được import provider legacy
-trực tiếp. Trong giai đoạn strangler hiện tại, chỉ
-`infrastructure/ai/legacy_provider.py` được phép bridge tới engine AI/settings cũ.
-Architecture Guard và `test_ai_architecture_boundary.py` khóa invariant này.
+Không có mũi tên từ `infrastructure/ai` sang `runtime_core`.
+
+## Provider boundary
+
+`NativeProviderGateway` là provider boundary duy nhất cho chat/report/legal/vision/Data Hub. Provider settings được resolve theo thứ tự tương thích với deployment hiện tại:
+
+- Admin-managed encrypted settings nếu `managed_ai=true`;
+- nếu không, environment/Streamlit secrets ưu tiên;
+- OpenAI/Gemini model có default an toàn;
+- thiếu API key trả lỗi domain rõ ràng, không rơi về legacy engine.
+
+`infrastructure/ai/legacy_provider.py` chỉ là deprecated import shim trỏ tới native gateway cho caller cũ chưa đổi tên import; file này **không import `runtime_core` và không chứa compatibility engine**.
 
 ## Grounded retrieval / RAG
 
-Contractor Data Hub đã chuẩn hóa Google Sheets/Drive/PDF/XLSX thành các record có
-`content` và provenance. Worker/indexer đưa chính những record đó cùng dữ liệu vận
-hành narrative vào `qlda_ai_chunks`. Mỗi chunk luôn mang `workspace_project_id`;
-cả vector search lẫn lexical fallback đều lọc tenant trước khi trả kết quả.
-
-Pipeline:
+Contractor Data Hub chuẩn hóa Google Sheets/Drive/PDF/XLSX thành record có `content` và provenance. Worker/indexer đưa record cùng operational narrative vào `qlda_ai_chunks`. Mỗi chunk luôn mang `workspace_project_id`; vector search và lexical fallback đều lọc tenant trước khi trả kết quả.
 
 ```text
 Google/Drive/Data Hub + operational records
         |
         v
-normalized records
+normalized records + provenance
         |
         v
 SHA/checksum dedup
@@ -76,37 +95,28 @@ SHA/checksum dedup
 AIContextService
         |
         v
-[NGUỒN n: source_ref] + câu hỏi
+[NGUỒN n: source_ref] + prompt
+        |
+        v
+NativeProviderGateway
 ```
 
-Indexing là content-addressed: record không đổi checksum không bị embed lại. Nếu
-PostgreSQL chưa có quyền tạo extension `vector`, chat vẫn hoạt động và retrieval
-chuyển sang lexical tenant-filtered.
-
-### Provenance
-
-Mỗi đoạn đưa cho model có `source_ref`; câu trả lời grounded được yêu cầu giữ nhãn
-`[NGUỒN n: ...]`. Retrieval eval đo source coverage, Recall@K và tenant leakage.
-Answer eval đo citation recall, nguồn trích dẫn không tồn tại và các assertion bị
-cấm trong golden fixture.
+Nếu PostgreSQL chưa có quyền tạo extension `vector`, chat vẫn hoạt động bằng lexical retrieval tenant-filtered. Indexing là content-addressed nên record không đổi checksum không bị embed lại.
 
 ### Dữ liệu số authoritative
 
-RAG dùng để tìm nội dung và bằng chứng, **không** thay thế các engine deterministic.
-Ví dụ:
+RAG tìm nội dung/bằng chứng, không thay thế deterministic engines. Ví dụ:
 
-- hỏi điều khoản/hạn phản hồi -> retrieval/RAG;
-- IPC vượt BOQ bao nhiêu -> `reconcile_ipc_boq`/SQL deterministic;
+- điều khoản/hạn phản hồi -> retrieval/RAG;
+- IPC vượt BOQ -> reconciliation/SQL deterministic;
 - giá trị VO -> engine VO + dữ liệu hợp đồng/BOQ;
-- Project Health -> Supervisor indicators deterministic.
+- Project Health -> deterministic supervisor indicators.
 
 LLM không được tự cộng lũy kế IPC để tạo số authoritative.
 
 ## Native tool calling
 
-`StructuredAIPlanner` ưu tiên OpenAI/Gemini native function calling. JSON schema
-được phát hành từ contract ToolSpec/application schema. Model chỉ lựa chọn function;
-việc thực thi vẫn đi theo:
+`StructuredAIPlanner` ưu tiên OpenAI/Gemini native function calling. Model chỉ lựa chọn function; thực thi vẫn đi theo:
 
 ```text
 Model tool choice
@@ -119,47 +129,31 @@ Model tool choice
     -> Audit
 ```
 
-Text-JSON planner chỉ là opt-in compatibility fallback
-(`QLDA_AI_TEXT_PLANNER_FALLBACK=1`) và parse bằng `json.loads` nghiêm ngặt; regex
-JSON extraction đã bị Architecture Guard/test cấm. Mặc định, native provider failure
-không gọi text planner mà quay thẳng về `HeuristicPlanner` deterministic.
+Text-JSON planner chỉ là opt-in fallback (`QLDA_AI_TEXT_PLANNER_FALLBACK=1`) và parse bằng `json.loads` nghiêm ngặt. Mặc định provider failure quay về deterministic `HeuristicPlanner`.
 
 ## Audit / telemetry
 
-`qlda_ai_audit` lưu theo workspace:
+`qlda_ai_audit` lưu theo workspace các metadata cần thiết: request/plan id, provider/model, input hash, context/source refs, tool/arguments/reason, latency, token usage/cost khi cấu hình được, fallback/success/error code. Secrets được redact và telemetry fail-open.
 
-- request/plan id;
-- provider/model;
-- input hash, context metadata, source refs;
-- tool được chọn, arguments, reason;
-- latency;
-- input/output tokens khi provider trả usage;
-- estimated cost chỉ khi operator cấu hình rate;
-- fallback/success/error code.
-
-Secrets được redact và telemetry fail-open để lỗi quan sát không làm hỏng nghiệp vụ.
-Không hard-code giá API vì pricing thay đổi theo thời gian.
-
-## Quality evaluation
+## Quality evaluation và architecture guard
 
 CI không gọi provider thật. Golden/deterministic eval bao phủ:
 
 - retrieval Recall@K / precision / provenance;
-- tenant leakage phải bằng 0;
-- grounded-answer citation recall và hallucinated source detection;
+- tenant leakage = 0;
+- citation recall và hallucinated source detection;
 - forbidden answer assertion detection;
-- planner tool recall;
-- forbidden/unknown tool detection;
-- native planner chỉ nhận registered tools;
-- provider failure phải fallback deterministic mặc định;
-- các schema quan trọng phải có required fields;
-- planner không được quay lại regex JSON extraction;
-- Contractor Data Hub application không được quay lại import `runtime_core`;
-- infrastructure AI không được phát sinh bridge thứ hai tới `runtime_core`.
+- planner tool recall và forbidden/unknown tool detection;
+- provider failure -> deterministic fallback mặc định;
+- schema required fields;
+- không regex JSON extraction;
+- application/Data Hub không import `runtime_core`;
+- **mọi file `infrastructure/ai` phải có zero `runtime_core` imports**;
+- runtime composition không được có `RuntimeStage.AI`;
+- bootstrap không được `install_stage(RuntimeStage.AI)`;
+- runtime settings bridge không được patch `AISettings/GeminiSettings`.
 
-Workflow `.github/workflows/ai-quality.yml` chạy riêng các regression AI architecture,
-RAG/provenance, planner contract, quality eval, workspace indexer và contractor tenant isolation.
-Live/provider eval có thể chạy ngoài CI với bộ dữ liệu đã ẩn thông tin nhạy cảm.
+Workflow `.github/workflows/ai-quality.yml` compile cả native AI boundary lẫn runtime retirement boundary trước khi chạy regression suite.
 
 ## Cấu hình chính
 
@@ -175,24 +169,11 @@ QLDA_AUTONOMY_AI_PROVIDER=openai
 QLDA_AI_TEXT_PLANNER_FALLBACK=0
 ```
 
-## Legacy compatibility còn lại
+## Quy tắc từ đây về sau
 
-Provider/context engine lịch sử vẫn còn trong `runtime_core` vì nhiều context patch
-production đang monkey-patch các assistant class. Nó không còn là dependency được
-phép của application/native adapters; toàn bộ bridge provider/settings đã được gom
-về `infrastructure.ai.legacy_provider`.
-
-Nguyên tắc retirement:
-
-```text
-legacy slice
-   -> native owner
-   -> parity regression
-   -> production soak
-   -> remove composition entry / compatibility bridge usage
-   -> delete legacy file
-```
-
-Không xóa hàng loạt `ai_service.py` hoặc các context patch đang phục vụ production.
-Mục tiêu tiếp theo là giảm dần bridge compatibility về 0; khi bridge cuối cùng không
-còn caller, test/guard sẽ được đổi từ “exactly one bridge” thành “zero runtime AI bridge”.
+1. AI capability mới phải đi qua `application/ai` + `infrastructure/ai`.
+2. Không thêm provider/context monkey patch vào `runtime_core`.
+3. Không khôi phục `RuntimeStage.AI`.
+4. Không cho LLM vượt ToolRegistry/RBAC/Data Integrity/Approval Gate.
+5. Mọi nguồn RAG phải tenant-scoped và mang provenance.
+6. Thay đổi AI boundary phải qua AI Quality Gate.
