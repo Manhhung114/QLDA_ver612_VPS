@@ -37,6 +37,31 @@ ALLOWED_DEBT_FILENAMES = frozenset(
 )
 DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 
+# UI compatibility features that still live in runtime_core. This is a shrinking
+# ledger, not an extension point. New UI features must be implemented under
+# qlda.presentation and referenced from the composition root there.
+ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
+    {
+        "upload-ui-policy",
+        "document-management-vps-ui",
+        "attachment-upload-reopen",
+        "owner-supplied-materials",
+        "finance-title-policy",
+        "project-cost-management",
+        "finance-consistency-ui",
+        "money-display-format",
+        "expander-default-collapsed",
+        "document-selection-autopen",
+        "production-progress-overview",
+        "production-progress-shared-ai",
+        "multiselect-tag-style",
+        "production-progress-source-exact",
+        "autonomy-overview",
+        "advanced-automation-ui",
+        "contractor-data-admin-visibility",
+    }
+)
+
 # One pre-existing application dependency still calls legacy AI/settings adapters
 # from Contractor Data Hub. It is explicitly tracked in the migration ledger and
 # may be removed from this baseline, never expanded with another path.
@@ -126,12 +151,61 @@ def check_no_new_patch_debt() -> list[str]:
     return errors
 
 
+def check_runtime_ui_feature_budget() -> list[str]:
+    """Prevent any new Streamlit/UI feature from being owned by runtime_core."""
+    from qlda.composition.runtime_features import FEATURES, RuntimeStage
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for feature in FEATURES:
+        if feature.stage is not RuntimeStage.UI:
+            continue
+        if not str(feature.module).startswith("qlda.runtime_core"):
+            continue
+        if feature.name in ALLOWED_RUNTIME_UI_COMPAT_FEATURES:
+            seen.add(feature.name)
+            continue
+        errors.append(
+            f"New UI compatibility feature {feature.name!r} points to {feature.module}; "
+            "new UI must live under qlda.presentation."
+        )
+    stale = ALLOWED_RUNTIME_UI_COMPAT_FEATURES - seen
+    for name in sorted(stale):
+        errors.append(f"Remove stale runtime UI compatibility baseline entry: {name}")
+    return errors
+
+
+def check_no_dynamic_source_execution() -> list[str]:
+    """Reject exec/eval in packaged application code.
+
+    Dynamic execution was historically used to compose generated/legacy source.
+    The production package is now source-controlled and must remain inspectable.
+    """
+    errors: list[str] = []
+    for path in _python_files(SRC):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError as exc:
+            errors.append(f"Cannot parse {path.relative_to(ROOT)}: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id in {"exec", "eval"}:
+                errors.append(
+                    f"Dynamic source execution is prohibited: {path.relative_to(ROOT)}:{getattr(node, 'lineno', '?')} uses {node.func.id}()"
+                )
+    return errors
+
+
 def run_checks() -> list[str]:
     errors: list[str] = []
     errors.extend(check_runtime_init_side_effect_free())
     errors.extend(check_layer_boundaries())
     errors.extend(check_streamlit_shell_frozen())
     errors.extend(check_no_new_patch_debt())
+    errors.extend(check_runtime_ui_feature_budget())
+    errors.extend(check_no_dynamic_source_execution())
     return errors
 
 
@@ -145,8 +219,11 @@ def main() -> int:
     print("ARCHITECTURE GUARD OK")
     print(f" - frozen Streamlit shell <= {LEGACY_APP_MAX_BYTES} bytes")
     print(f" - tracked compatibility-debt files: {len(ALLOWED_DEBT_FILENAMES)}")
+    print(f" - tracked runtime UI compatibility features: {len(ALLOWED_RUNTIME_UI_COMPAT_FEATURES)}")
     print(f" - tracked application->runtime_core dependencies: {len(ALLOWED_RUNTIME_CORE_DEPENDENCIES)}")
     print(" - no new domain/application dependency on runtime_core")
+    print(" - no new runtime_core-owned UI feature")
+    print(" - no dynamic exec/eval in packaged qlda source")
     print(" - runtime_core import is side-effect free")
     return 0
 
