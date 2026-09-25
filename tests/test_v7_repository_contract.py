@@ -21,6 +21,7 @@ class V7RepositoryContractTests(unittest.TestCase):
         self.assertEqual(qlda.__version__, "7.6")
         self.assertEqual(qlda.LEGACY_ADAPTERS, ())
         self.assertIs(qlda.LEGACY_RUNTIME, False)
+        self.assertEqual(qlda.STREAMLIT_ENTRYPOINT, "qlda.presentation.streamlit.main")
 
     def test_obsolete_v6_runtime_is_absent_from_root(self):
         for name in LEGACY_PATTERNS:
@@ -50,13 +51,17 @@ class V7RepositoryContractTests(unittest.TestCase):
                     offenders.append(f"{path.relative_to(ROOT)}: {module}")
         self.assertEqual(offenders, [])
 
-    def test_production_entrypoints_are_packaged(self):
+    def test_production_entrypoints_are_packaged_and_modular(self):
         service = (ROOT / "vps/qlda.service").read_text(encoding="utf-8")
         docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("src/qlda/presentation/streamlit/app.py", service)
-        self.assertIn("src/qlda/presentation/streamlit/app.py", docker)
+        entrypoint = "src/qlda/presentation/streamlit/main.py"
+        self.assertIn(entrypoint, service)
+        self.assertIn(entrypoint, docker)
         self.assertNotIn("streamlit_app.py", service)
         self.assertIn("USER qlda", docker)
+        self.assertTrue((ROOT / entrypoint).exists())
+        # The materialized shell remains available only as a compatibility body.
+        self.assertTrue((ROOT / "src/qlda/presentation/streamlit/app.py").exists())
         self.assertTrue((ROOT / "requirements.lock").exists())
 
 
