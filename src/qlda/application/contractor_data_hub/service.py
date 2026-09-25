@@ -129,7 +129,6 @@ class ContractorDataHubService:
         contractor_list = [dict(x) for x in contractors]
         for contractor in contractor_list:
             rows.append(self.repo.ensure_space(int(master_project_id), contractor))
-        # Non-destructive bridge from the first Google-Sheets implementation.
         self.repo.migrate_legacy_production_sources(int(master_project_id), contractor_list)
         return rows
 
@@ -243,8 +242,6 @@ class ContractorDataHubService:
             if category == "PRODUCTION":
                 records.extend(production or generic)
             elif category == "AUTO":
-                # Keep generic rows for broad AI retrieval, plus structured
-                # production points when the worksheet matches the Zone layout.
                 records.extend(generic)
                 records.extend(production)
             else:
@@ -263,7 +260,6 @@ class ContractorDataHubService:
     def _public_sheet_records(self, source: dict[str, Any]) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
         spreadsheet_id = str(source.get("external_id") or "")
         tabs = list(source.get("worksheet_names") or [])
-        # Legacy link-only source encodes gid as __gid__:123.
         gids: list[int] = []
         for value in tabs:
             text = str(value or "")
@@ -412,7 +408,6 @@ class ContractorDataHubService:
             return self._text_records(source, self._pdf_text(data), file_meta=file_meta, record_type="PDF"), 0
         if mime in XLSX_MIMES or lower_name.endswith((".xlsx", ".xlsm", ".xls")):
             if lower_name.endswith(".xls") and not lower_name.endswith(".xlsx"):
-                # openpyxl cannot safely parse legacy binary XLS. Keep metadata.
                 return self._text_records(
                     source,
                     f"File Excel legacy: {name}. QLDA đã ghi nhận metadata nhưng chưa trích nội dung .xls.",
@@ -560,9 +555,7 @@ class ContractorDataHubService:
         workspace_ids: Iterable[int] | None = None,
         trigger_type: str = "MANUAL",
     ) -> dict[str, Any]:
-        spaces = self.repo.list_spaces(
-            int(master_project_id), enabled_only=True
-        )
+        spaces = self.repo.list_spaces(int(master_project_id), enabled_only=True)
         allowed = {int(x) for x in (workspace_ids or []) if int(x) > 0}
         if allowed:
             spaces = [x for x in spaces if int(x.get("workspace_project_id") or 0) in allowed]
@@ -632,9 +625,9 @@ class ContractorDataHubService:
 class ContractorDataHubAI:
     """V4/V5 retrieval + AI analysis over contractor data spaces.
 
-    Retrieval happens in QLDA first.  Only the compact, authorized context is
-    sent to the configured AI provider; raw warehouses are not blindly copied to
-    the model prompt.
+    Retrieval happens in QLDA first. Only compact, authorized context is sent to
+    the infrastructure provider bridge; application code does not import the
+    compatibility provider engine or its settings store.
     """
 
     def __init__(self, db):
@@ -654,9 +647,7 @@ class ContractorDataHubAI:
         workspace_ids: Iterable[int] | None = None,
         limit: int = 120,
     ) -> list[dict[str, Any]]:
-        rows = self.repo.records(
-            int(master_project_id), workspace_ids=workspace_ids, limit=12000
-        )
+        rows = self.repo.records(int(master_project_id), workspace_ids=workspace_ids, limit=12000)
         tokens = self._tokens(question)
         scored: list[tuple[float, dict[str, Any]]] = []
         for row in rows:
@@ -691,12 +682,8 @@ class ContractorDataHubAI:
         workspace_ids: Iterable[int] | None = None,
     ) -> str:
         metrics = self.repo.project_metrics(int(master_project_id), workspace_ids=workspace_ids)
-        records = self.retrieve(
-            int(master_project_id), question, workspace_ids=workspace_ids, limit=140
-        )
-        alerts = ContractorDataHubService(self.db).project_alerts(
-            int(master_project_id), workspace_ids=workspace_ids
-        )
+        records = self.retrieve(int(master_project_id), question, workspace_ids=workspace_ids, limit=140)
+        alerts = ContractorDataHubService(self.db).project_alerts(int(master_project_id), workspace_ids=workspace_ids)
         lines = [
             "# CONTRACTOR DATA HUB — DỮ LIỆU ĐÃ ĐỒNG BỘ",
             "QUY TẮC: Mỗi nhà thầu là một kho riêng. Không trộn số liệu giữa hai nhà thầu nếu câu hỏi không yêu cầu tổng hợp.",
@@ -751,9 +738,9 @@ class ContractorDataHubAI:
         q = str(question or "").strip()
         if not q:
             raise ValueError("Câu hỏi AI đang trống.")
-        context = self.build_context(
-            int(master_project_id), q, workspace_ids=workspace_ids
-        )
+        allowed = [int(x) for x in (workspace_ids or []) if int(x) > 0]
+        workspace_scope = allowed[0] if len(allowed) == 1 else int(master_project_id)
+        context = self.build_context(int(master_project_id), q, workspace_ids=workspace_ids)
         prompt = f"""Bạn là AI kiểm soát dữ liệu dự án xây dựng QLDA.
 
 {context}
@@ -768,72 +755,6 @@ YÊU CẦU TRẢ LỜI:
 - Nếu phát hiện dữ liệu cũ, lỗi sync, thiếu nguồn hoặc mâu thuẫn, nêu rõ trước khi kết luận.
 - Với tổng hợp toàn dự án, tách số liệu từng nhà thầu trước rồi mới tổng hợp.
 """
-        from qlda.runtime_core import settings_store as ss
-        from qlda.runtime_core.ai_service import (
-            AIServiceError,
-            gemini_error_to_service_error,
-            openai_error_to_service_error,
-        )
+        from qlda.infrastructure.ai.legacy_provider import LegacyAIProvider
 
-        settings = ss.get_ai_runtime_settings()
-        provider = str(settings.get("provider") or "openai").lower()
-        if provider == "gemini":
-            key = str(settings.get("api_key") or "").strip()
-            if not key:
-                raise AIServiceError("Chưa cấu hình Gemini API key trong Cài đặt hệ thống.")
-            try:
-                from google import genai
-                from google.genai import types
-
-                client = genai.Client(api_key=key)
-                model = str(settings.get("model") or "auto").strip() or "auto"
-                if model.lower() in {"auto", "default"}:
-                    candidates: list[str] = []
-                    try:
-                        for item in client.models.list():
-                            name = str(getattr(item, "name", "") or "").removeprefix("models/")
-                            actions = list(getattr(item, "supported_actions", None) or [])
-                            if name and (not actions or "generateContent" in actions) and "gemini" in name.lower():
-                                candidates.append(name)
-                    except Exception:
-                        candidates = []
-                    preferred = ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
-                    model = next((x for x in preferred if x in candidates), candidates[0] if candidates else "gemini-2.5-flash")
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction="Chỉ phân tích dữ liệu QLDA được cung cấp. Không bịa số liệu."
-                    ),
-                )
-                text = str(getattr(response, "text", "") or "").strip()
-                try:
-                    client.close()
-                except Exception:
-                    pass
-                return text or "AI không trả về nội dung."
-            except AIServiceError:
-                raise
-            except Exception as exc:
-                raise gemini_error_to_service_error(exc) from exc
-
-        key = str(settings.get("api_key") or "").strip()
-        if not key:
-            raise AIServiceError("Chưa cấu hình OpenAI API key trong Cài đặt hệ thống.")
-        try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=key)
-            response = client.responses.create(
-                model=str(settings.get("model") or "gpt-5-mini"),
-                store=False,
-                input=[
-                    {"role": "developer", "content": "Chỉ phân tích dữ liệu QLDA được cung cấp. Không bịa số liệu."},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            return str(getattr(response, "output_text", "") or "").strip() or "AI không trả về nội dung."
-        except AIServiceError:
-            raise
-        except Exception as exc:
-            raise openai_error_to_service_error(exc) from exc
+        return LegacyAIProvider.data_hub_answer(workspace_scope, prompt)
