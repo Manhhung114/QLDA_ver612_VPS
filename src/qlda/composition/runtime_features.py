@@ -98,7 +98,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("contractor-data-official-ai-post", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
 
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.runtime_core.upload_ui_200mb_policy", "install_upload_ui_200mb_policy"),
-    RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.runtime_core.document_management_vps_ui", "install_document_management_vps_ui"),
+    RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.presentation.streamlit.document_management_vps_ui", "install_document_management_vps_ui"),
     RuntimeFeature("attachment-upload-reopen", RuntimeStage.UI, "qlda.runtime_core.attachment_upload_reopen_fix", "install_attachment_upload_reopen_fix"),
     RuntimeFeature("owner-supplied-materials", RuntimeStage.UI, "qlda.runtime_core.owner_supplied_materials", "install_owner_supplied_material_erp"),
     RuntimeFeature("finance-title-policy", RuntimeStage.UI, "qlda.presentation.streamlit.finance_title_policy", "install_finance_title_policy"),
