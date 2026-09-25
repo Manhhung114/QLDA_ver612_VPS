@@ -1,0 +1,58 @@
+name: AI Quality Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/qlda/application/ai/**'
+      - 'src/qlda/infrastructure/ai/**'
+      - 'src/qlda/infrastructure/native_ai.py'
+      - 'src/qlda/autonomy/ai_planner.py'
+      - 'src/qlda/application/contractor_data_hub/**'
+      - 'tests/test_ai_*.py'
+      - 'docs/architecture/AI_ARCHITECTURE.md'
+      - '.github/workflows/ai-quality.yml'
+  pull_request:
+    paths:
+      - 'src/qlda/application/ai/**'
+      - 'src/qlda/infrastructure/ai/**'
+      - 'src/qlda/infrastructure/native_ai.py'
+      - 'src/qlda/autonomy/ai_planner.py'
+      - 'src/qlda/application/contractor_data_hub/**'
+      - 'tests/test_ai_*.py'
+      - 'docs/architecture/AI_ARCHITECTURE.md'
+      - '.github/workflows/ai-quality.yml'
+  workflow_dispatch:
+
+jobs:
+  ai-quality:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src:.
+      QLDA_AI_TEXT_PLANNER_FALLBACK: '0'
+      QLDA_AI_TELEMETRY_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install locked dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+      - name: Compile AI boundaries
+        run: |
+          python -m compileall -q \
+            src/qlda/application/ai \
+            src/qlda/infrastructure/ai \
+            src/qlda/infrastructure/native_ai.py \
+            src/qlda/autonomy/ai_planner.py
+      - name: Run AI architecture and deterministic quality regressions
+        run: |
+          python -m unittest -v \
+            tests.test_ai_architecture_boundary \
+            tests.test_ai_modernization \
+            tests.test_ai_planner_native_contract \
+            tests.test_ai_quality_eval \
+            tests.test_ai_workspace_indexer \
+            tests.test_ai_contractor_tenant_isolation
