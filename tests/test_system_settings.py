@@ -116,6 +116,25 @@ class SystemSettingsV622Tests(unittest.TestCase):
         self.assertTrue(value["use_web"])
         self.assertFalse(bridge.runtime_bridge_status()["ai"])
 
+    def test_native_provider_settings_migrate_retired_gemini_25_flash(self):
+        from qlda.infrastructure.ai.provider_settings import get_provider_settings
+
+        ss.save_app_settings(
+            {
+                "managed_ai": True,
+                "ai_provider": "gemini",
+                "gemini_api_key": "admin-gemini-key",
+                "gemini_model": "gemini-2.5-flash",
+            }
+        )
+        managed = get_provider_settings("gemini")
+        self.assertEqual(managed["model"], "gemini-3.8-flash")
+
+        ss.save_app_settings({"managed_ai": False})
+        with patch.dict(os.environ, {"GEMINI_MODEL": "models/gemini-2.5-flash"}, clear=False):
+            runtime = get_provider_settings("gemini")
+        self.assertEqual(runtime["model"], "gemini-3.8-flash")
+
     def test_audit_contains_metadata_not_values(self):
         ss.append_settings_audit("admin@example.com", "update_ai", ["openai_api_key", "ai_provider"])
         raw = ss.AUDIT_FILE.read_text(encoding="utf-8")
