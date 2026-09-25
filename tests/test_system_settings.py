@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
@@ -9,6 +8,8 @@ from unittest.mock import patch
 
 import qlda.runtime_core.settings_store as ss
 import qlda.runtime_core.system_settings as syscfg
+
+
 class SystemSettingsV622Tests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -94,7 +95,7 @@ class SystemSettingsV622Tests(unittest.TestCase):
         self.assertEqual(fallback["api_key"], "env-gemini-key")
         self.assertEqual(fallback["model"], "env-gemini-model")
 
-    def test_ai_service_bridge_reads_admin_managed_settings(self):
+    def test_admin_ai_settings_are_handed_explicitly_to_native_facade(self):
         ss.save_app_settings(
             {
                 "managed_ai": True,
@@ -104,14 +105,24 @@ class SystemSettingsV622Tests(unittest.TestCase):
                 "openai_web_search": True,
             }
         )
+        from qlda.infrastructure.ai.presentation_facade import AISettings
         import qlda.runtime_core.runtime_settings_bridge as bridge
-        import qlda.runtime_core.ai_service as ai_service
-        bridge.install_runtime_settings_bridge()
-        value = ai_service.AISettings.from_env()
+
+        managed = ss.get_ai_runtime_settings()
+        value = AISettings(
+            api_key=str(managed.get("api_key") or ""),
+            model=str(managed.get("model") or "gpt-5-mini"),
+            use_web=bool(managed.get("use_web", False)),
+        )
         self.assertEqual(value.api_key, "admin-openai-key")
         self.assertEqual(value.model, "admin-openai-model")
         self.assertTrue(value.use_web)
-        self.assertTrue(bridge.runtime_bridge_status()["ai"])
+
+        bridge.install_runtime_settings_bridge()
+        status = bridge.runtime_bridge_status()
+        self.assertNotIn("ai", status)
+        self.assertIn("local_vps", status)
+        self.assertIn("multicore_excel", status)
 
     def test_audit_contains_metadata_not_values(self):
         ss.append_settings_audit("admin@example.com", "update_ai", ["openai_api_key", "ai_provider"])
