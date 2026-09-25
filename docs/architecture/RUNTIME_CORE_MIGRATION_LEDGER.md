@@ -6,23 +6,22 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | Nhóm hiện tại | Target owner | Trạng thái | Nguyên tắc migration |
 |---|---|---|---|
 | Autonomy runtime | `qlda.autonomy.runtime` | **Hoàn tất native owner; facade đã xóa** | Worker, API, UI và regression test import trực tiếp native runtime |
-| AI Supervisor overview | `qlda.presentation.streamlit.autonomy_overview` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime copy đã xóa |
-| Advanced Automation UI | `qlda.presentation.streamlit.advanced_automation` | **Đã migrate khỏi runtime_core** | V9.1–V9.6 UI nằm trong presentation; runtime copy đã xóa |
-| AI Supervisor navigation | `qlda.presentation.streamlit.ai_supervisor_navigation` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime module cũ đã xóa |
-| Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
-| Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
-| Finance title policy | `qlda.presentation.streamlit.finance_title_policy` | **Đã migrate khỏi runtime_core** | Composition gọi presentation owner; runtime copy đã xóa và Architecture Guard khóa không cho quay lại |
-| Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller và không còn trong composition baseline |
+| AI Supervisor overview/navigation/automation | `qlda.presentation.streamlit.*` | **Hoàn tất** | Composition gọi trực tiếp presentation owner |
+| UI policies (money/expander/multiselect/finance title/upload) | `qlda.presentation.streamlit.*` | **Hoàn tất** | Runtime không còn sở hữu UI feature |
+| Document VPS / attachment reopen / selection | `qlda.presentation.streamlit.*` | **Hoàn tất owner** | Runtime compatibility owners đã xóa; business/storage services giữ nguyên |
+| Production overview / source-exact / shared view | `qlda.presentation.streamlit.*` | **Hoàn tất owner** | Overview và source-exact đã rời runtime; shared AI context vẫn tách riêng ở runtime cho tới P2 AI migration |
+| Owner-supplied material UI | `qlda.presentation.streamlit.owner_supplied_materials_ui` | **Hoàn tất owner** | Nghiệp vụ/ledger tạm thời còn ở runtime; UI installer đã rời runtime |
+| Project Cost UI | `qlda.presentation.streamlit.project_cost_management_ui` | **Hoàn tất owner** | Công thức PMBOK/ledger tạm thời còn ở runtime; UI installer đã rời runtime |
+| Finance consistency UI | `qlda.presentation.streamlit.finance_consistency_ui` | **Hoàn tất owner** | Core finance policy còn ở runtime cho tới P3; presentation installer riêng |
+| Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller |
 | AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
+| Contractor Data Hub AI provider | application port + infrastructure adapter | **Ưu tiên tiếp theo** | Xóa dependency cuối cùng từ application sang runtime_core |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
 | `work_tasks_v1.py`, routing/email | `domain/tasks` + `application/tasks` + `infrastructure/notifications` | Chờ | Không gửi mail từ domain; giữ audit/idempotency |
 | Contractor workspace/access | `domain/access` + `application/access` | Chờ | Giữ `workspace_project_id` là tenant boundary |
 | Google OAuth/settings store | `infrastructure/google` + `infrastructure/settings` | Chờ | Application/Autonomy không import runtime_core sau khi tách |
 | `project_store.py`, `project_database.py` | `infrastructure/postgres` repositories | Chờ | Migrate theo repository/use-case, không big-bang |
-| Finance UI / project cost UI | `presentation/streamlit/finance` | Chờ | Business formula phải nằm ngoài renderer |
-| Document UI / attachment behavior | `presentation/streamlit/documents` + application use cases | Chờ | Upload/RBAC/approval giữ nguyên |
-| Production progress UI | `presentation/streamlit/production` | Một phần native | Xóa patch layer sau khi source-exact renderer thành owner |
 | `ui_v7_compact.py` | `presentation/streamlit/components` | Chờ | Tách theme/components khỏi business data access |
 | Materialized `app.py` | `presentation/streamlit/pages/*` | **Frozen** | Tách từng navigation group; app.py không được tăng kích thước |
 
@@ -34,7 +33,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 - Domain/Application không được tạo dependency mới vào `runtime_core`;
 - `app.py` legacy không được tăng kích thước;
 - không được thêm file `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` mới trong `runtime_core`;
-- UI feature mới không được sở hữu bởi `runtime_core`;
+- **không còn bất kỳ ngoại lệ runtime-owned UI feature nào**: mọi feature stage `UI` trong composition phải nằm dưới `qlda.presentation`;
 - các compatibility module đã retire không được tạo lại hoặc import lại;
 - không cho phép `exec()` / `eval()` trong packaged source ngoài đúng một debt IPC đã khóa;
 - BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
@@ -46,38 +45,52 @@ Các regression cleanup lịch sử `test_cleanup_v1`, `test_cleanup_v2*` đã �
 
 ### P0 — boundaries và runtime wiring
 
-Đã thực hiện: composition root, import side-effect guard, Streamlit modular entrypoint,
+**Hoàn tất:** composition root, import side-effect guard, Streamlit modular entrypoint,
 architecture CI, critical-domain CI.
 
-### P1 — các vertical slice có rủi ro thấp
+### P1 — presentation ownership
 
-Đang thực hiện theo nguyên tắc **move owner first, delete compatibility second**:
+**Hoàn tất ownership:**
 
-- AI Supervisor navigation — hoàn tất.
-- AI Supervisor overview — hoàn tất.
-- Advanced Automation UI — hoàn tất.
-- Multiselect style policy — hoàn tất.
-- Expander behavior policy — hoàn tất.
-- Finance title policy — hoàn tất; runtime copy đã xóa.
-- Contractor access source patch cũ — đã xóa; runtime dùng `contractor_access_control.py`.
-- Autonomy runtime facade — đã xóa; caller dùng `qlda.autonomy.runtime`.
-- Settings/Google OAuth infrastructure — tiếp theo.
+- AI Supervisor navigation/overview/Advanced Automation;
+- money/expander/multiselect/finance title policies;
+- VPS document UI, attachment reopen và document selection;
+- upload policy;
+- production overview, source-exact view và shared Data Hub view;
+- Contractor Data Hub admin visibility;
+- owner-supplied material installer;
+- Project Cost installer;
+- Finance Consistency UI installer.
 
-### P2 — workflow nghiệp vụ trung tâm
+Architecture Guard hiện đặt runtime UI compatibility budget bằng **0**. Các module runtime còn chứa
+business/persistence logic chưa được gọi là presentation owner nữa và sẽ được xử lý ở P2/P3.
 
-- Tasks / document workflow.
-- Contract management.
-- Production progress.
+### P2 — application/domain/infrastructure boundaries
 
-### P3 — tài chính có rủi ro cao
+Ưu tiên theo thứ tự:
+
+1. Xóa dependency cuối cùng `application/contractor_data_hub/service.py -> runtime_core` bằng AI provider port + infrastructure adapter.
+2. Settings/Google OAuth về `infrastructure/settings` và `infrastructure/google`.
+3. Tasks/routing/email về `domain/tasks`, `application/tasks`, `infrastructure/notifications`.
+4. Contract management về `domain/contracts` + `application/contracts`.
+5. Contractor workspace/access về `domain/access` + `application/access`.
+6. Repository/store về `infrastructure/postgres`.
+7. AI contexts/providers về `application/ai` + `infrastructure/ai`.
+8. Tiếp tục tách `app.py` theo navigation page.
+
+### P3 — tài chính/commercial rủi ro cao
 
 - BOQ.
 - IPC/Claim.
 - VO.
 - Project Cost/Cashflow.
+- Owner supplied material ledger nếu cần đưa toàn bộ business semantics sang domain/application.
 
 P3 chỉ migrate khi golden/regression fixtures bao phủ công thức hiện hành. Không
 rewrite đồng thời parser + persistence + UI của cùng một nghiệp vụ.
+
+`ipc_claim_patch.py` vẫn là debt đã định danh vì còn mang semantics ngày tới hạn/thanh toán bằng
+source recompilation. Không xóa trước khi semantics này được đưa native vào IPC core và focused regression xanh.
 
 ## Metrics cần theo dõi
 
@@ -89,7 +102,7 @@ Mỗi đợt migration phải làm ít nhất một chỉ số tốt hơn và kh
 - số import `qlda.runtime_core` từ code native giảm;
 - focused regression coverage tăng;
 - số file tên `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` không tăng;
-- số UI feature còn do `runtime_core` sở hữu chỉ được giảm, không được tăng.
+- số UI feature còn do `runtime_core` sở hữu = **0** và không được tăng lại.
 
 ## Quy tắc xóa compatibility
 
