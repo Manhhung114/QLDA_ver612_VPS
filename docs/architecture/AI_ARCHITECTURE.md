@@ -29,22 +29,23 @@ infrastructure/ai
   - one explicit legacy provider adapter
 ```
 
-`application/ai` không được import `runtime_core`. `infrastructure/native_ai.py`
-không được import provider legacy trực tiếp. Trong giai đoạn strangler hiện tại,
-chỉ `infrastructure/ai/legacy_provider.py` được phép bridge tới engine AI cũ.
+`application/ai` và `application/contractor_data_hub` không được import
+`runtime_core`. `infrastructure/native_ai.py` không được import provider legacy
+trực tiếp. Trong giai đoạn strangler hiện tại, chỉ
+`infrastructure/ai/legacy_provider.py` được phép bridge tới engine AI/settings cũ.
 Architecture Guard khóa invariant này.
 
 ## Grounded retrieval / RAG
 
 Contractor Data Hub đã chuẩn hóa Google Sheets/Drive/PDF/XLSX thành các record có
-`content` và provenance. Worker index chính những record đó vào `qlda_ai_chunks`.
-Mỗi chunk luôn mang `workspace_project_id`; cả vector search lẫn lexical fallback
-đều lọc tenant trước khi trả kết quả.
+`content` và provenance. Worker/indexer đưa chính những record đó cùng dữ liệu vận
+hành narrative vào `qlda_ai_chunks`. Mỗi chunk luôn mang `workspace_project_id`;
+cả vector search lẫn lexical fallback đều lọc tenant trước khi trả kết quả.
 
 Pipeline:
 
 ```text
-Google/Drive/Data Hub
+Google/Drive/Data Hub + operational records
         |
         v
 normalized records
@@ -71,6 +72,8 @@ chuyển sang lexical tenant-filtered.
 
 Mỗi đoạn đưa cho model có `source_ref`; câu trả lời grounded được yêu cầu giữ nhãn
 `[NGUỒN n: ...]`. Retrieval eval đo source coverage, Recall@K và tenant leakage.
+Answer eval đo citation recall, nguồn trích dẫn không tồn tại và các assertion bị
+cấm trong golden fixture.
 
 ### Dữ liệu số authoritative
 
@@ -101,9 +104,10 @@ Model tool choice
     -> Audit
 ```
 
-Text-JSON planner cũ chỉ là opt-in fallback (`QLDA_AUTONOMY_TEXT_PLANNER_FALLBACK`)
-và parse bằng `json.loads` nghiêm ngặt; regex JSON extraction đã bị Architecture
-Guard cấm. Provider-native path lỗi sẽ quay về HeuristicPlanner deterministic.
+Text-JSON planner chỉ là opt-in compatibility fallback
+(`QLDA_AI_TEXT_PLANNER_FALLBACK=1`) và parse bằng `json.loads` nghiêm ngặt; regex
+JSON extraction đã bị Architecture Guard cấm. Mặc định, native provider failure
+không gọi text planner mà quay thẳng về `HeuristicPlanner` deterministic.
 
 ## Audit / telemetry
 
@@ -127,12 +131,15 @@ CI không gọi provider thật. Golden/deterministic eval bao phủ:
 
 - retrieval Recall@K / precision / provenance;
 - tenant leakage phải bằng 0;
+- grounded-answer citation recall và hallucinated source detection;
+- forbidden answer assertion detection;
 - planner tool recall;
 - forbidden/unknown tool detection;
 - native planner chỉ nhận registered tools;
-- provider failure phải fallback deterministic;
+- provider failure phải fallback deterministic mặc định;
 - các schema quan trọng phải có required fields;
-- planner không được quay lại regex JSON extraction.
+- planner không được quay lại regex JSON extraction;
+- Contractor Data Hub application không được quay lại import `runtime_core`.
 
 Live/provider eval có thể chạy ngoài CI với bộ dữ liệu đã ẩn thông tin nhạy cảm.
 
@@ -147,13 +154,13 @@ QLDA_AI_RAG_INDEX_LIMIT=10000
 QLDA_AI_TELEMETRY_ENABLED=true
 QLDA_AUTONOMY_AI_PLANNER_ENABLED=true
 QLDA_AUTONOMY_AI_PROVIDER=openai
-QLDA_AUTONOMY_TEXT_PLANNER_FALLBACK=false
+QLDA_AI_TEXT_PLANNER_FALLBACK=0
 ```
 
 ## Legacy compatibility còn lại
 
 Provider/context engine lịch sử vẫn còn trong `runtime_core` vì nhiều context patch
 production đang monkey-patch các assistant class. Nó không còn là dependency được
-phép của `application/ai` hay native adapter; toàn bộ bridge đã được gom về một
-infrastructure compatibility adapter. Chỉ xóa engine cũ sau khi từng context slice
+phép của application/native adapters; toàn bộ bridge provider/settings đã được gom
+về `infrastructure.ai.legacy_provider`. Chỉ xóa engine cũ sau khi từng context slice
 được migrate và regression tương ứng xanh. Đây là strangler, không phải big-bang.
