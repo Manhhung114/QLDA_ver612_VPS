@@ -6,6 +6,9 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | Nhóm hiện tại | Target owner | Trạng thái | Nguyên tắc migration |
 |---|---|---|---|
 | `autonomy_runtime.py` | `qlda.autonomy.runtime` | **Đã tách runtime; facade còn lại** | Chuyển dần caller sang native path rồi xóa facade |
+| AI Supervisor navigation | `qlda.presentation.streamlit.ai_supervisor_navigation` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime module cũ đã xóa |
+| Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
+| Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
@@ -19,6 +22,18 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | `ui_v7_compact.py` | `presentation/streamlit/components` | Chờ | Tách theme/components khỏi business data access |
 | Materialized `app.py` | `presentation/streamlit/pages/*` | **Frozen** | Tách từng navigation group; app.py không được tăng kích thước |
 
+## Trạng thái hardening hiện tại
+
+Đã khóa các nguyên tắc sau bằng CI chứ không chỉ bằng tài liệu:
+
+- `runtime_core.__init__` phải side-effect free;
+- Domain/Application không được tạo dependency mới vào `runtime_core`;
+- `app.py` legacy không được tăng kích thước;
+- không được thêm file `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` mới trong `runtime_core`;
+- UI feature mới không được sở hữu bởi `runtime_core`;
+- không cho phép `exec()` / `eval()` trong packaged source;
+- BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
+
 ## Thứ tự ưu tiên
 
 ### P0 — boundaries và runtime wiring
@@ -28,9 +43,13 @@ architecture CI, critical-domain CI.
 
 ### P1 — các vertical slice có rủi ro thấp
 
-- AI Supervisor / autonomy runtime — bắt đầu bằng facade compatibility.
-- Navigation và presentation components.
-- Settings/Google OAuth infrastructure.
+Đang thực hiện theo nguyên tắc **move owner first, delete compatibility second**:
+
+- AI Supervisor navigation — hoàn tất.
+- Multiselect style policy — hoàn tất.
+- Expander behavior policy — hoàn tất.
+- Autonomy runtime — native owner đã có; còn facade caller cũ.
+- Settings/Google OAuth infrastructure — tiếp theo.
 
 ### P2 — workflow nghiệp vụ trung tâm
 
@@ -57,7 +76,8 @@ Mỗi đợt migration phải làm ít nhất một chỉ số tốt hơn và kh
 - `app.py` không tăng và dần giảm;
 - số import `qlda.runtime_core` từ code native giảm;
 - focused regression coverage tăng;
-- số file tên `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` không tăng.
+- số file tên `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` không tăng;
+- số UI feature còn do `runtime_core` sở hữu chỉ được giảm, không được tăng.
 
 ## Quy tắc xóa compatibility
 
@@ -69,3 +89,11 @@ Không xóa module cũ chỉ vì code native đã tồn tại. Chỉ xóa khi:
 4. Docker Check xanh;
 5. deploy/healthcheck production đã soak ổn định;
 6. rollback không phụ thuộc module đó.
+
+## Nguyên tắc chống big-bang rewrite
+
+"Triệt để" không có nghĩa xóa hàng chục nghìn dòng legacy trong một commit. Với
+QLDA đang chạy production, cách xử lý triệt để là đặt boundary cứng, không cho nợ
+mới phát sinh, rồi migrate từng vertical slice có regression và xóa compatibility
+ngay khi slice đó đủ điều kiện. Điều này giảm nợ thật mà vẫn bảo toàn khả năng
+rollback và dữ liệu nghiệp vụ tài chính.
