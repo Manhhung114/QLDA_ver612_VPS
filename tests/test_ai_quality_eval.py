@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from qlda.application.ai.evaluation import (
+    AnswerEvalCase,
     PlannerEvalCase,
     RetrievalEvalCase,
+    evaluate_answer,
     evaluate_planner,
     evaluate_retrieval,
 )
@@ -66,6 +68,38 @@ class AIQualityEvaluationTests(unittest.TestCase):
         self.assertEqual(result.forbidden_tool_count, 1)
         self.assertEqual(result.unknown_tool_count, 1)
         self.assertFalse(result.safe)
+
+    def test_answer_eval_accepts_grounded_sources(self):
+        answer = (
+            "Thời hạn phản hồi là 7 ngày [NGUỒN 1: contract:1:page-47]. "
+            "RFI-001 đang mở [NGUỒN 2: documents:10:RFI-001]."
+        )
+        result = evaluate_answer(
+            AnswerEvalCase(
+                required_source_refs=("contract:1:page-47", "documents:10:RFI-001"),
+                forbidden_phrases=("đã tự phê duyệt",),
+            ),
+            answer,
+            available_source_refs=("contract:1:page-47", "documents:10:RFI-001"),
+        )
+        self.assertEqual(result.citation_recall, 1.0)
+        self.assertEqual(result.unsupported_citation_count, 0)
+        self.assertTrue(result.grounded)
+
+    def test_answer_eval_detects_hallucinated_source_and_forbidden_claim(self):
+        answer = "Đã tự phê duyệt IPC [NGUỒN 9: fake:outside-source]."
+        result = evaluate_answer(
+            AnswerEvalCase(
+                required_source_refs=("contract:1:page-47",),
+                forbidden_phrases=("đã tự phê duyệt",),
+            ),
+            answer,
+            available_source_refs=("contract:1:page-47",),
+        )
+        self.assertEqual(result.citation_recall, 0.0)
+        self.assertEqual(result.unsupported_citation_count, 1)
+        self.assertEqual(result.forbidden_phrase_count, 1)
+        self.assertFalse(result.grounded)
 
 
 if __name__ == "__main__":
