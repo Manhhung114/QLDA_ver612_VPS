@@ -4,7 +4,8 @@ import hashlib
 import json
 from typing import Any, Callable, Iterable, Sequence
 
-from qlda.application.ai import ToolChoice, ToolDefinition
+from qlda.application.ai import AITelemetryPort, ToolChoice, ToolDefinition
+from qlda.application.ai.tool_schemas import tool_parameters_schema
 
 from .models import ExecutionPlan, PlanStep, ToolSpec
 from .orchestrator import HeuristicPlanner
@@ -17,9 +18,9 @@ class StructuredAIPlanner:
     """LLM planner constrained to registered ToolRegistry actions.
 
     Provider-native tool/function calling is the primary path. A strict JSON text
-    completion is retained only as a compatibility fallback; the old regex-based
-    extraction has been removed. Any provider/validation failure falls back to the
-    deterministic planner. RBAC, integrity and approval remain downstream.
+    completion is retained only as an opt-in compatibility fallback; the old
+    regex-based extraction is gone. RBAC, integrity and approval remain downstream.
+    Every finalized plan can also be written to the provider-neutral AI audit sink.
     """
 
     def __init__(
@@ -29,11 +30,13 @@ class StructuredAIPlanner:
         *,
         fallback: HeuristicPlanner | None = None,
         tool_caller: ToolCallingFn | None = None,
+        telemetry: AITelemetryPort | None = None,
     ) -> None:
         self.complete = complete
         self.specs = {spec.name: spec for spec in tools}
         self.fallback = fallback or HeuristicPlanner()
         self.tool_caller = tool_caller
+        self.telemetry = telemetry
 
     def _definitions(self) -> tuple[ToolDefinition, ...]:
         return tuple(
@@ -43,7 +46,7 @@ class StructuredAIPlanner:
                     f"{spec.description}; risk={spec.risk.value}; mode={spec.mode.value}; "
                     f"roles={','.join(spec.allowed_roles)}"
                 ),
-                parameters_schema=dict(spec.parameters_schema or {}),
+                parameters_schema=tool_parameters_schema(spec.name, spec.parameters_schema),
             )
             for spec in self.specs.values()
         )
@@ -70,8 +73,12 @@ class StructuredAIPlanner:
             if tool_name not in self.specs:
                 continue
             step_id = f"S{index}"
+            explicit = tuple(str(x).upper() for x in choice.depends_on if str(x).upper() in used_ids)
+            # Native providers normally return independent function calls. Chain
+            # them conservatively unless the model supplied a valid dependency so
+            # a later write cannot race ahead of an earlier integrity/read step.
+            deps = explicit or ((steps[-1].step_id,) if steps else ())
             used_ids.add(step_id)
-            deps = tuple(str(x).upper() for x in choice.depends_on if str(x).upper() in used_ids)
             steps.append(
                 PlanStep(
                     step_id=step_id,
@@ -113,6 +120,30 @@ class StructuredAIPlanner:
         raw_id = f"{int(project_id)}|{objective}|" + "|".join(f"{x.step_id}:{x.tool_name}" for x in steps)
         return "PLAN-" + hashlib.sha256(raw_id.encode("utf-8")).hexdigest()[:16].upper()
 
+    def _record_plan(self, plan: ExecutionPlan, context: dict[str, Any] | None) -> None:
+        if self.telemetry is None:
+            return
+        for step in plan.steps:
+            try:
+                self.telemetry.record(
+                    {
+                        "workspace_project_id": plan.project_id,
+                        "plan_id": plan.plan_id,
+                        "event_type": "PLANNER_DECISION",
+                        "context": {
+                            "objective": plan.objective,
+                            "created_by": plan.created_by,
+                            "context_keys": sorted(str(k) for k in (context or {}).keys()),
+                        },
+                        "tool_name": step.tool_name,
+                        "tool_arguments": step.arguments,
+                        "decision_reason": step.reason,
+                        "success": True,
+                    }
+                )
+            except Exception:
+                pass
+
     def plan(self, project_id: int, objective: str, context: dict[str, Any] | None = None) -> ExecutionPlan:
         try:
             choices: Sequence[ToolChoice] = ()
@@ -125,15 +156,34 @@ class StructuredAIPlanner:
             steps = self._steps_from_choices(choices)
             if not steps:
                 raise ValueError("AI planner không chọn được tool hợp lệ.")
-            return ExecutionPlan(
+            plan = ExecutionPlan(
                 project_id=int(project_id),
                 objective=str(objective),
                 steps=tuple(steps),
                 created_by=created_by,
                 plan_id=self._plan_id(int(project_id), str(objective), steps),
             )
-        except Exception:
-            return self.fallback.plan(int(project_id), str(objective), context)
+            self._record_plan(plan, context)
+            return plan
+        except Exception as exc:
+            plan = self.fallback.plan(int(project_id), str(objective), context)
+            if self.telemetry is not None:
+                try:
+                    self.telemetry.record(
+                        {
+                            "workspace_project_id": int(project_id),
+                            "plan_id": plan.plan_id,
+                            "event_type": "PLANNER_FALLBACK",
+                            "context": {"objective": str(objective)},
+                            "fallback_used": True,
+                            "success": False,
+                            "error_code": exc.__class__.__name__,
+                            "decision_reason": str(exc)[:1000],
+                        }
+                    )
+                except Exception:
+                    pass
+            return plan
 
 
 __all__ = ["StructuredAIPlanner"]
