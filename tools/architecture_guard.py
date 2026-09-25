@@ -40,7 +40,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "project-cost-management",
         "finance-consistency-ui",
         "production-progress-shared-ai",
-        "production-progress-source-exact",
     }
 )
 
@@ -61,6 +60,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.attachment_upload_reopen_fix": RUNTIME / "attachment_upload_reopen_fix.py",
     "qlda.runtime_core.upload_ui_200mb_policy": RUNTIME / "upload_ui_200mb_policy.py",
     "qlda.runtime_core.production_progress_overview_patch": RUNTIME / "production_progress_overview_patch.py",
+    "qlda.runtime_core.production_progress_source_exact": RUNTIME / "production_progress_source_exact.py",
 }
 
 ALLOWED_DYNAMIC_EXECUTION = {
@@ -148,7 +148,6 @@ def check_no_new_patch_debt() -> list[str]:
 
 
 def check_runtime_ui_feature_budget() -> list[str]:
-    """Prevent any new Streamlit/UI feature from being owned by runtime_core."""
     from qlda.composition.runtime_features import FEATURES, RuntimeStage
 
     errors: list[str] = []
