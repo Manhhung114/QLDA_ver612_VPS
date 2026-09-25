@@ -32,12 +32,12 @@ def install_ai_supervisor_navigation() -> None:
     """Expose AI Supervisor as its own sidebar navigation item.
 
     This presentation-layer adapter is temporary only while the frozen V7.6
-    Streamlit shell is decomposed.  Business rules remain outside this module;
+    Streamlit shell is decomposed. Business rules remain outside this module;
     it only routes the existing sidebar selection to the contractor-isolated
     Supervisor renderer.
     """
     import streamlit as st
-    import qlda.runtime_core.autonomy_overview_patch as overview
+    import qlda.presentation.streamlit.autonomy_overview as overview
     import qlda.runtime_core.ui_v7_compact as ui
 
     if getattr(st, "_qlda_ai_supervisor_navigation_installed", False):
