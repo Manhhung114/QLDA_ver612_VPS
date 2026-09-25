@@ -89,7 +89,7 @@ def _site_images(db, tenant_id: int) -> list[dict[str, Any]]:
 
 
 def _render_advanced_ui(st, db, tenant_id: int, *, actor: str) -> None:
-    from qlda.runtime_core.autonomy_runtime import get_autonomy_platform
+    from qlda.autonomy.runtime import get_autonomy_platform
 
     platform = get_autonomy_platform(db)
     state_prefix = f"advanced_ai_{tenant_id}"
@@ -301,7 +301,7 @@ def _render_advanced_ui(st, db, tenant_id: int, *, actor: str) -> None:
 
 def install_advanced_automation_ui() -> None:
     """Append the V9.1→V9.6 Admin panel after the existing Supervisor UI."""
-    import qlda.runtime_core.autonomy_overview_patch as overview
+    import qlda.presentation.streamlit.autonomy_overview as overview
 
     if getattr(overview, "_qlda_advanced_automation_ui_installed", False):
         return
