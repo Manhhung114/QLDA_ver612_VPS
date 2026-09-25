@@ -62,6 +62,7 @@ jobs:
             tests.test_ai_architecture_boundary \
             tests.test_ai_modernization \
             tests.test_ai_planner_native_contract \
+            tests.test_ai_provider_resilience \
             tests.test_ai_quality_eval \
             tests.test_ai_workspace_indexer \
             tests.test_ai_contractor_tenant_isolation
