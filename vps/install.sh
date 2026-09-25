@@ -47,8 +47,8 @@ find "$DATA_DIR" -type d -exec chmod 750 {} +
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install --upgrade pip wheel setuptools
 runuser -u "$RUN_USER" -- "$VENV_DIR/bin/python" -m pip install -r "$APP_DIR/requirements.lock"
 
-# V7.6 final-conversion preflight. A fresh VPS must never start through a root
-# compatibility entrypoint or a legacy adapter.
+# Packaged-runtime preflight. Production starts from the small presentation
+# entrypoint; the materialized app.py remains a frozen compatibility shell.
 runuser -u "$RUN_USER" -- env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" -m compileall -q "$APP_DIR/src/qlda"
 runuser -u "$RUN_USER" -- env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" - <<'PY'
 from pathlib import Path
@@ -58,12 +58,13 @@ root = Path("/opt/qlda/app")
 assert qlda.__version__ == "7.6"
 assert qlda.LEGACY_ADAPTERS == ()
 assert qlda.LEGACY_RUNTIME is False
-assert qlda.STREAMLIT_ENTRYPOINT == "qlda.presentation.streamlit.app"
+assert qlda.STREAMLIT_ENTRYPOINT == "qlda.presentation.streamlit.main"
+assert (root / "src/qlda/presentation/streamlit/main.py").is_file()
 assert (root / "src/qlda/presentation/streamlit/app.py").is_file()
 assert (root / "src/qlda/presentation/api/app.py").is_file()
 assert (root / "src/qlda/modules/excel/worker.py").is_file()
 get_application()
-print("QLDA V7.6 packaged runtime preflight OK")
+print("QLDA packaged runtime preflight OK")
 PY
 
 if [[ ! -f "$SHARED_DIR/qlda.env" ]]; then
