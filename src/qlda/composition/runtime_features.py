@@ -100,6 +100,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_shared", "install_production_progress_shared_ai_ui"),
     RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.presentation.streamlit.multiselect_tag_style", "install_multiselect_tag_style_patch"),
     RuntimeFeature("production-progress-source-exact", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_source_exact", "install_production_progress_source_exact"),
+    RuntimeFeature("compact-density", RuntimeStage.UI, "qlda.presentation.streamlit.compact_density", "install_compact_density"),
     RuntimeFeature("autonomy-overview", RuntimeStage.UI, "qlda.presentation.streamlit.autonomy_overview", "install_autonomy_overview_patch"),
     RuntimeFeature("advanced-automation-ui", RuntimeStage.UI, "qlda.presentation.streamlit.advanced_automation", "install_advanced_automation_ui"),
     RuntimeFeature("ai-supervisor-navigation", RuntimeStage.UI, "qlda.presentation.streamlit.ai_supervisor_navigation", "install_ai_supervisor_navigation"),
