@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-"""Native AI adapter with contractor-tenant isolation and optional grounded RAG.
-
-Application callers no longer import ``runtime_core.ai_service`` through this
-module. The remaining legacy provider dependency is isolated behind
-``qlda.infrastructure.ai.legacy_provider`` and can be removed independently.
-"""
+"""Native AI adapter with tenant isolation, grounded RAG and telemetry."""
 
 import os
 import time
@@ -15,14 +10,14 @@ from typing import Any, Sequence
 from qlda.application.ai import AIContextService
 from qlda.domain.errors import AIApplicationError
 from qlda.infrastructure.ai.embeddings import ProviderEmbeddingAdapter
-from qlda.infrastructure.ai.legacy_provider import AIProviderError, LegacyAIProvider
+from qlda.infrastructure.ai.provider_gateway import AIProviderError, NativeProviderGateway
 from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
 from qlda.infrastructure.ai.vector_store import PostgresVectorContextStore
 from qlda.infrastructure.ai.workspace_indexer import sync_workspace_sources
 
 
 class NativeAIAdapter:
-    """AIPort implementation backed by native infrastructure boundaries."""
+    """AIPort implementation backed only by native AI infrastructure."""
 
     @staticmethod
     def _domain_error(exc: BaseException) -> AIApplicationError:
@@ -42,7 +37,9 @@ class NativeAIAdapter:
 
     @staticmethod
     def _rag_enabled() -> bool:
-        return str(os.environ.get("QLDA_AI_RAG_ENABLED", "1") or "1").strip().lower() in {"1", "true", "yes", "on"}
+        return str(os.environ.get("QLDA_AI_RAG_ENABLED", "1") or "1").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
 
     @classmethod
     def _ground_question(cls, tenant: int, question: str, provider: str) -> tuple[str, list[str]]:
@@ -51,9 +48,6 @@ class NativeAIAdapter:
         try:
             embedder = ProviderEmbeddingAdapter(provider if provider in {"openai", "gemini", "google"} else None)
             store = PostgresVectorContextStore(embed=embedder.embed)
-            # Best-effort and throttled. This supplements background Data Hub indexing
-            # with current task/document/drawing evidence without making chat depend
-            # on indexing availability.
             try:
                 sync_workspace_sources(store, tenant)
             except Exception:
@@ -75,8 +69,6 @@ class NativeAIAdapter:
             )
             return grounded, list(bundle.citations)
         except Exception:
-            # RAG is an augmentation layer; provider chat remains available when
-            # pgvector/embedding/indexing is temporarily unavailable.
             return str(question or ""), []
 
     @classmethod
@@ -87,9 +79,9 @@ class NativeAIAdapter:
         workspace_scope: int | None,
         *args: Any,
         **kwargs: Any,
-    ):
+    ) -> str:
         try:
-            return LegacyAIProvider.run(provider, method, workspace_scope, *args, **kwargs)
+            return NativeProviderGateway.run(provider, method, workspace_scope, *args, **kwargs)
         except AIProviderError as exc:
             raise cls._domain_error(exc) from exc
 
@@ -152,13 +144,43 @@ class NativeAIAdapter:
         workspace_scope: int | None = None,
     ) -> str:
         tenant = self._tenant(project_id, workspace_scope)
-        return self._run(
-            provider,
-            "analyze_schedule_risk",
-            tenant,
-            int(project_id),
-            status_date=status_date,
+        query = (
+            "Phân tích rủi ro tiến độ hiện tại: các công tác chậm, mốc có nguy cơ, nguyên nhân, "
+            "ảnh hưởng đường găng và hành động ưu tiên."
         )
+        grounded, source_refs = self._ground_question(tenant, query, str(provider or "openai").lower())
+        started = time.perf_counter()
+        try:
+            result = self._run(
+                provider,
+                "analyze_schedule_risk",
+                tenant,
+                int(project_id),
+                status_date=status_date,
+                context=grounded,
+            )
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_SCHEDULE_RISK",
+                "provider": provider,
+                "input": query,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": True,
+            })
+            return result
+        except Exception as exc:
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_SCHEDULE_RISK",
+                "provider": provider,
+                "input": query,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": False,
+                "error_code": str(getattr(exc, "code", exc.__class__.__name__)),
+            })
+            raise
 
     def draft_report(
         self,
@@ -170,14 +192,44 @@ class NativeAIAdapter:
         workspace_scope: int | None = None,
     ) -> str:
         tenant = self._tenant(project_id, workspace_scope)
-        return self._run(
-            provider,
-            "draft_report",
-            tenant,
-            int(project_id),
-            period=period,
-            status_date=status_date,
+        query = (
+            f"Tổng hợp dữ liệu để lập báo cáo {period}: tiến độ, khối lượng, chất lượng, hồ sơ, "
+            "thanh toán/chi phí, rủi ro và hành động tiếp theo."
         )
+        grounded, source_refs = self._ground_question(tenant, query, str(provider or "openai").lower())
+        started = time.perf_counter()
+        try:
+            result = self._run(
+                provider,
+                "draft_report",
+                tenant,
+                int(project_id),
+                period=period,
+                status_date=status_date,
+                context=grounded,
+            )
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_DRAFT_REPORT",
+                "provider": provider,
+                "input": query,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": True,
+            })
+            return result
+        except Exception as exc:
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_DRAFT_REPORT",
+                "provider": provider,
+                "input": query,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": False,
+                "error_code": str(getattr(exc, "code", exc.__class__.__name__)),
+            })
+            raise
 
     def legal_qa(
         self,
