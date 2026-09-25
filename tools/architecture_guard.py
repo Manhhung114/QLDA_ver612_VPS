@@ -46,7 +46,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "finance-title-policy",
         "project-cost-management",
         "finance-consistency-ui",
-        "money-display-format",
         "document-selection-autopen",
         "production-progress-overview",
         "production-progress-shared-ai",
