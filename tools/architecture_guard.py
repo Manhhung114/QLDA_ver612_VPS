@@ -55,6 +55,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.upload_ui_200mb_policy": RUNTIME / "upload_ui_200mb_policy.py",
     "qlda.runtime_core.production_progress_overview_patch": RUNTIME / "production_progress_overview_patch.py",
     "qlda.runtime_core.production_progress_source_exact": RUNTIME / "production_progress_source_exact.py",
+    "qlda.runtime_core.meeting_minutes_simple": RUNTIME / "meeting_minutes_simple.py",
 }
 
 ALLOWED_DYNAMIC_EXECUTION = {
