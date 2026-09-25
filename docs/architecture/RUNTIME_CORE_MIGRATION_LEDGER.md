@@ -11,6 +11,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | AI Supervisor navigation | `qlda.presentation.streamlit.ai_supervisor_navigation` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime module cũ đã xóa |
 | Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
+| Finance title policy | `qlda.presentation.streamlit.finance_title_policy` | **Đã migrate khỏi runtime_core** | Composition gọi presentation owner; runtime copy đã xóa và Architecture Guard khóa không cho quay lại |
 | Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller và không còn trong composition baseline |
 | AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
@@ -57,6 +58,7 @@ architecture CI, critical-domain CI.
 - Advanced Automation UI — hoàn tất.
 - Multiselect style policy — hoàn tất.
 - Expander behavior policy — hoàn tất.
+- Finance title policy — hoàn tất; runtime copy đã xóa.
 - Contractor access source patch cũ — đã xóa; runtime dùng `contractor_access_control.py`.
 - Autonomy runtime facade — đã xóa; caller dùng `qlda.autonomy.runtime`.
 - Settings/Google OAuth infrastructure — tiếp theo.
