@@ -41,9 +41,11 @@ def _install_common_ai_planner(platform: AutomationPlatform) -> None:
         return
     provider = str(os.environ.get("QLDA_AUTONOMY_AI_PROVIDER", "openai") or "openai").strip().lower()
 
+    from qlda.infrastructure.ai.telemetry import PostgresAITelemetry
     from qlda.infrastructure.ai.tool_calling import NativeToolCallingAdapter
 
     native = NativeToolCallingAdapter(provider)
+    telemetry = PostgresAITelemetry()
 
     def tool_caller(project_id, objective, tools, context):
         return native.choose_tools(
@@ -73,6 +75,7 @@ def _install_common_ai_planner(platform: AutomationPlatform) -> None:
         platform.tools.list_specs(),
         fallback=platform.orchestrator.planner,
         tool_caller=tool_caller,
+        telemetry=telemetry,
     )
 
 
