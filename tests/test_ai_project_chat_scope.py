@@ -167,7 +167,7 @@ class AIProjectChatScopeTests(unittest.TestCase):
         self.assertTrue(project_wide)
 
     @patch("qlda.infrastructure.ai.project_chat._table_exists", return_value=True)
-    def test_task_context_surfaces_s4_rows_instead_of_only_aggregate_count(self, _table_exists):
+    def test_task_context_ranks_s4_evidence_ahead_of_related_tower_rows(self, _table_exists):
         lines = project_chat._task_detail_context(
             _TaskConnection(),
             [101],
@@ -181,7 +181,7 @@ class AIProjectChatScopeTests(unittest.TestCase):
         self.assertIn("tháp S4", context)
         self.assertIn("KH=70.0%", context)
         self.assertIn("TT=55.0%", context)
-        self.assertNotIn("[TASK:12]", context)
+        self.assertLess(context.index("[TASK:11]"), context.index("[TASK:12]"))
 
 
 if __name__ == "__main__":
