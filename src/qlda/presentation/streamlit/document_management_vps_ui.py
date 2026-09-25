@@ -19,7 +19,7 @@ attachment renderer.
 import inspect
 from typing import Any
 
-from qlda.runtime_core import meeting_minutes_simple as meeting
+from qlda.presentation.streamlit import meeting_minutes_simple as meeting
 
 
 _PATCH_FLAG = "_qlda_document_vps_attachment_renderer"
