@@ -10,6 +10,7 @@ APP_DATA_HUB = ROOT / "src/qlda/application/contractor_data_hub"
 INFRA_AI = ROOT / "src/qlda/infrastructure/ai"
 NATIVE_AI = ROOT / "src/qlda/infrastructure/native_ai.py"
 PLANNER = ROOT / "src/qlda/autonomy/ai_planner.py"
+LEGACY_PROVIDER = INFRA_AI / "legacy_provider.py"
 
 
 def _runtime_imports(path: Path) -> list[str]:
@@ -52,6 +53,15 @@ def test_only_explicit_legacy_provider_may_bridge_runtime_ai_service() -> None:
         if imports and path.name != "legacy_provider.py":
             offenders.append(f"{path.name}: {imports}")
     assert not offenders, "Unexpected runtime_core imports in infrastructure/ai: " + "; ".join(offenders)
+
+
+def test_legacy_provider_is_the_single_runtime_ai_bridge() -> None:
+    assert LEGACY_PROVIDER.exists(), "Strangler bridge disappeared before legacy slices were retired"
+    assert _runtime_imports(LEGACY_PROVIDER), "Legacy bridge must remain explicit while compatibility AI exists"
+    bridge_files = sorted(
+        path.name for path in INFRA_AI.glob("*.py") if _runtime_imports(path)
+    )
+    assert bridge_files == ["legacy_provider.py"], bridge_files
 
 
 def test_planner_has_no_regex_json_parser() -> None:
