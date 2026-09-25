@@ -47,7 +47,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "production-progress-overview",
         "production-progress-shared-ai",
         "production-progress-source-exact",
-        "contractor-data-admin-visibility",
     }
 )
 
@@ -64,6 +63,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.contractor_access_patch": RUNTIME / "contractor_access_patch.py",
     "qlda.runtime_core.finance_title_policy": RUNTIME / "finance_title_policy.py",
     "qlda.runtime_core.document_selection_autopen": RUNTIME / "document_selection_autopen.py",
+    "qlda.runtime_core.contractor_data_admin_visibility": RUNTIME / "contractor_data_admin_visibility.py",
 }
 
 # One legacy IPC compatibility module still recompiles a materialized function.
