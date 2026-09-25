@@ -36,26 +36,43 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _install_common_ai_planner(platform: AutomationPlatform) -> None:
-    """Use the app-wide assistant provider for planning; fall back safely on error."""
+    """Use provider-native tool calling and deterministic fallback for planning."""
     if not _env_bool("QLDA_AUTONOMY_AI_PLANNER_ENABLED", True):
         return
     provider = str(os.environ.get("QLDA_AUTONOMY_AI_PROVIDER", "openai") or "openai").strip().lower()
 
-    def complete(project_id: int, prompt: str) -> str:
-        from qlda.bootstrap import get_application
+    from qlda.infrastructure.ai.tool_calling import NativeToolCallingAdapter
 
-        return get_application().ai.ask(
+    native = NativeToolCallingAdapter(provider)
+
+    def tool_caller(project_id, objective, tools, context):
+        return native.choose_tools(
             int(project_id),
-            prompt,
-            provider=provider,
-            history=[],
-            use_web=False,
+            str(objective),
+            tools,
+            context=context,
+            max_steps=24,
         )
+
+    complete = None
+    if _env_bool("QLDA_AUTONOMY_TEXT_PLANNER_FALLBACK", False):
+        def strict_complete(project_id: int, prompt: str) -> str:
+            from qlda.bootstrap import get_application
+
+            return get_application().ai.ask(
+                int(project_id),
+                prompt,
+                provider=provider,
+                history=[],
+                use_web=False,
+            )
+        complete = strict_complete
 
     platform.orchestrator.planner = StructuredAIPlanner(
         complete,
         platform.tools.list_specs(),
         fallback=platform.orchestrator.planner,
+        tool_caller=tool_caller,
     )
 
 
@@ -89,10 +106,26 @@ def _native_google_sync(db) -> Callable[..., Any]:
                 account_name=str(stored.get("account_name") or ""),
                 scopes=[GoogleWorkspaceClient.SHEETS_SCOPE, GoogleWorkspaceClient.DRIVE_SCOPE],
             )
+
+        rag_indexed = 0
+        if _env_bool("QLDA_AI_RAG_ENABLED", True):
+            try:
+                from qlda.infrastructure.ai.embeddings import ProviderEmbeddingAdapter
+                from qlda.infrastructure.ai.vector_store import PostgresVectorContextStore
+
+                embedding_provider = str(os.environ.get("QLDA_AI_EMBEDDING_PROVIDER", "auto") or "auto")
+                embedder = ProviderEmbeddingAdapter(embedding_provider)
+                rag_indexed = PostgresVectorContextStore(embed=embedder.embed).sync_contractor_data_hub(
+                    int(project_id),
+                    limit=int(os.environ.get("QLDA_AI_RAG_INDEX_LIMIT", "10000")),
+                )
+            except Exception:
+                rag_indexed = 0
         return {
             "project_id": int(project_id),
             "actor": actor,
             "oauth_connected": bool(token_state),
+            "rag_indexed_records": rag_indexed,
             **dict(result or {}),
         }
 
