@@ -9,7 +9,11 @@ from typing import Any
 
 
 _DEFAULT_OPENAI_MODEL = "gpt-5-mini"
-_DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+_RETIRED_GEMINI_MODELS = {
+    "gemini-2.5-flash",
+    "models/gemini-2.5-flash",
+}
 _SECRET_FIELDS = {"openai_api_key", "gemini_api_key", "google_api_key"}
 
 
@@ -86,6 +90,24 @@ def _load_saved() -> dict[str, Any]:
     return raw
 
 
+def normalize_gemini_model(value: Any) -> str:
+    """Return a production-safe Gemini model id.
+
+    Historical deployments may still persist the retired 2.5 Flash id in Admin
+    settings or GEMINI_MODEL. Normalize those values at request time so a stale
+    mutable setting cannot keep production AI down after the code is deployed.
+    """
+    raw = str(value or "").strip()
+    if not raw or raw.lower() in {"auto", "default"}:
+        return DEFAULT_GEMINI_MODEL
+    lowered = raw.lower()
+    if lowered in _RETIRED_GEMINI_MODELS:
+        return DEFAULT_GEMINI_MODEL
+    if lowered.startswith("models/"):
+        raw = raw.split("/", 1)[1].strip()
+    return raw or DEFAULT_GEMINI_MODEL
+
+
 def get_provider_settings(preferred: str | None = None) -> dict[str, Any]:
     """Resolve AI provider settings without importing ``runtime_core``.
 
@@ -117,9 +139,8 @@ def get_provider_settings(preferred: str | None = None) -> dict[str, Any]:
         saved_key = str(saved.get("gemini_api_key") or "").strip()
         api_key = saved_key if managed else (_runtime_value("GEMINI_API_KEY", "") or saved_key)
         saved_model = str(saved.get("gemini_model") or "auto").strip() or "auto"
-        model = saved_model if managed else _runtime_value("GEMINI_MODEL", saved_model)
-        if model.lower() in {"", "auto", "default"}:
-            model = _DEFAULT_GEMINI_MODEL
+        configured_model = saved_model if managed else _runtime_value("GEMINI_MODEL", saved_model)
+        model = normalize_gemini_model(configured_model)
         use_web = bool(saved.get("openai_web_search", False)) if managed else _runtime_bool(
             "GEMINI_WEB_SEARCH", _runtime_bool("AI_WEB_SEARCH", bool(saved.get("openai_web_search", False)))
         )
@@ -141,4 +162,4 @@ def get_provider_settings(preferred: str | None = None) -> dict[str, Any]:
     }
 
 
-__all__ = ["get_provider_settings"]
+__all__ = ["DEFAULT_GEMINI_MODEL", "get_provider_settings", "normalize_gemini_model"]
