@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "src/qlda/runtime_core/document_management_vps_ui.py"
+MODULE = ROOT / "src/qlda/presentation/streamlit/document_management_vps_ui.py"
 
 
 class AttachmentUploadReopenTests(unittest.TestCase):
