@@ -37,7 +37,6 @@ DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 
 ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
     {
-        "upload-ui-policy",
         "owner-supplied-materials",
         "project-cost-management",
         "finance-consistency-ui",
@@ -51,8 +50,6 @@ ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
     {"src/qlda/application/contractor_data_hub/service.py"}
 )
 
-# Compatibility modules that have completed strangler migration. They must stay
-# deleted and no source/test import is allowed to reintroduce them.
 RETIRED_MODULES = {
     "qlda.runtime_core.autonomy_runtime": RUNTIME / "autonomy_runtime.py",
     "qlda.runtime_core.autonomy_overview_patch": RUNTIME / "autonomy_overview_patch.py",
@@ -64,11 +61,9 @@ RETIRED_MODULES = {
     "qlda.runtime_core.document_management_uniform_interaction": RUNTIME / "document_management_uniform_interaction.py",
     "qlda.runtime_core.document_management_vps_ui": RUNTIME / "document_management_vps_ui.py",
     "qlda.runtime_core.attachment_upload_reopen_fix": RUNTIME / "attachment_upload_reopen_fix.py",
+    "qlda.runtime_core.upload_ui_200mb_policy": RUNTIME / "upload_ui_200mb_policy.py",
 }
 
-# One legacy IPC compatibility module still recompiles a materialized function.
-# Track the exact number of calls so this debt can shrink but can never spread or
-# silently increase. Delete this entry when ipc_claim_patch.py is fully retired.
 ALLOWED_DYNAMIC_EXECUTION = {
     "src/qlda/runtime_core/ipc_claim_patch.py": {"exec": 1, "eval": 0},
 }
