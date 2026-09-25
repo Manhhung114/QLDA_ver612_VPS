@@ -15,13 +15,6 @@ from qlda.infrastructure.ai.provider_settings import (
 
 
 _GEMINI_RETRY_DELAYS = (1.0, 2.0, 4.0)
-_GEMINI_PREFERRED_MODELS = (
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-)
 
 
 class AIProviderError(RuntimeError):
@@ -96,107 +89,41 @@ def _friendly_error(exc: BaseException) -> AIProviderError:
         action = "Thử lại sau hoặc kiểm tra quota của nhà cung cấp AI."
     elif any(token in lower for token in ("503", "unavailable", "overloaded", "high demand")):
         code = "service_unavailable"
-        action = "Gemini đang quá tải tạm thời. Hệ thống đã tự thử lại; hãy gửi lại yêu cầu sau ít phút nếu lỗi còn tiếp diễn."
+        action = "Gemini đang quá tải tạm thời. Hệ thống đã tự thử lại cùng model; hãy gửi lại yêu cầu sau ít phút nếu lỗi còn tiếp diễn."
     elif any(token in lower for token in ("timeout", "timed out", "504")):
         code = "timeout"
         action = "Nhà cung cấp AI phản hồi chậm. Hãy thử lại yêu cầu."
     elif _is_gemini_model_error(exc):
         code = "model_unavailable"
         retryable = False
-        message = "Gemini không tìm thấy model tạo nội dung tương thích với API key hiện tại."
-        action = "Đặt Gemini model = auto hoặc kiểm tra danh sách model khả dụng trong Cài đặt hệ thống."
+        message = "Gemini model đang cấu hình không dùng được với API key hiện tại."
+        action = "Kiểm tra đúng model ID trong Cài đặt hệ thống và bấm Test Gemini. Hệ thống không tự đổi sang model khác."
     return AIProviderError(message, code=code, retryable=retryable, action=action)
 
 
-def _gemini_model_candidates(client: Any, configured_model: str) -> list[str]:
-    """Return generateContent models available to this exact API key.
-
-    A commercial on-premise installation can use a customer-owned Google key,
-    and model availability can differ between keys/accounts. Prefer the saved
-    model when it is advertised by the Models API, otherwise select a compatible
-    Flash model from the live catalog. If catalog discovery itself is not
-    available, preserve the configured model so older SDKs continue to work.
-    """
-    configured = _model_id(normalize_gemini_model(configured_model)) or DEFAULT_GEMINI_MODEL
-    discovered: list[str] = []
-    catalog_ok = False
-    try:
-        for item in client.models.list():
-            actions = list(getattr(item, "supported_actions", None) or [])
-            if actions and "generateContent" not in actions:
-                continue
-            raw = (
-                getattr(item, "base_model_id", "")
-                or getattr(item, "baseModelId", "")
-                or getattr(item, "name", "")
-            )
-            candidate = _model_id(raw)
-            lowered = candidate.lower()
-            if not lowered.startswith("gemini-"):
-                continue
-            if any(token in lowered for token in ("embedding", "tts", "live", "image")):
-                continue
-            if candidate not in discovered:
-                discovered.append(candidate)
-        catalog_ok = True
-    except Exception:
-        catalog_ok = False
-
-    if not catalog_ok:
-        return [configured]
-
-    ordered: list[str] = []
-
-    def add(value: str) -> None:
-        value = _model_id(value)
-        if value and value in discovered and value not in ordered:
-            ordered.append(value)
-
-    add(configured)
-    for preferred in _GEMINI_PREFERRED_MODELS:
-        add(preferred)
-    for candidate in discovered:
-        if "flash" in candidate.lower():
-            add(candidate)
-    for candidate in discovered:
-        add(candidate)
-
-    return ordered[:6] or [configured]
-
-
 def _gemini_generate(client, *, model: str, contents: Any, config: Any):
-    """Call Gemini with live model discovery, fallback and bounded retry."""
-    candidates = _gemini_model_candidates(client, model)
-    last_exc: BaseException | None = None
+    """Call exactly the configured Gemini model with bounded transient retries.
 
-    for model_index, selected in enumerate(candidates):
-        attempt = 0
-        while True:
-            try:
-                return client.models.generate_content(
-                    model=selected,
-                    contents=contents,
-                    config=config,
-                )
-            except Exception as exc:
-                last_exc = exc
-                if _is_gemini_model_error(exc):
-                    break
-                if _is_transient_provider_error(exc):
-                    # Keep the existing bounded backoff on the primary model.
-                    # A discovered fallback is tried immediately after retries
-                    # are exhausted so the UI does not wait on every candidate.
-                    if model_index == 0 and attempt < len(_GEMINI_RETRY_DELAYS):
-                        delay = _GEMINI_RETRY_DELAYS[attempt] + random.uniform(0.0, 0.35)
-                        attempt += 1
-                        time.sleep(delay)
-                        continue
-                    break
-                raise
-
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("Gemini không trả về model generateContent khả dụng.")
+    A fixed model is an explicit Admin choice. The gateway may retry the same
+    model for short-lived provider errors, but it must never silently route the
+    request to a different Gemini generation.
+    """
+    selected = _model_id(normalize_gemini_model(model)) or DEFAULT_GEMINI_MODEL
+    attempt = 0
+    while True:
+        try:
+            return client.models.generate_content(
+                model=selected,
+                contents=contents,
+                config=config,
+            )
+        except Exception as exc:
+            if _is_transient_provider_error(exc) and attempt < len(_GEMINI_RETRY_DELAYS):
+                delay = _GEMINI_RETRY_DELAYS[attempt] + random.uniform(0.0, 0.35)
+                attempt += 1
+                time.sleep(delay)
+                continue
+            raise
 
 
 class NativeProviderGateway:
