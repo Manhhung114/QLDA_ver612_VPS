@@ -69,7 +69,7 @@ def install_document_selection_autopen() -> None:
     import streamlit as st
 
     if getattr(st, "_qlda_document_selection_autopen_installed", False):
-        from qlda.runtime_core.document_management_uniform_interaction import (
+        from qlda.presentation.streamlit.document_management_uniform_interaction import (
             install_document_management_uniform_interaction,
         )
         install_document_management_uniform_interaction()
@@ -118,7 +118,7 @@ def install_document_selection_autopen() -> None:
     st._qlda_document_selection_autopen_installed = True
     st._qlda_document_selection_autopen_marker = PATCH_MARKER
 
-    from qlda.runtime_core.document_management_uniform_interaction import (
+    from qlda.presentation.streamlit.document_management_uniform_interaction import (
         install_document_management_uniform_interaction,
     )
     install_document_management_uniform_interaction()
