@@ -42,7 +42,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "document-management-vps-ui",
         "attachment-upload-reopen",
         "owner-supplied-materials",
-        "finance-title-policy",
         "project-cost-management",
         "finance-consistency-ui",
         "document-selection-autopen",
@@ -64,6 +63,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.autonomy_overview_patch": RUNTIME / "autonomy_overview_patch.py",
     "qlda.runtime_core.advanced_automation_ui": RUNTIME / "advanced_automation_ui.py",
     "qlda.runtime_core.contractor_access_patch": RUNTIME / "contractor_access_patch.py",
+    "qlda.runtime_core.finance_title_policy": RUNTIME / "finance_title_policy.py",
 }
 
 # One legacy IPC compatibility module still recompiles a materialized function.
