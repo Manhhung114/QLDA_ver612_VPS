@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-# Importing runtime_core installs the production completeness/source-semantics
-# guards used by both Streamlit and sync workers.
-import qlda.runtime_core  # noqa: F401
+# Runtime imports are side-effect free after architecture hardening. Tests that
+# exercise production Data Hub semantics activate the DATA composition stage
+# explicitly, exactly as worker/bootstrap entrypoints do.
+from qlda.composition import RuntimeStage, install_stage
+
+install_stage(RuntimeStage.DATA)
+
 import qlda.application.contractor_data_hub.service as hub_service
 from qlda.application.contractor_data_hub.service import ContractorDataHubService
 from qlda.runtime_core.contractor_data_complete_rows import _include_raw_source
