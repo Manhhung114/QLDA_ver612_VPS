@@ -10,10 +10,6 @@ from typing import Any
 
 _DEFAULT_OPENAI_MODEL = "gpt-5-mini"
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
-_RETIRED_GEMINI_MODELS = {
-    "gemini-2.5-flash",
-    "models/gemini-2.5-flash",
-}
 _SECRET_FIELDS = {"openai_api_key", "gemini_api_key", "google_api_key"}
 
 
@@ -91,21 +87,29 @@ def _load_saved() -> dict[str, Any]:
 
 
 def normalize_gemini_model(value: Any) -> str:
-    """Return a production-safe Gemini model id.
+    """Return one canonical Gemini model id without silently changing models.
 
-    Historical deployments may still persist the retired 2.5 Flash id in Admin
-    settings or GEMINI_MODEL. Normalize those values at request time so a stale
-    mutable setting cannot keep production AI down after the code is deployed.
+    Admin settings historically accepted both human labels (for example
+    ``Gemini 3.5 Flash``) and API ids. Normalize only the spelling/resource
+    prefix. An explicitly selected model is never rewritten to a different
+    generation. Legacy ``auto``/blank values resolve once to the application
+    default for backward compatibility; runtime requests then use that exact id.
     """
     raw = str(value or "").strip()
     if not raw or raw.lower() in {"auto", "default"}:
         return DEFAULT_GEMINI_MODEL
-    lowered = raw.lower()
-    if lowered in _RETIRED_GEMINI_MODELS:
-        return DEFAULT_GEMINI_MODEL
+
+    lowered = raw.lower().strip()
     if lowered.startswith("models/"):
-        raw = raw.split("/", 1)[1].strip()
-    return raw or DEFAULT_GEMINI_MODEL
+        lowered = lowered.split("/", 1)[1].strip()
+    elif "/models/" in lowered:
+        lowered = lowered.split("/models/", 1)[1].strip()
+
+    # Friendly UI labels such as "Gemini 3.5 Flash" become valid API ids.
+    if lowered.startswith("gemini "):
+        lowered = "-".join(lowered.split())
+
+    return lowered or DEFAULT_GEMINI_MODEL
 
 
 def get_provider_settings(preferred: str | None = None) -> dict[str, Any]:
@@ -138,7 +142,7 @@ def get_provider_settings(preferred: str | None = None) -> dict[str, Any]:
     if provider == "gemini":
         saved_key = str(saved.get("gemini_api_key") or "").strip()
         api_key = saved_key if managed else (_runtime_value("GEMINI_API_KEY", "") or saved_key)
-        saved_model = str(saved.get("gemini_model") or "auto").strip() or "auto"
+        saved_model = str(saved.get("gemini_model") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
         configured_model = saved_model if managed else _runtime_value("GEMINI_MODEL", saved_model)
         model = normalize_gemini_model(configured_model)
         use_web = bool(saved.get("openai_web_search", False)) if managed else _runtime_bool(
