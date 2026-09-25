@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import random
+import time
 from datetime import date
 from typing import Any, Sequence
 
@@ -10,6 +12,9 @@ from qlda.infrastructure.ai.provider_settings import (
     get_provider_settings,
     normalize_gemini_model,
 )
+
+
+_GEMINI_RETRY_DELAYS = (1.0, 2.0, 4.0)
 
 
 class AIProviderError(RuntimeError):
@@ -33,21 +38,47 @@ def _is_gemini_model_error(exc: BaseException) -> bool:
     return bool(not_found and "model" in text)
 
 
+def _is_transient_provider_error(exc: BaseException) -> bool:
+    text = str(exc or "").lower()
+    return any(
+        token in text
+        for token in (
+            "408",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+            "unavailable",
+            "overloaded",
+            "high demand",
+            "temporar",
+            "timeout",
+            "timed out",
+            "rate limit",
+            "resource_exhausted",
+        )
+    )
+
+
 def _friendly_error(exc: BaseException) -> AIProviderError:
     text = str(exc or "").strip()
     lower = text.lower()
     code = exc.__class__.__name__ or "ai_error"
-    retryable = any(token in lower for token in ("timeout", "temporar", "429", "rate limit", "503", "overloaded"))
+    retryable = _is_transient_provider_error(exc)
     action = ""
     if any(token in lower for token in ("401", "unauthorized", "invalid api key", "api_key")):
         code = "invalid_api_key"
         action = "Kiểm tra API key trong Cài đặt hệ thống."
-    elif any(token in lower for token in ("429", "rate limit", "quota")):
+    elif any(token in lower for token in ("429", "rate limit", "quota", "resource_exhausted")):
         code = "rate_limit"
         action = "Thử lại sau hoặc kiểm tra quota của nhà cung cấp AI."
-    elif any(token in lower for token in ("timeout", "timed out")):
+    elif any(token in lower for token in ("503", "unavailable", "overloaded", "high demand")):
+        code = "service_unavailable"
+        action = "Gemini đang quá tải tạm thời. Hệ thống đã tự thử lại; hãy gửi lại yêu cầu sau ít phút nếu lỗi còn tiếp diễn."
+    elif any(token in lower for token in ("timeout", "timed out", "504")):
         code = "timeout"
-        action = "Thử lại yêu cầu."
+        action = "Nhà cung cấp AI phản hồi chậm. Hãy thử lại yêu cầu."
     elif _is_gemini_model_error(exc):
         code = "model_not_found"
         action = f"Đổi Gemini model sang {DEFAULT_GEMINI_MODEL} trong Cài đặt hệ thống."
@@ -55,22 +86,31 @@ def _friendly_error(exc: BaseException) -> AIProviderError:
 
 
 def _gemini_generate(client, *, model: str, contents: Any, config: Any):
-    """Call Gemini and recover once from a stale configured model id."""
+    """Call Gemini with bounded recovery for retired models and transient load.
+
+    The Google SDK already retries some transient failures internally. This
+    application-level loop is deliberately small so an interactive Streamlit
+    request remains responsive while still surviving short capacity spikes.
+    """
     selected = normalize_gemini_model(model)
-    try:
-        return client.models.generate_content(
-            model=selected,
-            contents=contents,
-            config=config,
-        )
-    except Exception as exc:
-        if selected != DEFAULT_GEMINI_MODEL and _is_gemini_model_error(exc):
+    attempt = 0
+    while True:
+        try:
             return client.models.generate_content(
-                model=DEFAULT_GEMINI_MODEL,
+                model=selected,
                 contents=contents,
                 config=config,
             )
-        raise
+        except Exception as exc:
+            if selected != DEFAULT_GEMINI_MODEL and _is_gemini_model_error(exc):
+                selected = DEFAULT_GEMINI_MODEL
+                continue
+            if _is_transient_provider_error(exc) and attempt < len(_GEMINI_RETRY_DELAYS):
+                delay = _GEMINI_RETRY_DELAYS[attempt] + random.uniform(0.0, 0.35)
+                attempt += 1
+                time.sleep(delay)
+                continue
+            raise
 
 
 class NativeProviderGateway:
