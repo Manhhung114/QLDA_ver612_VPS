@@ -4,7 +4,7 @@ import unittest
 
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
 from qlda.modules.contractor_data.worker import project_ids_for_supervisor
-from qlda.runtime_core.ai_supervisor_navigation import (
+from qlda.presentation.streamlit.ai_supervisor_navigation import (
     AI_NAV_LABEL,
     HOME_NAV_LABEL,
     _inject_ai_nav_option,
