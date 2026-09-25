@@ -5,7 +5,11 @@ import json
 from datetime import date
 from typing import Any, Sequence
 
-from qlda.infrastructure.ai.provider_settings import get_provider_settings
+from qlda.infrastructure.ai.provider_settings import (
+    DEFAULT_GEMINI_MODEL,
+    get_provider_settings,
+    normalize_gemini_model,
+)
 
 
 class AIProviderError(RuntimeError):
@@ -23,6 +27,12 @@ class AIProviderError(RuntimeError):
         self.action = action
 
 
+def _is_gemini_model_error(exc: BaseException) -> bool:
+    text = str(exc or "").lower()
+    not_found = any(token in text for token in ("404", "not_found", "not found", "no longer available"))
+    return bool(not_found and "model" in text)
+
+
 def _friendly_error(exc: BaseException) -> AIProviderError:
     text = str(exc or "").strip()
     lower = text.lower()
@@ -38,7 +48,29 @@ def _friendly_error(exc: BaseException) -> AIProviderError:
     elif any(token in lower for token in ("timeout", "timed out")):
         code = "timeout"
         action = "Thử lại yêu cầu."
+    elif _is_gemini_model_error(exc):
+        code = "model_not_found"
+        action = f"Đổi Gemini model sang {DEFAULT_GEMINI_MODEL} trong Cài đặt hệ thống."
     return AIProviderError(text or "Nhà cung cấp AI trả về lỗi không xác định.", code=code, retryable=retryable, action=action)
+
+
+def _gemini_generate(client, *, model: str, contents: Any, config: Any):
+    """Call Gemini and recover once from a stale configured model id."""
+    selected = normalize_gemini_model(model)
+    try:
+        return client.models.generate_content(
+            model=selected,
+            contents=contents,
+            config=config,
+        )
+    except Exception as exc:
+        if selected != DEFAULT_GEMINI_MODEL and _is_gemini_model_error(exc):
+            return client.models.generate_content(
+                model=DEFAULT_GEMINI_MODEL,
+                contents=contents,
+                config=config,
+            )
+        raise
 
 
 class NativeProviderGateway:
@@ -83,8 +115,9 @@ class NativeProviderGateway:
                     config = types.GenerateContentConfig(
                         system_instruction=system or "Trả lời chính xác theo dữ liệu được cung cấp. Không bịa số liệu."
                     )
-                    response = client.models.generate_content(
-                        model=model or "gemini-2.5-flash",
+                    response = _gemini_generate(
+                        client,
+                        model=model or DEFAULT_GEMINI_MODEL,
                         contents=str(prompt or ""),
                         config=config,
                     )
@@ -230,8 +263,9 @@ class NativeProviderGateway:
                 client = genai.Client(api_key=str(settings["api_key"]))
                 try:
                     part = types.Part.from_bytes(data=bytes(data), mime_type=str(mime_type or "image/jpeg"))
-                    response = client.models.generate_content(
-                        model=str(settings.get("model") or "gemini-2.5-flash"),
+                    response = _gemini_generate(
+                        client,
+                        model=str(settings.get("model") or DEFAULT_GEMINI_MODEL),
                         contents=[part, str(prompt or "")],
                         config=types.GenerateContentConfig(
                             system_instruction="Phân tích đúng hình ảnh được cung cấp. Không suy đoán chi tiết không nhìn thấy."
