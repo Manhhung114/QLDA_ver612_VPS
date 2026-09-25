@@ -18,6 +18,7 @@ from qlda.infrastructure.ai.embeddings import ProviderEmbeddingAdapter
 from qlda.infrastructure.ai.legacy_provider import AIProviderError, LegacyAIProvider
 from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
 from qlda.infrastructure.ai.vector_store import PostgresVectorContextStore
+from qlda.infrastructure.ai.workspace_indexer import sync_workspace_sources
 
 
 class NativeAIAdapter:
@@ -50,6 +51,13 @@ class NativeAIAdapter:
         try:
             embedder = ProviderEmbeddingAdapter(provider if provider in {"openai", "gemini", "google"} else None)
             store = PostgresVectorContextStore(embed=embedder.embed)
+            # Best-effort and throttled. This supplements background Data Hub indexing
+            # with current task/document/drawing evidence without making chat depend
+            # on indexing availability.
+            try:
+                sync_workspace_sources(store, tenant)
+            except Exception:
+                pass
             service = AIContextService(
                 store,
                 max_chars=max(2000, min(int(os.environ.get("QLDA_AI_RAG_MAX_CHARS", "18000")), 50000)),
@@ -183,24 +191,39 @@ class NativeAIAdapter:
     ) -> str:
         tenant = self._tenant(project_id, workspace_scope)
         grounded, source_refs = self._ground_question(tenant, str(question or ""), str(provider or "openai").lower())
-        result = self._run(
-            provider,
-            "legal_qa",
-            tenant,
-            int(project_id),
-            grounded,
-            status_date=status_date,
-            use_web=use_web,
-        )
-        record_ai_event({
-            "workspace_project_id": tenant,
-            "event_type": "AI_LEGAL_QA",
-            "provider": provider,
-            "input": question,
-            "source_refs": source_refs,
-            "success": True,
-        })
-        return result
+        started = time.perf_counter()
+        try:
+            result = self._run(
+                provider,
+                "legal_qa",
+                tenant,
+                int(project_id),
+                grounded,
+                status_date=status_date,
+                use_web=use_web,
+            )
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_LEGAL_QA",
+                "provider": provider,
+                "input": question,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": True,
+            })
+            return result
+        except Exception as exc:
+            record_ai_event({
+                "workspace_project_id": tenant,
+                "event_type": "AI_LEGAL_QA",
+                "provider": provider,
+                "input": question,
+                "source_refs": source_refs,
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "success": False,
+                "error_code": str(getattr(exc, "code", exc.__class__.__name__)),
+            })
+            raise
 
     def test_connection(self, *, provider: str = "openai") -> str:
         return self._run(provider, "test_connection", None)
