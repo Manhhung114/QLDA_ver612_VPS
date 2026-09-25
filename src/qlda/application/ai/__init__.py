@@ -1,6 +1,14 @@
 from __future__ import annotations
 
 from qlda.application.ai.context import AIContextService
+from qlda.application.ai.evaluation import (
+    PlannerEvalCase,
+    PlannerEvalResult,
+    RetrievalEvalCase,
+    RetrievalEvalResult,
+    evaluate_planner,
+    evaluate_retrieval,
+)
 from qlda.application.ai.ports import (
     AIChunk,
     AIContextPort,
@@ -22,4 +30,10 @@ __all__ = [
     "AIToolCallingPort",
     "AITelemetryPort",
     "AIContextService",
+    "RetrievalEvalCase",
+    "RetrievalEvalResult",
+    "PlannerEvalCase",
+    "PlannerEvalResult",
+    "evaluate_retrieval",
+    "evaluate_planner",
 ]
