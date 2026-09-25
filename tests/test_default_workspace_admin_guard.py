@@ -14,8 +14,9 @@ from qlda.runtime_core.contractor_workspace import (
 from qlda.runtime_core.default_workspace_admin_guard import (
     PATCH_MARKER,
     install_default_workspace_admin_guard,
-    patch_generated_source_admin_only,
 )
+
+
 class DefaultWorkspaceAdminGuardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -39,6 +40,12 @@ class DefaultWorkspaceAdminGuardTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_native_guard_is_installed_without_generated_source_patch(self):
+        self.assertTrue(access._qlda_default_workspace_admin_guard_installed)
+        self.assertEqual(access._qlda_default_workspace_admin_guard_marker, PATCH_MARKER)
+        runtime = Path(__file__).resolve().parents[1] / "src/qlda/runtime_core"
+        self.assertFalse((runtime / "contractor_access_patch.py").exists())
 
     def test_admin_sees_default_and_other_contractors(self):
         rows = access.authorized_contractor_rows(
@@ -121,6 +128,7 @@ class DefaultWorkspaceAdminGuardTests(unittest.TestCase):
                 active_only=True,
                 can_admin=False,
             )
+
 
 if __name__ == "__main__":
     unittest.main()
