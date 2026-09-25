@@ -25,4 +25,5 @@ NATIVE_ADAPTERS = (
 )
 LEGACY_ADAPTERS = ()
 IMPORT_ENGINE_LAYER = "native-packaged"
-STREAMLIT_ENTRYPOINT = "qlda.presentation.streamlit.app"
+STREAMLIT_ENTRYPOINT = "qlda.presentation.streamlit.main"
+LEGACY_STREAMLIT_SHELL = "qlda.presentation.streamlit.app"
