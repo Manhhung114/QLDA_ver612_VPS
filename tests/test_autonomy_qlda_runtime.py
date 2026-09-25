@@ -7,7 +7,7 @@ from pathlib import Path
 
 from qlda.autonomy.persistence import AutomationRepository
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
-from qlda.runtime_core.autonomy_runtime import (
+from qlda.autonomy.runtime import (
     SUPERVISOR_SCHEMA_VERSION,
     get_autonomy_platform,
     run_project_supervisor,
