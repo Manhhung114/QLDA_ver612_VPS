@@ -12,6 +12,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller và không còn trong composition baseline |
+| IPC dynamic source patch | `qlda.runtime_core.ipc_claim` + explicit installers | **Đã retire** | `ipc_claim_patch.py` đã rời composition, không có production caller và đã xóa; `exec()`/`eval()` bị cấm toàn bộ packaged source |
 | AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
@@ -35,7 +36,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 - không được thêm file `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` mới trong `runtime_core`;
 - UI feature mới không được sở hữu bởi `runtime_core`;
 - các compatibility module đã retire không được tạo lại hoặc import lại;
-- không cho phép `exec()` / `eval()` trong packaged source ngoài đúng một debt IPC đã khóa;
+- không cho phép `exec()` / `eval()` trong packaged source;
 - BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
 
 Các regression cleanup lịch sử `test_cleanup_v1`, `test_cleanup_v2*` đã được hợp nhất thành
@@ -59,6 +60,7 @@ architecture CI, critical-domain CI.
 - Expander behavior policy — hoàn tất.
 - Contractor access source patch cũ — đã xóa; runtime dùng `contractor_access_control.py`.
 - Autonomy runtime facade — đã xóa; caller dùng `qlda.autonomy.runtime`.
+- IPC dynamic source patch — đã xóa; packaged source hiện không còn ngoại lệ `exec()`/`eval()`.
 - Settings/Google OAuth infrastructure — tiếp theo.
 
 ### P2 — workflow nghiệp vụ trung tâm
