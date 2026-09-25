@@ -88,7 +88,8 @@ def test_runtime_core_ai_compatibility_files_are_deleted() -> None:
 
 def test_streamlit_uses_native_ai_facade() -> None:
     source = STREAMLIT_APP.read_text(encoding="utf-8")
-    assert "qlda.runtime_core.ai_service" not in source
+    retired_import = "qlda.runtime_core." + "ai_service"
+    assert retired_import not in source
     assert "qlda.infrastructure.ai.presentation_facade" in source
     assert "set_ai_workspace_scope" not in source
 
