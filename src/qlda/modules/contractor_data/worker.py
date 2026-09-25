@@ -111,6 +111,40 @@ def project_ids_for_supervisor(db) -> list[int]:
     return out
 
 
+def _index_rag_workspaces(db, master_project_id: int) -> dict[str, int]:
+    """Best-effort RAG indexing; never makes source sync fail."""
+    if not _env_bool("QLDA_AI_RAG_ENABLED", True):
+        return {"workspaces": 0, "records": 0}
+    try:
+        from qlda.infrastructure.ai.embeddings import ProviderEmbeddingAdapter
+        from qlda.infrastructure.ai.vector_store import PostgresVectorContextStore
+
+        provider = str(os.environ.get("QLDA_AI_EMBEDDING_PROVIDER", "auto") or "auto")
+        embedder = ProviderEmbeddingAdapter(provider)
+        store = PostgresVectorContextStore(embed=embedder.embed)
+        with db.connect() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT workspace_project_id
+                FROM contractor_data_spaces
+                WHERE master_project_id=? AND enabled=1
+                ORDER BY workspace_project_id""",
+                (int(master_project_id),),
+            ).fetchall()
+        workspace_count = 0
+        indexed = 0
+        limit = int(os.environ.get("QLDA_AI_RAG_INDEX_LIMIT", "10000") or 10000)
+        for row in rows:
+            workspace_id = int(_row_value(row, "workspace_project_id", 0) or 0)
+            if workspace_id <= 0:
+                continue
+            workspace_count += 1
+            indexed += int(store.sync_contractor_data_hub(workspace_id, limit=limit) or 0)
+        return {"workspaces": workspace_count, "records": indexed}
+    except Exception as exc:
+        LOG.warning("RAG indexing skipped for project=%s: %s", master_project_id, exc)
+        return {"workspaces": 0, "records": 0}
+
+
 def run_project(db, master_project_id: int) -> dict[str, Any]:
     from qlda.application.contractor_data_hub import ContractorDataHubService
     from qlda.infrastructure.google_sheets.drive import GoogleWorkspaceClient
@@ -132,9 +166,13 @@ def run_project(db, master_project_id: int) -> dict[str, Any]:
             account_name=str(stored.get("account_name") or ""),
             scopes=[GoogleWorkspaceClient.SHEETS_SCOPE, GoogleWorkspaceClient.DRIVE_SCOPE],
         )
+
+    rag = _index_rag_workspaces(db, int(master_project_id))
     return {
         "project_id": int(master_project_id),
         "oauth_connected": bool(token_state),
+        "rag_indexed_workspaces": int(rag.get("workspaces") or 0),
+        "rag_indexed_records": int(rag.get("records") or 0),
         **result,
     }
 
@@ -181,20 +219,21 @@ def run_once(db=None) -> list[dict[str, Any]]:
                 LOG.info("project=%s skipped=%s", project_id, result.get("reason"))
             else:
                 LOG.info(
-                    "project=%s oauth=%s due=%s success=%s errors=%s records=%s",
+                    "project=%s oauth=%s due=%s success=%s errors=%s records=%s rag=%s",
                     project_id,
                     result.get("oauth_connected", False),
                     result.get("due", 0),
                     result.get("success", 0),
                     result.get("errors", 0),
                     result.get("records", 0),
+                    result.get("rag_indexed_records", 0),
                 )
         except Exception as exc:
             LOG.exception("Contractor data sync failed for project=%s: %s", project_id, exc)
             results.append({"project_id": project_id, "error": str(exc)})
 
     # Source sync stays master-project aware; AI supervision is then fanned out to
-    # isolated contractor workspaces so snapshots/events/twins never mix tenants.
+    # isolated contractor workspaces so snapshots/events never mix tenants.
     run_daily_supervisor_pass(db)
     return results
 
