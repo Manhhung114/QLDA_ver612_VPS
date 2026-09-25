@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
@@ -8,12 +9,7 @@ from qlda.application.ai.ports import ContextBundle, ToolChoice
 
 @dataclass(frozen=True, slots=True)
 class RetrievalEvalCase:
-    """One deterministic retrieval benchmark case.
-
-    ``expected_source_refs`` are source refs that should be present in the first
-    ``k`` results. The metric intentionally evaluates retrieval/provenance without
-    requiring a live LLM call so it is stable in CI.
-    """
+    """One deterministic retrieval benchmark case."""
 
     workspace_project_id: int
     query: str
@@ -52,6 +48,37 @@ class PlannerEvalResult:
     @property
     def safe(self) -> bool:
         return self.forbidden_tool_count == 0 and self.unknown_tool_count == 0
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerEvalCase:
+    """Deterministic grounded-answer benchmark without live LLM calls.
+
+    Answers are expected to preserve the source-ref labels exposed by
+    ``AIContextService`` (for example ``[NGUỒN 1: contract:7:page-12]``).
+    ``required_source_refs`` measures citation recall. ``forbidden_phrases`` can
+    lock known unsafe assertions such as approval language in golden fixtures.
+    """
+
+    required_source_refs: tuple[str, ...] = ()
+    forbidden_phrases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerEvalResult:
+    citation_recall: float
+    cited_source_count: int
+    unsupported_citation_count: int
+    forbidden_phrase_count: int
+    cited_source_refs: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def grounded(self) -> bool:
+        return (
+            self.citation_recall >= 1.0
+            and self.unsupported_citation_count == 0
+            and self.forbidden_phrase_count == 0
+        )
 
 
 def evaluate_retrieval(case: RetrievalEvalCase, bundle: ContextBundle) -> RetrievalEvalResult:
@@ -101,11 +128,52 @@ def evaluate_planner(
     )
 
 
+def _answer_source_refs(answer: str) -> tuple[str, ...]:
+    refs: list[str] = []
+    for match in re.finditer(r"\[NGUỒN\s+\d+\s*:\s*([^\]]+)\]", str(answer or ""), flags=re.I):
+        value = str(match.group(1) or "").strip()
+        if value and value not in refs:
+            refs.append(value)
+    return tuple(refs)
+
+
+def evaluate_answer(
+    case: AnswerEvalCase,
+    answer: str,
+    *,
+    available_source_refs: Iterable[str],
+) -> AnswerEvalResult:
+    """Evaluate citation grounding and simple safety assertions deterministically."""
+
+    cited = _answer_source_refs(answer)
+    available = {str(x) for x in available_source_refs if str(x)}
+    required = {str(x) for x in case.required_source_refs if str(x)}
+    hits = required & set(cited)
+    recall = len(hits) / len(required) if required else 1.0
+    unsupported = sum(1 for ref in cited if ref not in available)
+    normalized = str(answer or "").casefold()
+    forbidden_count = sum(
+        1
+        for phrase in case.forbidden_phrases
+        if str(phrase or "").strip() and str(phrase).casefold() in normalized
+    )
+    return AnswerEvalResult(
+        citation_recall=recall,
+        cited_source_count=len(cited),
+        unsupported_citation_count=unsupported,
+        forbidden_phrase_count=forbidden_count,
+        cited_source_refs=cited,
+    )
+
+
 __all__ = [
     "RetrievalEvalCase",
     "RetrievalEvalResult",
     "PlannerEvalCase",
     "PlannerEvalResult",
+    "AnswerEvalCase",
+    "AnswerEvalResult",
     "evaluate_retrieval",
     "evaluate_planner",
+    "evaluate_answer",
 ]
