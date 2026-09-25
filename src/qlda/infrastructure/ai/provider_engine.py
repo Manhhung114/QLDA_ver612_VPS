@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Provider-native text/vision execution for the QLDA AI boundary.
 
-This module deliberately has no dependency on ``qlda.runtime_core``.  It owns
+This module deliberately has no dependency on ``qlda.runtime_core``. It owns
 provider SDK integration only; tenant context, RAG, audit and tool policy stay
 in the application/infrastructure layers above it.
 """
@@ -66,16 +66,20 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _safe_error(exc: BaseException, provider: str) -> NativeProviderError:
-    text = str(exc or "").replace(str(os.environ.get("OPENAI_API_KEY") or ""), "***").replace(
-        str(os.environ.get("GEMINI_API_KEY") or ""), "***"
-    )
+    text = str(exc or "")
+    for secret in (
+        str(os.environ.get("OPENAI_API_KEY") or "").strip(),
+        str(os.environ.get("GEMINI_API_KEY") or "").strip(),
+    ):
+        if secret:
+            text = text.replace(secret, "***")
     low = text.lower()
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     try:
         status = int(status) if status is not None else None
     except Exception:
         status = None
-    if status in {401, 403} or "api key" in low and ("invalid" in low or "not valid" in low):
+    if status in {401, 403} or ("api key" in low and ("invalid" in low or "not valid" in low)):
         return NativeProviderError(
             f"Không xác thực được {provider} API.", code="invalid_api_key",
             action="Kiểm tra API key/quyền model trong biến môi trường máy chủ.",
@@ -169,7 +173,10 @@ class NativeProviderEngine:
                     ],
                     config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTIONS),
                 )
-                return str(getattr(response, "text", "") or "").strip()
+                text = str(getattr(response, "text", "") or "").strip()
+                if not text:
+                    raise NativeProviderError("Gemini trả phản hồi rỗng.", code="empty_response", retryable=True)
+                return text
 
             from openai import OpenAI
 
@@ -185,7 +192,10 @@ class NativeProviderEngine:
                     ],
                 }],
             )
-            return str(getattr(response, "output_text", "") or "").strip()
+            text = str(getattr(response, "output_text", "") or "").strip()
+            if not text:
+                raise NativeProviderError("OpenAI trả phản hồi rỗng.", code="empty_response", retryable=True)
+            return text
         except NativeProviderError:
             raise
         except Exception as exc:
@@ -208,8 +218,6 @@ class NativeProviderEngine:
         except Exception:
             if not cfg.use_web:
                 raise
-            # Model/project may not expose web search. Preserve the core answer
-            # path rather than turning an optional retrieval feature into outage.
             kwargs.pop("tools", None)
             response = client.responses.create(**kwargs)
         text = str(getattr(response, "output_text", "") or "").strip()
