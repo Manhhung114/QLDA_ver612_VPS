@@ -37,9 +37,6 @@ ALLOWED_DEBT_FILENAMES = frozenset(
 )
 DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 
-# UI compatibility features that still live in runtime_core. This is a shrinking
-# ledger, not an extension point. New UI features must be implemented under
-# qlda.presentation and referenced from the composition root there.
 ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
     {
         "upload-ui-policy",
@@ -50,11 +47,9 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "project-cost-management",
         "finance-consistency-ui",
         "money-display-format",
-        "expander-default-collapsed",
         "document-selection-autopen",
         "production-progress-overview",
         "production-progress-shared-ai",
-        "multiselect-tag-style",
         "production-progress-source-exact",
         "autonomy-overview",
         "advanced-automation-ui",
@@ -62,9 +57,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
     }
 )
 
-# One pre-existing application dependency still calls legacy AI/settings adapters
-# from Contractor Data Hub. It is explicitly tracked in the migration ledger and
-# may be removed from this baseline, never expanded with another path.
 ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
     {"src/qlda/application/contractor_data_hub/service.py"}
 )
@@ -105,8 +97,6 @@ def check_layer_boundaries() -> list[str]:
                 seen_legacy_dependencies.add(relative)
                 continue
             errors.append(f"{relative} imports compatibility runtime_core")
-    # The allow-list is a migration ledger, not a permanent exception. Stale
-    # entries must be deleted as soon as their dependency is removed.
     stale = ALLOWED_RUNTIME_CORE_DEPENDENCIES - seen_legacy_dependencies
     for relative in sorted(stale):
         errors.append(f"Remove stale runtime_core dependency baseline entry: {relative}")
@@ -176,11 +166,6 @@ def check_runtime_ui_feature_budget() -> list[str]:
 
 
 def check_no_dynamic_source_execution() -> list[str]:
-    """Reject exec/eval in packaged application code.
-
-    Dynamic execution was historically used to compose generated/legacy source.
-    The production package is now source-controlled and must remain inspectable.
-    """
     errors: list[str] = []
     for path in _python_files(SRC):
         try:
