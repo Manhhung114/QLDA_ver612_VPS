@@ -49,8 +49,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "production-progress-overview",
         "production-progress-shared-ai",
         "production-progress-source-exact",
-        "autonomy-overview",
-        "advanced-automation-ui",
         "contractor-data-admin-visibility",
     }
 )
