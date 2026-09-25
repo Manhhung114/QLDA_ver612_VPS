@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import qlda.runtime_core.settings_store as ss
 import qlda.runtime_core.system_settings as syscfg
+
+
 class SystemSettingsV622Tests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -21,6 +23,7 @@ class SystemSettingsV622Tests(unittest.TestCase):
             os.environ,
             {
                 "QLDA_SETTINGS_MASTER_KEY": "test-master-key-that-is-long-and-private-123456789",
+                "QLDA_APP_SETTINGS_FILE": str(ss.APP_SETTINGS_FILE),
                 "OPENAI_API_KEY": "env-openai-key",
                 "GEMINI_API_KEY": "env-gemini-key",
                 "OPENAI_MODEL": "env-openai-model",
@@ -94,7 +97,7 @@ class SystemSettingsV622Tests(unittest.TestCase):
         self.assertEqual(fallback["api_key"], "env-gemini-key")
         self.assertEqual(fallback["model"], "env-gemini-model")
 
-    def test_ai_service_bridge_reads_admin_managed_settings(self):
+    def test_native_provider_settings_read_admin_managed_settings_without_runtime_bridge(self):
         ss.save_app_settings(
             {
                 "managed_ai": True,
@@ -104,14 +107,14 @@ class SystemSettingsV622Tests(unittest.TestCase):
                 "openai_web_search": True,
             }
         )
+        from qlda.infrastructure.ai.provider_settings import get_provider_settings
         import qlda.runtime_core.runtime_settings_bridge as bridge
-        import qlda.runtime_core.ai_service as ai_service
-        bridge.install_runtime_settings_bridge()
-        value = ai_service.AISettings.from_env()
-        self.assertEqual(value.api_key, "admin-openai-key")
-        self.assertEqual(value.model, "admin-openai-model")
-        self.assertTrue(value.use_web)
-        self.assertTrue(bridge.runtime_bridge_status()["ai"])
+
+        value = get_provider_settings()
+        self.assertEqual(value["api_key"], "admin-openai-key")
+        self.assertEqual(value["model"], "admin-openai-model")
+        self.assertTrue(value["use_web"])
+        self.assertFalse(bridge.runtime_bridge_status()["ai"])
 
     def test_audit_contains_metadata_not_values(self):
         ss.append_settings_audit("admin@example.com", "update_ai", ["openai_api_key", "ai_provider"])
