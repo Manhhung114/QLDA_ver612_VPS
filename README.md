@@ -32,14 +32,16 @@ Tài liệu kiến trúc đang được duy trì:
 
 - `docs/architecture/ARCHITECTURE_HARDENING.md` – nguyên tắc kiến trúc và quality gate hiện hành.
 - `docs/architecture/RUNTIME_CORE_MIGRATION_LEDGER.md` – danh sách các compatibility slice còn phải chuyển sang native layer.
+- `docs/architecture/AI_ARCHITECTURE.md` – boundary AI, RAG/provenance, native tool calling, telemetry và quality evaluation.
 
 Các tài liệu migration trung gian V6.25–V7.6 đã được loại khỏi nhánh `main`; lịch sử đầy đủ vẫn có trong Git history.
 
 ## CI / Quality gates
 
-Nhánh `main` được kiểm tra qua bốn workflow:
+Nhánh `main` được kiểm tra qua năm workflow:
 
 - **Architecture Quality Gate** – boundary, tăng nợ kỹ thuật, kích thước Streamlit shell và dynamic source execution.
+- **AI Quality Gate** – AI boundary, tenant isolation, RAG/provenance, native planner contract và deterministic quality eval.
 - **Critical Domain Regression** – BOQ, IPC/Claim, VO, Schedule, Contract, Autonomy và tenant isolation.
 - **V7 Native Regression** – regression tổng thể runtime native/compatibility.
 - **V7 Docker Check** – kiểm tra Docker build và entrypoint production.
