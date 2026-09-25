@@ -92,7 +92,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("owner-supplied-materials", RuntimeStage.UI, "qlda.presentation.streamlit.owner_supplied_materials_ui", "install_owner_supplied_material_erp"),
     RuntimeFeature("finance-title-policy", RuntimeStage.UI, "qlda.presentation.streamlit.finance_title_policy", "install_finance_title_policy"),
     RuntimeFeature("project-cost-management", RuntimeStage.UI, "qlda.presentation.streamlit.project_cost_management_ui", "install_project_cost_management"),
-    RuntimeFeature("finance-consistency-ui", RuntimeStage.UI, "qlda.runtime_core.finance_consistency", "install_finance_consistency_ui"),
+    RuntimeFeature("finance-consistency-ui", RuntimeStage.UI, "qlda.presentation.streamlit.finance_consistency_ui", "install_finance_consistency_ui"),
     RuntimeFeature("money-display-format", RuntimeStage.UI, "qlda.presentation.streamlit.money_display", "install_money_display_format"),
     RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.presentation.streamlit.expander_policy", "install_expanders_default_collapsed"),
     RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.presentation.streamlit.document_selection_autopen", "install_document_selection_autopen"),
