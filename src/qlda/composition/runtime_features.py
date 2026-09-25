@@ -2,19 +2,8 @@ from __future__ import annotations
 
 """Deterministic runtime feature composition.
 
-Historically QLDA accumulated behavior by importing ``runtime_core`` and then
-wrapping/bootstrap-patching functions from ``runtime_core.__init__``. That made
-import order part of the application contract and made production failures hard
-to diagnose.
-
-This module turns that hidden behavior into an explicit, inspectable composition
-root. Every compatibility installer is named, ordered and attached to one stage.
-Importing this module has no side effects; callers must invoke ``install_stage``.
-
-The compatibility installers remain idempotent while native replacements are
-migrated into domain/application/presentation packages. New product features
-must not be added here as ad-hoc ``*_fix``/``*_patch`` modules; the architecture
-guard in CI enforces that rule.
+All compatibility installers are explicit, ordered, and grouped by stage. Importing
+this module has no side effects; callers must invoke ``install_stage``.
 """
 
 from dataclasses import dataclass
@@ -107,7 +96,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("money-display-format", RuntimeStage.UI, "qlda.presentation.streamlit.money_display", "install_money_display_format"),
     RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.presentation.streamlit.expander_policy", "install_expanders_default_collapsed"),
     RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.presentation.streamlit.document_selection_autopen", "install_document_selection_autopen"),
-    RuntimeFeature("production-progress-overview", RuntimeStage.UI, "qlda.runtime_core.production_progress_overview_patch", "install_production_progress_overview_patch"),
+    RuntimeFeature("production-progress-overview", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_overview", "install_production_progress_overview_patch"),
     RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.runtime_core.contractor_data_shared_ai", "install_production_progress_shared_ai_ui"),
     RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.presentation.streamlit.multiselect_tag_style", "install_multiselect_tag_style_patch"),
     RuntimeFeature("production-progress-source-exact", RuntimeStage.UI, "qlda.runtime_core.production_progress_source_exact", "install_production_progress_source_exact"),
@@ -145,10 +134,4 @@ def feature_status() -> dict[str, object]:
         }
 
 
-__all__ = [
-    "FEATURES",
-    "RuntimeFeature",
-    "RuntimeStage",
-    "feature_status",
-    "install_stage",
-]
+__all__ = ["FEATURES", "RuntimeFeature", "RuntimeStage", "feature_status", "install_stage"]
