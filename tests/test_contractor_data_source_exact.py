@@ -4,7 +4,10 @@ import unittest
 
 import pandas as pd
 
-import qlda.runtime_core  # noqa: F401 - installs production sync semantics
+from qlda.composition import RuntimeStage, install_stage
+
+install_stage(RuntimeStage.DATA)
+
 import qlda.application.contractor_data_hub.service as hub_service
 from qlda.runtime_core.contractor_data_official_ai import extract_official_summaries
 from qlda.runtime_core.production_progress_source_exact import build_source_exact_pivot
