@@ -41,6 +41,12 @@ class LegacyAIProvider:
         initialize_ai_runtime()
         return engine, access
 
+    @staticmethod
+    def _settings() -> dict[str, Any]:
+        from qlda.runtime_core.settings_store import get_ai_runtime_settings
+
+        return dict(get_ai_runtime_settings() or {})
+
     @classmethod
     def assistant(cls, provider: str):
         engine, _access = cls._modules()
@@ -84,6 +90,85 @@ class LegacyAIProvider:
             ) from exc
 
     @classmethod
+    def data_hub_answer(cls, workspace_scope: int, prompt: str) -> str:
+        """Answer a pre-grounded Data Hub prompt using Admin-managed AI settings.
+
+        This preserves the legacy provider configuration while removing every
+        ``runtime_core`` import from the application-layer Data Hub service.
+        """
+        engine, _access = cls._modules()
+        settings = cls._settings()
+        provider = str(settings.get("provider") or "openai").strip().lower()
+        key = str(settings.get("api_key") or "").strip()
+        if not key:
+            raise AIProviderError("Chưa cấu hình API key trong Cài đặt hệ thống.", code="missing_api_key")
+        model = str(settings.get("model") or "").strip()
+        try:
+            with cls.scope(int(workspace_scope)):
+                if provider in {"gemini", "google"}:
+                    from google import genai
+                    from google.genai import types
+
+                    client = genai.Client(api_key=key)
+                    try:
+                        selected_model = model or "auto"
+                        if selected_model.lower() in {"", "auto", "default"}:
+                            selected_model = "gemini-2.5-flash"
+                        response = client.models.generate_content(
+                            model=selected_model,
+                            contents=str(prompt),
+                            config=types.GenerateContentConfig(
+                                system_instruction="Chỉ phân tích dữ liệu QLDA được cung cấp. Không bịa số liệu."
+                            ),
+                        )
+                        return str(getattr(response, "text", "") or "").strip() or "AI không trả về nội dung."
+                    finally:
+                        try:
+                            client.close()
+                        except Exception:
+                            pass
+
+                from openai import OpenAI
+
+                client = OpenAI(api_key=key)
+                response = client.responses.create(
+                    model=model or "gpt-5-mini",
+                    store=False,
+                    input=[
+                        {"role": "developer", "content": "Chỉ phân tích dữ liệu QLDA được cung cấp. Không bịa số liệu."},
+                        {"role": "user", "content": str(prompt)},
+                    ],
+                )
+                return str(getattr(response, "output_text", "") or "").strip() or "AI không trả về nội dung."
+        except engine.AIServiceError as exc:
+            raise AIProviderError(
+                str(exc),
+                code=str(getattr(exc, "code", "ai_error") or "ai_error"),
+                retryable=bool(getattr(exc, "retryable", False)),
+                action=str(getattr(exc, "action", "") or ""),
+            ) from exc
+        except AIProviderError:
+            raise
+        except Exception as exc:
+            # Preserve the provider engine's friendly error normalization without
+            # leaking those runtime imports back into application code.
+            try:
+                if provider in {"gemini", "google"}:
+                    normalized = engine.gemini_error_to_service_error(exc)
+                else:
+                    normalized = engine.openai_error_to_service_error(exc)
+                raise AIProviderError(
+                    str(normalized),
+                    code=str(getattr(normalized, "code", "ai_error") or "ai_error"),
+                    retryable=bool(getattr(normalized, "retryable", False)),
+                    action=str(getattr(normalized, "action", "") or ""),
+                ) from exc
+            except AIProviderError:
+                raise
+            except Exception:
+                raise AIProviderError(str(exc), code=exc.__class__.__name__) from exc
+
+    @classmethod
     def vision_text(
         cls,
         workspace_scope: int,
@@ -97,10 +182,8 @@ class LegacyAIProvider:
         This keeps Site Vision outside direct ``runtime_core`` imports while the
         legacy provider engine is still being strangled.
         """
-        from qlda.runtime_core.settings_store import get_ai_runtime_settings
-
         engine, _access = cls._modules()
-        settings = dict(get_ai_runtime_settings() or {})
+        settings = cls._settings()
         api_key = str(settings.get("api_key") or "").strip()
         if not api_key:
             raise AIProviderError("Chưa cấu hình API key cho AI Vision.", code="missing_api_key")
