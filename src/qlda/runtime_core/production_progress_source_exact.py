@@ -3,11 +3,9 @@ from __future__ import annotations
 """Source-faithful Contractor Data Hub production overview.
 
 The old pivot indexed only by contractor + worksheet + work-item text and used
-``aggfunc='mean'``.  In the real SME workbook labels repeat in separate sections:
-for example "I. Thi công lắp đặt phần thô" occurs at source rows 5, 47 and 83.
-A mean therefore changed 50%, 32.5% and 92.08% into a synthetic 58.19% row that
-never exists in Google Sheet.  This renderer keys every row by source_row and
-source name, so the dashboard is a faithful view of the workbook.
+``aggfunc='mean'``. In the real SME workbook labels repeat in separate sections;
+this renderer keys every row by source_row and source name, so the dashboard is
+a faithful view of the workbook.
 """
 
 from typing import Any
@@ -15,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from qlda.runtime_core.contractor_data_official_ai import extract_official_summaries
-from qlda.runtime_core.production_progress_overview_patch import (
+from qlda.presentation.streamlit.production_progress_overview import (
     _contractor_label,
     _progress_dimension_sort_key,
     _sanitize_multiselect_state,
@@ -27,7 +25,6 @@ PATCH_MARKER = "V7 PRODUCTION SOURCE EXACT V1"
 
 
 def _format_percent_table(frame: pd.DataFrame, progress_columns: list[str]) -> pd.DataFrame:
-    """Match the workbook's visible 0% formatting without changing stored values."""
     out = frame.copy()
     for column in progress_columns:
         if column not in out.columns:
@@ -39,7 +36,6 @@ def _format_percent_table(frame: pd.DataFrame, progress_columns: list[str]) -> p
 
 
 def build_source_exact_pivot(view: pd.DataFrame, selected_dimensions: list[str]) -> pd.DataFrame:
-    """Pivot without collapsing repeated work-item labels from different rows."""
     if view.empty:
         return pd.DataFrame()
     index_cols = ["Nhà thầu", "Nguồn", "Worksheet", "Dòng nguồn", "Công tác"]
@@ -276,8 +272,6 @@ def render_overview_source_exact(
     pivot = build_source_exact_pivot(view, selected_zones)
     progress_columns = [x for x in selected_zones if x in pivot.columns]
     display = _format_percent_table(pivot, progress_columns)
-    # Source row is a correctness key, not a business-facing column. Keep it in
-    # the internal pivot to preserve identity, then hide it from the display.
     if "Dòng nguồn" in display.columns:
         display = display.drop(columns=["Dòng nguồn"])
     st.dataframe(display, hide_index=True, use_container_width=True, height=520)
