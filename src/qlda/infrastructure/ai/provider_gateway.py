@@ -15,6 +15,13 @@ from qlda.infrastructure.ai.provider_settings import (
 
 
 _GEMINI_RETRY_DELAYS = (1.0, 2.0, 4.0)
+_GEMINI_PREFERRED_MODELS = (
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+)
 
 
 class AIProviderError(RuntimeError):
@@ -32,10 +39,23 @@ class AIProviderError(RuntimeError):
         self.action = action
 
 
+def _model_id(value: Any) -> str:
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    if lowered.startswith("models/"):
+        return raw.split("/", 1)[1].strip()
+    marker = "/models/"
+    if marker in lowered:
+        return raw[lowered.index(marker) + len(marker) :].strip()
+    return raw
+
+
 def _is_gemini_model_error(exc: BaseException) -> bool:
     text = str(exc or "").lower()
     not_found = any(token in text for token in ("404", "not_found", "not found", "no longer available"))
-    return bool(not_found and "model" in text)
+    bad_format = "unexpected model name format" in text
+    invalid_model = "model" in text and any(token in text for token in ("invalid_argument", "invalid argument"))
+    return bool((not_found and "model" in text) or bad_format or invalid_model)
 
 
 def _is_transient_provider_error(exc: BaseException) -> bool:
@@ -67,6 +87,7 @@ def _friendly_error(exc: BaseException) -> AIProviderError:
     code = exc.__class__.__name__ or "ai_error"
     retryable = _is_transient_provider_error(exc)
     action = ""
+    message = text or "Nhà cung cấp AI trả về lỗi không xác định."
     if any(token in lower for token in ("401", "unauthorized", "invalid api key", "api_key")):
         code = "invalid_api_key"
         action = "Kiểm tra API key trong Cài đặt hệ thống."
@@ -80,37 +101,102 @@ def _friendly_error(exc: BaseException) -> AIProviderError:
         code = "timeout"
         action = "Nhà cung cấp AI phản hồi chậm. Hãy thử lại yêu cầu."
     elif _is_gemini_model_error(exc):
-        code = "model_not_found"
-        action = f"Đổi Gemini model sang {DEFAULT_GEMINI_MODEL} trong Cài đặt hệ thống."
-    return AIProviderError(text or "Nhà cung cấp AI trả về lỗi không xác định.", code=code, retryable=retryable, action=action)
+        code = "model_unavailable"
+        retryable = False
+        message = "Gemini không tìm thấy model tạo nội dung tương thích với API key hiện tại."
+        action = "Đặt Gemini model = auto hoặc kiểm tra danh sách model khả dụng trong Cài đặt hệ thống."
+    return AIProviderError(message, code=code, retryable=retryable, action=action)
+
+
+def _gemini_model_candidates(client: Any, configured_model: str) -> list[str]:
+    """Return generateContent models available to this exact API key.
+
+    A commercial on-premise installation can use a customer-owned Google key,
+    and model availability can differ between keys/accounts. Prefer the saved
+    model when it is advertised by the Models API, otherwise select a compatible
+    Flash model from the live catalog. If catalog discovery itself is not
+    available, preserve the configured model so older SDKs continue to work.
+    """
+    configured = _model_id(normalize_gemini_model(configured_model)) or DEFAULT_GEMINI_MODEL
+    discovered: list[str] = []
+    catalog_ok = False
+    try:
+        for item in client.models.list():
+            actions = list(getattr(item, "supported_actions", None) or [])
+            if actions and "generateContent" not in actions:
+                continue
+            raw = (
+                getattr(item, "base_model_id", "")
+                or getattr(item, "baseModelId", "")
+                or getattr(item, "name", "")
+            )
+            candidate = _model_id(raw)
+            lowered = candidate.lower()
+            if not lowered.startswith("gemini-"):
+                continue
+            if any(token in lowered for token in ("embedding", "tts", "live", "image")):
+                continue
+            if candidate not in discovered:
+                discovered.append(candidate)
+        catalog_ok = True
+    except Exception:
+        catalog_ok = False
+
+    if not catalog_ok:
+        return [configured]
+
+    ordered: list[str] = []
+
+    def add(value: str) -> None:
+        value = _model_id(value)
+        if value and value in discovered and value not in ordered:
+            ordered.append(value)
+
+    add(configured)
+    for preferred in _GEMINI_PREFERRED_MODELS:
+        add(preferred)
+    for candidate in discovered:
+        if "flash" in candidate.lower():
+            add(candidate)
+    for candidate in discovered:
+        add(candidate)
+
+    return ordered[:6] or [configured]
 
 
 def _gemini_generate(client, *, model: str, contents: Any, config: Any):
-    """Call Gemini with bounded recovery for retired models and transient load.
+    """Call Gemini with live model discovery, fallback and bounded retry."""
+    candidates = _gemini_model_candidates(client, model)
+    last_exc: BaseException | None = None
 
-    The Google SDK already retries some transient failures internally. This
-    application-level loop is deliberately small so an interactive Streamlit
-    request remains responsive while still surviving short capacity spikes.
-    """
-    selected = normalize_gemini_model(model)
-    attempt = 0
-    while True:
-        try:
-            return client.models.generate_content(
-                model=selected,
-                contents=contents,
-                config=config,
-            )
-        except Exception as exc:
-            if selected != DEFAULT_GEMINI_MODEL and _is_gemini_model_error(exc):
-                selected = DEFAULT_GEMINI_MODEL
-                continue
-            if _is_transient_provider_error(exc) and attempt < len(_GEMINI_RETRY_DELAYS):
-                delay = _GEMINI_RETRY_DELAYS[attempt] + random.uniform(0.0, 0.35)
-                attempt += 1
-                time.sleep(delay)
-                continue
-            raise
+    for model_index, selected in enumerate(candidates):
+        attempt = 0
+        while True:
+            try:
+                return client.models.generate_content(
+                    model=selected,
+                    contents=contents,
+                    config=config,
+                )
+            except Exception as exc:
+                last_exc = exc
+                if _is_gemini_model_error(exc):
+                    break
+                if _is_transient_provider_error(exc):
+                    # Keep the existing bounded backoff on the primary model.
+                    # A discovered fallback is tried immediately after retries
+                    # are exhausted so the UI does not wait on every candidate.
+                    if model_index == 0 and attempt < len(_GEMINI_RETRY_DELAYS):
+                        delay = _GEMINI_RETRY_DELAYS[attempt] + random.uniform(0.0, 0.35)
+                        attempt += 1
+                        time.sleep(delay)
+                        continue
+                    break
+                raise
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Gemini không trả về model generateContent khả dụng.")
 
 
 class NativeProviderGateway:
