@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "qlda"
+TESTS = ROOT / "tests"
 RUNTIME = SRC / "runtime_core"
 LEGACY_APP = SRC / "presentation" / "streamlit" / "app.py"
 ENTRYPOINT = SRC / "presentation" / "streamlit" / "main.py"
@@ -55,6 +56,15 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
 ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
     {"src/qlda/application/contractor_data_hub/service.py"}
 )
+
+# Compatibility modules that have completed strangler migration. They must stay
+# deleted and no source/test import is allowed to reintroduce them.
+RETIRED_MODULES = {
+    "qlda.runtime_core.autonomy_runtime": RUNTIME / "autonomy_runtime.py",
+    "qlda.runtime_core.autonomy_overview_patch": RUNTIME / "autonomy_overview_patch.py",
+    "qlda.runtime_core.advanced_automation_ui": RUNTIME / "advanced_automation_ui.py",
+    "qlda.runtime_core.contractor_access_patch": RUNTIME / "contractor_access_patch.py",
+}
 
 # One legacy IPC compatibility module still recompiles a materialized function.
 # Track the exact number of calls so this debt can shrink but can never spread or
@@ -167,6 +177,32 @@ def check_runtime_ui_feature_budget() -> list[str]:
     return errors
 
 
+def check_retired_modules_stay_retired() -> list[str]:
+    errors: list[str] = []
+    for module, path in RETIRED_MODULES.items():
+        if path.exists():
+            errors.append(f"Retired compatibility module was restored: {path.relative_to(ROOT)} ({module})")
+
+    scan_roots = [SRC]
+    if TESTS.exists():
+        scan_roots.append(TESTS)
+    for root in scan_roots:
+        for path in _python_files(root):
+            relative = path.relative_to(ROOT).as_posix()
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module in RETIRED_MODULES:
+                    errors.append(f"{relative} imports retired module {node.module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in RETIRED_MODULES:
+                            errors.append(f"{relative} imports retired module {alias.name}")
+    return errors
+
+
 def check_no_dynamic_source_execution() -> list[str]:
     errors: list[str] = []
     seen: dict[str, dict[str, int]] = {}
@@ -212,6 +248,7 @@ def run_checks() -> list[str]:
     errors.extend(check_streamlit_shell_frozen())
     errors.extend(check_no_new_patch_debt())
     errors.extend(check_runtime_ui_feature_budget())
+    errors.extend(check_retired_modules_stay_retired())
     errors.extend(check_no_dynamic_source_execution())
     return errors
 
@@ -228,9 +265,11 @@ def main() -> int:
     print(f" - tracked compatibility-debt files: {len(ALLOWED_DEBT_FILENAMES)}")
     print(f" - tracked runtime UI compatibility features: {len(ALLOWED_RUNTIME_UI_COMPAT_FEATURES)}")
     print(f" - tracked application->runtime_core dependencies: {len(ALLOWED_RUNTIME_CORE_DEPENDENCIES)}")
+    print(f" - retired compatibility modules locked out: {len(RETIRED_MODULES)}")
     print(f" - tracked legacy dynamic-execution modules: {len(ALLOWED_DYNAMIC_EXECUTION)}")
     print(" - no new domain/application dependency on runtime_core")
     print(" - no new runtime_core-owned UI feature")
+    print(" - retired compatibility imports cannot return")
     print(" - dynamic exec/eval cannot spread or increase")
     print(" - runtime_core import is side-effect free")
     return 0

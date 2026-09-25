@@ -5,7 +5,9 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 
 | Nhóm hiện tại | Target owner | Trạng thái | Nguyên tắc migration |
 |---|---|---|---|
-| `autonomy_runtime.py` | `qlda.autonomy.runtime` | **Đã tách runtime; facade còn lại** | Chuyển dần caller sang native path rồi xóa facade |
+| Autonomy runtime | `qlda.autonomy.runtime` | **Hoàn tất native owner; facade đã xóa** | Worker, API, UI và regression test import trực tiếp native runtime |
+| AI Supervisor overview | `qlda.presentation.streamlit.autonomy_overview` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime copy đã xóa |
+| Advanced Automation UI | `qlda.presentation.streamlit.advanced_automation` | **Đã migrate khỏi runtime_core** | V9.1–V9.6 UI nằm trong presentation; runtime copy đã xóa |
 | AI Supervisor navigation | `qlda.presentation.streamlit.ai_supervisor_navigation` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime module cũ đã xóa |
 | Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
@@ -15,7 +17,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
 | `work_tasks_v1.py`, routing/email | `domain/tasks` + `application/tasks` + `infrastructure/notifications` | Chờ | Không gửi mail từ domain; giữ audit/idempotency |
 | Contractor workspace/access | `domain/access` + `application/access` | Chờ | Giữ `workspace_project_id` là tenant boundary |
-| Google OAuth/settings store | `infrastructure/google` + `infrastructure/settings` | Chờ | Autonomy không import runtime_core sau khi tách |
+| Google OAuth/settings store | `infrastructure/google` + `infrastructure/settings` | Chờ | Application/Autonomy không import runtime_core sau khi tách |
 | `project_store.py`, `project_database.py` | `infrastructure/postgres` repositories | Chờ | Migrate theo repository/use-case, không big-bang |
 | Finance UI / project cost UI | `presentation/streamlit/finance` | Chờ | Business formula phải nằm ngoài renderer |
 | Document UI / attachment behavior | `presentation/streamlit/documents` + application use cases | Chờ | Upload/RBAC/approval giữ nguyên |
@@ -32,6 +34,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 - `app.py` legacy không được tăng kích thước;
 - không được thêm file `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` mới trong `runtime_core`;
 - UI feature mới không được sở hữu bởi `runtime_core`;
+- các compatibility module đã retire không được tạo lại hoặc import lại;
 - không cho phép `exec()` / `eval()` trong packaged source ngoài đúng một debt IPC đã khóa;
 - BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
 
@@ -50,10 +53,12 @@ architecture CI, critical-domain CI.
 Đang thực hiện theo nguyên tắc **move owner first, delete compatibility second**:
 
 - AI Supervisor navigation — hoàn tất.
+- AI Supervisor overview — hoàn tất.
+- Advanced Automation UI — hoàn tất.
 - Multiselect style policy — hoàn tất.
 - Expander behavior policy — hoàn tất.
 - Contractor access source patch cũ — đã xóa; runtime dùng `contractor_access_control.py`.
-- Autonomy runtime — native owner đã có; còn facade caller cũ.
+- Autonomy runtime facade — đã xóa; caller dùng `qlda.autonomy.runtime`.
 - Settings/Google OAuth infrastructure — tiếp theo.
 
 ### P2 — workflow nghiệp vụ trung tâm
@@ -88,12 +93,12 @@ Mỗi đợt migration phải làm ít nhất một chỉ số tốt hơn và kh
 
 Không xóa module cũ chỉ vì code native đã tồn tại. Chỉ xóa khi:
 
-1. code search xác nhận không còn production caller;
-2. focused regression xanh;
-3. Native Regression xanh;
-4. Docker Check xanh;
-5. deploy/healthcheck production đã soak ổn định đối với module đang tham gia runtime;
-6. rollback không phụ thuộc module đó.
+1. production caller đã chuyển sang native owner;
+2. Architecture Guard khóa không cho import compatibility quay lại;
+3. focused regression xanh;
+4. Native Regression xanh;
+5. Docker Check xanh;
+6. deploy/healthcheck production vẫn giữ khả năng rollback.
 
 Các file patch đã rời khỏi composition và không có production caller có thể được xóa như dead source,
 nhưng phải đồng thời giảm baseline trong Architecture Guard để CI không che giấu nợ cũ.
