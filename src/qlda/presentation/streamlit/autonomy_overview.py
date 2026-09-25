@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-PATCH_MARKER = "V7.7-V9 AUTONOMY OVERVIEW CONTROL CENTER V3 NO DIGITAL TWIN"
+PATCH_MARKER = "V7.7-V9 AUTONOMY OVERVIEW SUMMARY V4 NO DIGITAL TWIN"
 
 
 def _app_identity(ui_module) -> tuple[dict[str, Any], bool, bool]:
@@ -79,7 +79,7 @@ def _contractor_tenants(db, project_id: int) -> tuple[int, list[dict[str, Any]]]
 
 
 def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, dict[str, Any]]:
-    """Bind the Control Center to exactly one contractor workspace."""
+    """Bind the dedicated AI Supervisor page to exactly one contractor workspace."""
     pid = int(project_id)
     master_id, rows = _contractor_tenants(db, pid)
     if not rows:
@@ -132,10 +132,90 @@ def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, 
     return selected, dict(by_workspace[selected])
 
 
+def _overview_ai_tenant(st, db, project_id: int) -> tuple[int, dict[str, Any]]:
+    """Resolve the already-active contractor without rendering another selector."""
+    pid = int(project_id)
+    master_id, rows = _contractor_tenants(db, pid)
+    if not rows:
+        return pid, {}
+
+    by_workspace = {
+        int(row.get("workspace_project_id") or 0): row
+        for row in rows
+        if int(row.get("workspace_project_id") or 0) > 0
+    }
+    if pid in by_workspace:
+        return pid, dict(by_workspace[pid])
+
+    candidates = list(by_workspace)
+    if not candidates:
+        return pid, {}
+
+    selected = int(
+        st.session_state.get(f"contractor_workspace_{master_id}")
+        or st.session_state.get(f"autonomy_tenant_{master_id}")
+        or candidates[0]
+    )
+    if selected not in by_workspace:
+        selected = candidates[0]
+    return selected, dict(by_workspace[selected])
+
+
+def _latest_supervisor_payload(db, tenant_id: int) -> tuple[dict[str, Any] | None, bool]:
+    from qlda.autonomy.runtime import SUPERVISOR_SCHEMA_VERSION, get_autonomy_repository
+
+    repository = get_autonomy_repository(db)
+    latest = repository.latest_snapshot(project_id=int(tenant_id), snapshot_type="DAILY_SUPERVISOR")
+    payload = latest.get("payload") if isinstance(latest, dict) else None
+    legacy_snapshot = bool(
+        isinstance(payload, dict)
+        and str(payload.get("supervisor_schema") or "") != SUPERVISOR_SCHEMA_VERSION
+    )
+    if legacy_snapshot or not isinstance(payload, dict):
+        return None, legacy_snapshot
+    return dict(payload), False
+
+
+def render_autonomy_overview_metrics(st, db, project_id: int, *, ui_module=None) -> None:
+    """Render report-only AI Supervisor KPIs on Tổng quan.
+
+    Tổng quan intentionally contains no finding table, tenant selector, orchestration,
+    approval controls or V9 automation panels. Full interaction lives exclusively in
+    the dedicated ``🤖 AI Supervisor`` navigation page.
+    """
+    tenant_id, contractor = _overview_ai_tenant(st, db, int(project_id))
+    payload, _legacy_snapshot = _latest_supervisor_payload(db, tenant_id)
+
+    label = " - ".join(
+        value
+        for value in (
+            str(contractor.get("contractor_code") or "").strip(),
+            str(contractor.get("contractor_name") or "").strip(),
+        )
+        if value
+    )
+    st.caption(f"🤖 AI Supervisor · {label}" if label else "🤖 AI Supervisor")
+
+    c1, c2, c3, c4 = st.columns(4)
+    if isinstance(payload, dict):
+        health = float(payload.get("health_score") or 0)
+        integrity = float((payload.get("integrity") or {}).get("score") or 0)
+        findings = list(payload.get("findings") or [])
+        c1.metric("Project Health", f"{health:.0f}/100")
+        c2.metric("Data Integrity", f"{integrity:.0f}%")
+        c3.metric("Cảnh báo", f"{len(findings)}")
+        c4.metric("Trạng thái", _health_badge(health))
+        return
+
+    c1.metric("Project Health", "—")
+    c2.metric("Data Integrity", "—")
+    c3.metric("Cảnh báo", "—")
+    c4.metric("Trạng thái", "Chưa có dữ liệu")
+
+
 def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -> None:
-    """Contractor-isolated V7.7→V9 AI control center."""
+    """Contractor-isolated V7.7→V9 AI control center for the dedicated page."""
     from qlda.autonomy.runtime import (
-        SUPERVISOR_SCHEMA_VERSION,
         get_autonomy_platform,
         get_autonomy_repository,
         run_project_supervisor,
@@ -160,14 +240,7 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
 
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
-    latest = repository.latest_snapshot(project_id=tenant_id, snapshot_type="DAILY_SUPERVISOR")
-    payload = latest.get("payload") if isinstance(latest, dict) else None
-    legacy_snapshot = bool(
-        isinstance(payload, dict)
-        and str(payload.get("supervisor_schema") or "") != SUPERVISOR_SCHEMA_VERSION
-    )
-    if legacy_snapshot:
-        payload = None
+    payload, legacy_snapshot = _latest_supervisor_payload(db, tenant_id)
 
     title = "### 🧠 AI Project Supervisor"
     if label:
@@ -324,26 +397,31 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
 
 
 def install_autonomy_overview_patch() -> None:
-    """Append the contractor-isolated AI control center to the V7 overview."""
+    """Append report-only AI Supervisor KPIs to Tổng quan."""
     import qlda.runtime_core.ui_v7_compact as ui
 
     if getattr(ui, "_qlda_autonomy_overview_installed", False):
         return
     original = ui.render_overview_v7
 
-    def render_overview_with_autonomy(st, db, pid, *args, **kwargs):
+    def render_overview_with_autonomy_metrics(st, db, pid, *args, **kwargs):
         result = original(st, db, pid, *args, **kwargs)
         try:
-            render_autonomy_control_center(st, db, int(pid), ui_module=ui)
+            render_autonomy_overview_metrics(st, db, int(pid), ui_module=ui)
         except Exception as exc:
             identity, is_admin, _ = _app_identity(ui)
             if is_admin:
-                st.warning(f"AI Automation Control Center chưa sẵn sàng: {exc}")
+                st.caption(f"Chỉ số AI Supervisor chưa sẵn sàng: {exc}")
         return result
 
-    ui.render_overview_v7 = render_overview_with_autonomy
+    ui.render_overview_v7 = render_overview_with_autonomy_metrics
     ui._qlda_autonomy_overview_installed = True
     ui._qlda_autonomy_overview_marker = PATCH_MARKER
 
 
-__all__ = ["render_autonomy_control_center", "install_autonomy_overview_patch", "PATCH_MARKER"]
+__all__ = [
+    "render_autonomy_control_center",
+    "render_autonomy_overview_metrics",
+    "install_autonomy_overview_patch",
+    "PATCH_MARKER",
+]
