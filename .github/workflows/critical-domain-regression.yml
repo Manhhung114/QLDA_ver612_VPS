@@ -1,0 +1,48 @@
+name: Critical Domain Regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  critical-domain:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install Java runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends default-jre-headless
+      - name: Install locked dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+      - name: Compile critical modules
+        run: python -m compileall -q src/qlda tests
+      - name: BOQ, IPC, VO and schedule regressions
+        run: |
+          python -m unittest -v \
+            tests.test_boq_persistence \
+            tests.test_boq_multisheet \
+            tests.test_ipc_claim \
+            tests.test_ipc_adaptive_parser \
+            tests.test_ipc_payment_semantic \
+            tests.test_vo_claim \
+            tests.test_schedule_background
+      - name: Contract and autonomy regressions
+        run: |
+          python -m unittest -v \
+            tests.test_contract_management \
+            tests.test_autonomy_platform \
+            tests.test_autonomy_qlda_runtime \
+            tests.test_ai_contractor_tenant_isolation \
+            tests.test_supervisor_auto_data \
+            tests.test_supervisor_no_payment_overdue \
+            tests.test_v9_advanced_automation
