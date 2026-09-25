@@ -27,8 +27,6 @@ class ProjectRemainingComponentsTests(unittest.TestCase):
             "INSERT INTO payment_claims(claim_id,project_id,claim_no,claim_code,filename,updated_at) VALUES(?,?,?,?,?,?)",
             [
                 ("c02", 1, "02", "IPC-02", "IPC02.xlsx", "2026-09-10 10:00:00"),
-                # IPC-09 intentionally has a later updated_at and could have more money;
-                # it still must NOT beat IPC-10 because the rule is highest IPC number.
                 ("c09", 1, "09", "IPC-09", "IPC09.xlsx", "2026-09-11 10:00:00"),
                 ("c10", 1, "10", "IPC-10", "IPC10.xlsx", "2026-09-09 10:00:00"),
                 ("other", 1, "A", "CLAIM-A", "A.xlsx", "2026-09-12 10:00:00"),
@@ -66,7 +64,7 @@ class ProjectRemainingComponentsTests(unittest.TestCase):
             "total_rows": 4029,
         }]
 
-        with patch("qlda.runtime_core.boq_ai_fullscan.fullscan_boq_component_totals", return_value=boq), \
+        with patch("qlda.runtime_core.boq_component_fullscan.fullscan_boq_component_totals", return_value=boq), \
              patch("qlda.runtime_core.claim_component_fullscan.fullscan_claim_components", return_value=latest_claim_scan) as claim_scan:
             result = project_remaining_components(self.db, 1)
 
@@ -76,7 +74,6 @@ class ProjectRemainingComponentsTests(unittest.TestCase):
         self.assertAlmostEqual(result["remaining_material"], 150.0)
         self.assertAlmostEqual(result["remaining_labor"], 40.0)
         self.assertAlmostEqual(result["remaining_total"], 190.0)
-        # Critical: calculate IPC-10 directly; do not request/sum IPC-02 + IPC-09 + IPC-10.
         args = claim_scan.call_args.args
         self.assertEqual(args[1], 1)
         self.assertIn("IPC-10", args[2])
@@ -102,7 +99,7 @@ class ProjectRemainingComponentsTests(unittest.TestCase):
             "total_rows": 4029,
         }]
 
-        with patch("qlda.runtime_core.boq_ai_fullscan.fullscan_boq_component_totals", return_value=boq), \
+        with patch("qlda.runtime_core.boq_component_fullscan.fullscan_boq_component_totals", return_value=boq), \
              patch("qlda.runtime_core.claim_component_fullscan.fullscan_claim_components", return_value=latest_claim_scan):
             result = project_remaining_components(self.db, 1)
 
@@ -130,7 +127,7 @@ class ProjectRemainingComponentsTests(unittest.TestCase):
             "total_rows": 4029,
         }]
 
-        with patch("qlda.runtime_core.boq_ai_fullscan.fullscan_boq_component_totals", return_value=boq), \
+        with patch("qlda.runtime_core.boq_component_fullscan.fullscan_boq_component_totals", return_value=boq), \
              patch("qlda.runtime_core.claim_component_fullscan.fullscan_claim_components", return_value=latest_claim_scan):
             result = project_remaining_components(self.db, 1)
 
