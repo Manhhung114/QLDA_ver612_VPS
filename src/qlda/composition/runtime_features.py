@@ -17,7 +17,6 @@ from typing import Callable
 class RuntimeStage(str, Enum):
     DATA = "data"
     BUSINESS = "business"
-    AI = "ai"  # retained as an empty stage for bootstrap/API stability
     UI = "ui"
 
 
@@ -67,12 +66,8 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     # These deterministic calculation guards were historically installed in the
     # AI stage although they contain no model/provider logic. Keep them as
     # business rules while removing all AI monkey patches.
-    RuntimeFeature("claim-component-fullscan", RuntimeStage.BUSINESS, "qlda.runtime_core.claim_component_fullscan", "install_claim_component_fullscan"),
     RuntimeFeature("claim-material-period-guard", RuntimeStage.BUSINESS, "qlda.runtime_core.claim_material_period_guard", "install_claim_material_period_guard"),
-    RuntimeFeature("project-remaining-components", RuntimeStage.BUSINESS, "qlda.runtime_core.project_remaining_components", "install_project_remaining_components"),
     RuntimeFeature("finance-consistency-core", RuntimeStage.BUSINESS, "qlda.runtime_core.finance_consistency", "install_finance_consistency_core"),
-
-    # RuntimeStage.AI intentionally has zero compatibility installers.
 
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.presentation.streamlit.upload_policy", "install_upload_ui_200mb_policy"),
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.presentation.streamlit.document_management_vps_ui", "install_document_management_vps_ui"),

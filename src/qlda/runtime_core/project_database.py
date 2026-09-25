@@ -706,20 +706,6 @@ class PostgresCloudDatabase(_SQLITE_CLOUD_DATABASE):
         return stats
 
 
-def _patch_ai_service(module) -> None:
-    cls = getattr(module, "ProjectContextBuilder", None)
-    if cls is None or getattr(cls, "_v622_postgres", False):
-        return
-
-    def pg_connect(self):
-        return _PGConnectionContext(resolve_database_url())
-
-    def pg_table_exists(self, c, table: str) -> bool:
-        return _table_exists(c, table)
-
-    cls.connect = pg_connect
-    cls.table_exists = pg_table_exists
-    cls._v622_postgres = True
 
 
 def _patch_legal_documents(module) -> None:
@@ -735,7 +721,6 @@ def _patch_legal_documents(module) -> None:
 
 
 _PATCHERS = {
-    "qlda.runtime_core.ai_service": _patch_ai_service,
     "qlda.runtime_core.legal_documents": _patch_legal_documents,
 }
 

@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from qlda.runtime_core.contractor_data_official_ai import extract_official_summaries
+from qlda.application.contractor_data_hub.official_summary import extract_official_summaries
 from qlda.presentation.streamlit.production_progress_overview import (
     _contractor_label,
     _progress_dimension_sort_key,

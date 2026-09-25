@@ -45,7 +45,7 @@ import streamlit.components.v1 as components
 from qlda.runtime_core.project_store import CloudDatabase, progress_delta, planned_progress, calculate_delay_days
 from qlda.runtime_core.mpp_cloud_reader import MppCloudError, read_mpp
 from qlda.runtime_core.settings_store import DEFAULT_SPECIFIED_SEARCH_DOMAINS
-from qlda.runtime_core.ai_service import (AIServiceError, AISettings, OpenAIProjectAssistant, GeminiSettings, GeminiProjectAssistant, ProjectContextBuilder)
+from qlda.infrastructure.ai.presentation_facade import (AIServiceError, AISettings, OpenAIProjectAssistant, GeminiSettings, GeminiProjectAssistant, ProjectContextBuilder)
 from qlda.runtime_core.drive_gateway import DriveGateway, DriveGatewayError, config_from_streamlit
 
 class _LazyPlotlyExpress:
@@ -5501,11 +5501,6 @@ def _ai_typewriter_stream(stream):
 
 
 def render_ai_assistant(pid: int):
-    # CONTRACTOR accounts set a ContextVar guard so ProjectContextBuilder,
-    # attachment catalog and every AI helper remain inside the authorized workspace.
-    _v622_set_ai_workspace_scope(
-        int(pid) if _user_approval_role(_cloud_identity()) == "CONTRACTOR" else None
-    )
     st.subheader("🤖 Trợ lý QLDA")
     _ui_note("Chat với dự án • Rủi ro tiến độ • Dự thảo báo cáo • Đọc hồ sơ • Tra cứu văn bản. AI chỉ đưa ra đề xuất; người dùng vẫn là người phê duyệt/kết luận.")
 
@@ -5691,7 +5686,6 @@ from qlda.runtime_core.contractor_access_control import (
     effective_user_classification as _v622_effective_user_classification,
     user_contractor_scope_label as _v622_user_contractor_scope_label,
     user_can_view_all_contractors as _v622_user_can_view_all_contractors,
-    set_ai_workspace_scope as _v622_set_ai_workspace_scope,
 )
 
 _require_cloud_login_and_access()

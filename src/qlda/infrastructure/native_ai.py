@@ -124,6 +124,40 @@ class NativeAIAdapter:
             "error_code": "" if error is None else str(getattr(error, "code", error.__class__.__name__)),
         })
 
+    def answer_grounded(
+        self,
+        workspace_project_id: int,
+        prompt: str,
+        *,
+        provider: str = "openai",
+        event_type: str = "AI_GROUNDED_ANSWER",
+        source_refs: Sequence[str] | None = None,
+        use_web: bool | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Answer an already-authorized, already-grounded prompt with audit.
+
+        Use this for application services such as Contractor Data Hub that build
+        their own deterministic evidence bundle and must not run a second RAG pass.
+        """
+        tenant = self._tenant(int(workspace_project_id), int(workspace_project_id))
+        started = time.perf_counter()
+        try:
+            result = self._complete(provider, str(prompt or ""), use_web=use_web)
+            self._event(
+                tenant, event_type, provider, started,
+                input_text=prompt, source_refs=source_refs,
+                context=dict(context or {}),
+            )
+            return result
+        except Exception as exc:
+            self._event(
+                tenant, event_type, provider, started,
+                input_text=prompt, source_refs=source_refs,
+                success=False, error=exc, context=dict(context or {}),
+            )
+            raise
+
     def ask(
         self,
         project_id: int,

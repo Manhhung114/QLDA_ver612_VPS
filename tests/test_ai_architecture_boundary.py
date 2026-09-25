@@ -94,8 +94,10 @@ def test_streamlit_uses_native_ai_facade() -> None:
     assert "set_ai_workspace_scope" not in source
 
 
-def test_runtime_ai_stage_has_no_compatibility_installers() -> None:
-    assert [feature.name for feature in FEATURES if feature.stage is RuntimeStage.AI] == []
+def test_runtime_ai_stage_is_deleted() -> None:
+    assert "ai" not in {stage.value for stage in RuntimeStage}
+    assert all(getattr(feature.stage, "value", "") != "ai" for feature in FEATURES)
+
 
 
 def test_planner_has_no_regex_json_parser() -> None:

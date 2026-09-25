@@ -755,6 +755,17 @@ YÊU CẦU TRẢ LỜI:
 - Nếu phát hiện dữ liệu cũ, lỗi sync, thiếu nguồn hoặc mâu thuẫn, nêu rõ trước khi kết luận.
 - Với tổng hợp toàn dự án, tách số liệu từng nhà thầu trước rồi mới tổng hợp.
 """
-        from qlda.infrastructure.ai.legacy_provider import LegacyAIProvider
+        import os
+        from qlda.infrastructure.native_ai import NativeAIAdapter
 
-        return LegacyAIProvider.data_hub_answer(workspace_scope, prompt)
+        provider = str(os.environ.get("QLDA_AI_PROVIDER") or "openai").strip().lower()
+        source_refs = re.findall(r"\[DATA:([^\]]+)\]", prompt)
+        return NativeAIAdapter().answer_grounded(
+            workspace_scope,
+            prompt,
+            provider=provider,
+            event_type="AI_CONTRACTOR_DATA_HUB",
+            source_refs=source_refs,
+            use_web=False,
+            context={"master_project_id": int(master_project_id), "workspace_count": len(allowed)},
+        )

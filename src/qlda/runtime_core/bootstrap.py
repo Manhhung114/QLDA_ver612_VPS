@@ -21,7 +21,6 @@ from qlda.composition.runtime_features import RuntimeStage, install_stage
 _LOCK = RLock()
 _DB_READY = False
 _BUSINESS_READY = False
-_AI_READY = False
 _UI_READY = False
 
 
@@ -62,16 +61,6 @@ def initialize_business_runtime() -> None:
         _BUSINESS_READY = True
 
 
-def initialize_ai_runtime() -> None:
-    global _AI_READY
-    if _AI_READY:
-        return
-    with _LOCK:
-        if _AI_READY:
-            return
-        initialize_business_runtime()
-        install_stage(RuntimeStage.AI)
-        _AI_READY = True
 
 
 def initialize_runtime() -> None:
@@ -86,13 +75,12 @@ def initialize_runtime() -> None:
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
 
         apply_streamlit_secrets_to_env()
-        initialize_ai_runtime()
+        initialize_business_runtime()
         install_stage(RuntimeStage.UI)
         _UI_READY = True
 
 
 __all__ = [
-    "initialize_ai_runtime",
     "initialize_business_runtime",
     "initialize_database_runtime",
     "initialize_runtime",

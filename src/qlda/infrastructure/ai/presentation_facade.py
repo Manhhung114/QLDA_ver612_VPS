@@ -88,6 +88,7 @@ class _BaseProjectAssistant:
         self._apply_process_settings()
 
     def _apply_process_settings(self) -> None:
+        os.environ["QLDA_AI_PROVIDER"] = self.provider
         # Existing Streamlit settings are server-owned. Export them only to the
         # current process so the native provider engine consumes one source of truth.
         if self.provider == "gemini":

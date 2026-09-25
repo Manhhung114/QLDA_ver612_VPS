@@ -493,35 +493,6 @@ def _install_ipc_multirow_header_fix() -> None:
     adaptive._qlda_price_recovery_header_installed = True
 
 
-def _install_ai_recovery() -> None:
-    import qlda.runtime_core.ai_live_context as ai_boq
-    import qlda.runtime_core.ai_claim_context as ai_claim
-    if not getattr(ai_boq, "_qlda_price_recovery_installed", False):
-        original_boq = ai_boq._boq_query_appendix
-
-        def boq_query_after_recovery(connection, project_id: int, question: str, total_rows: int):
-            try:
-                _recover_boq(connection, int(project_id))
-            except Exception:
-                pass
-            return original_boq(connection, project_id, question, total_rows)
-
-        ai_boq._boq_query_appendix = boq_query_after_recovery
-        ai_boq._qlda_price_recovery_installed = True
-
-    if not getattr(ai_claim, "_qlda_price_recovery_installed", False):
-        original_claim = ai_claim._claim_appendix
-
-        def claim_appendix_after_recovery(builder, project_id: int, question: str):
-            try:
-                with builder.connect() as connection:
-                    _recover_claims(connection, int(project_id), str(question or ""))
-            except Exception:
-                pass
-            return original_claim(builder, project_id, question)
-
-        ai_claim._claim_appendix = claim_appendix_after_recovery
-        ai_claim._qlda_price_recovery_installed = True
 
 
 def install_boq_claim_price_recovery() -> None:
@@ -529,4 +500,3 @@ def install_boq_claim_price_recovery() -> None:
     with _LOCK:
         _install_boq_material_alias()
         _install_ipc_multirow_header_fix()
-        _install_ai_recovery()

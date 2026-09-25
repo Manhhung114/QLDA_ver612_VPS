@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Any
 
 
-PATCH_MARKER = "V6.22 BOQ AI FULLSCAN V1"
+PATCH_MARKER = "V6.22 BOQ COMPONENT FULLSCAN V2"
 AUTO_NOTE_PREFIX = "[QLDA_BOQ_EXCEL]"
 
 
@@ -260,64 +260,5 @@ def fullscan_boq_component_totals(connection, project_id: int) -> dict[str, Any]
     }
 
 
-def _component_total_intent(ai, question: str) -> bool:
-    q = ai._norm(question)
-    has_component = any(word in q for word in ("vat tu", "vat lieu", "nhan cong", "material", "labor", "labour"))
-    has_total = any(word in q for word in ("tong", "chi phi", "gia tri", "du toan", "boq"))
-    return has_component and has_total
 
 
-def install_boq_ai_fullscan() -> None:
-    """Make full-workbook BOQ component totals authoritative for AI answers."""
-    import qlda.runtime_core.ai_live_context as ai
-    if getattr(ai, "_qlda_boq_fullscan_installed", False):
-        return
-
-    original = ai._boq_query_appendix
-
-    def boq_query_with_fullscan(connection, project_id: int, question: str, total_rows: int) -> list[str]:
-        lines = original(connection, project_id, question, total_rows)
-        if not _component_total_intent(ai, question):
-            return lines
-
-        stats = fullscan_boq_component_totals(connection, int(project_id))
-        lines += ["", "#### BOQ FULL-SCAN VẬT TƯ / NHÂN CÔNG — NGUỒN TỔNG HỢP ƯU TIÊN"]
-        if not stats.get("ok"):
-            lines.append(
-                "Không tạo được tổng full-scan từ workbook BOQ đã lưu. Không được gọi subtotal từ một phần dòng là 'Tổng BOQ'."
-            )
-            return lines
-
-        lines += [
-            "QUY TẮC BẮT BUỘC: phần này được tính bằng chương trình trên toàn bộ dòng BOQ Excel theo sheet + dòng gốc, "
-            "không phụ thuộc giới hạn số dòng được đưa nguyên văn vào prompt. Nếu tổng ở phần phía trên khác phần FULL-SCAN này, "
-            "phải bỏ qua tổng phía trên và dùng FULL-SCAN.",
-            f"Đã quét {stats['scanned_rows']:,}/{stats['total_rows']:,} dòng BOQ Excel; "
-            f"{stats['component_sheet_count']:,}/{stats['saved_sheet_count']:,} sheet có cấu trúc đơn giá vật tư/nhân công.",
-            f"TỔNG CHI PHÍ VẬT TƯ BOQ (FULL-SCAN): {ai._fmt_money(stats['material_total'])} VND.",
-            f"TỔNG CHI PHÍ NHÂN CÔNG BOQ (FULL-SCAN): {ai._fmt_money(stats['labor_total'])} VND.",
-            f"TỔNG VẬT TƯ + NHÂN CÔNG (FULL-SCAN): {ai._fmt_money(stats['material_total'] + stats['labor_total'])} VND.",
-        ]
-
-        if stats.get("complete"):
-            lines.append("Trạng thái FULL-SCAN: HOÀN TẤT — tất cả dòng BOQ Excel đã nhập đều đã tham gia phép tổng hợp.")
-        else:
-            lines.append(
-                f"Trạng thái FULL-SCAN: CHƯA ĐỦ — còn {stats['missing_source_rows']:,} dòng chưa đối chiếu được với snapshot Excel"
-                + (f"; snapshot bị giới hạn ở sheet: {', '.join(stats['truncated_sheets'])}." if stats.get("truncated_sheets") else ".")
-                + " Không được trình bày các số trên như tổng cuối cùng nếu trạng thái chưa đủ."
-            )
-
-        lines += ["", "##### ĐỐI CHIẾU FULL-SCAN THEO SHEET"]
-        for item in stats.get("by_sheet") or []:
-            lines.append(
-                f"[BOQ-FULLSCAN:{item['sheet']}] {item['rows']:,} dòng | "
-                f"vật tư={ai._fmt_money(item['material_total'])} VND | "
-                f"nhân công={ai._fmt_money(item['labor_total'])} VND | "
-                f"chưa đối chiếu={item['missing_rows']:,}"
-            )
-        return lines
-
-    ai._boq_query_appendix = boq_query_with_fullscan
-    ai._qlda_boq_fullscan_installed = True
-    ai._qlda_boq_fullscan_marker = PATCH_MARKER

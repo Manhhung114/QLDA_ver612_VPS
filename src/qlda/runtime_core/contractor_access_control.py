@@ -361,51 +361,8 @@ def set_ai_workspace_scope(workspace_project_id: int | None) -> None:
         _AI_WORKSPACE_SCOPE.set(_AI_PINNED_WORKSPACE_SCOPE.get())
 
 
-def capture_single_contractor_ai_context() -> None:
-    """Capture the fully-patched single-workspace AI methods before aggregation."""
-    import qlda.runtime_core.ai_service as ai_service
-    cls = ai_service.ProjectContextBuilder
-    if not hasattr(cls, "_qlda_single_contractor_build"):
-        cls._qlda_single_contractor_build = cls.build
-    if not hasattr(cls, "_qlda_single_contractor_catalog"):
-        cls._qlda_single_contractor_catalog = cls.attachment_catalog
 
 
-def install_ai_access_guard() -> None:
-    """Apply a ContextVar guard after the project-wide multi-contractor AI patch.
-
-    The selected contractor workspace is the AI tenant for every role, including
-    Admin/Project Viewer. Project-wide aggregation remains available only through
-    an explicit Project Control path that deliberately clears/bypasses this guard.
-    """
-    import qlda.runtime_core.ai_service as ai_service
-    cls = ai_service.ProjectContextBuilder
-    if getattr(cls, "_qlda_contractor_ai_access_guard", False):
-        return
-    single_build = getattr(cls, "_qlda_single_contractor_build", None)
-    single_catalog = getattr(cls, "_qlda_single_contractor_catalog", None)
-    if not callable(single_build) or not callable(single_catalog):
-        raise RuntimeError("Chưa capture single-contractor AI context trước khi cài access guard.")
-
-    project_build = cls.build
-    project_catalog = cls.attachment_catalog
-
-    def guarded_build(self, project_id: int, *args, **kwargs):
-        restricted = _AI_WORKSPACE_SCOPE.get()
-        if restricted:
-            return single_build(self, int(restricted), *args, **kwargs)
-        return project_build(self, int(project_id), *args, **kwargs)
-
-    def guarded_catalog(self, project_id: int):
-        restricted = _AI_WORKSPACE_SCOPE.get()
-        if restricted:
-            return single_catalog(self, int(restricted))
-        return project_catalog(self, int(project_id))
-
-    cls.build = guarded_build
-    cls.attachment_catalog = guarded_catalog
-    cls._qlda_contractor_ai_access_guard = True
-    cls._qlda_contractor_ai_access_marker = PATCH_MARKER
 
 
 def install_contractor_access_control() -> None:

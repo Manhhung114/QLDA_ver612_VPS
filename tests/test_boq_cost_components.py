@@ -7,9 +7,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-import qlda.runtime_core.ai_service as ai_service
 import qlda.runtime_core.boq_multisheet as boq
-from qlda.runtime_core.ai_live_context import install_ai_live_context
 from qlda.runtime_core.boq_cost_components import install_boq_cost_components
 from qlda.runtime_core.project_store import CloudDatabase
 
@@ -17,9 +15,6 @@ from qlda.runtime_core.project_store import CloudDatabase
 class BOQCostComponentsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Match the real VPS startup order: install the live snapshot wrapper
-        # first, then extend its BOQ appendix with material/labor components.
-        install_ai_live_context()
         install_boq_cost_components()
 
     @staticmethod
@@ -86,25 +81,6 @@ class BOQCostComponentsTests(unittest.TestCase):
             self.assertEqual(float(row["material_cost"]), 1000.0)
             self.assertEqual(float(row["labor_cost"]), 200.0)
 
-    def test_ai_context_receives_component_prices_and_costs(self):
-        result = boq.parse_boq_workbook(self._split_workbook(), "BOQ_split.xlsx")
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "boq_ai_components.db"
-            db = CloudDatabase(db_path)
-            pid = db.add_project("BC02", "BOQ AI components")
-            boq.save_boq_summary_to_project(db, pid, result)
-
-            snapshot = ai_service.ProjectContextBuilder(db_path).build(
-                pid,
-                "chi phí nhân công và vật tư của cáp điện",
-            )
-            self.assertIn("PHÂN TÁCH CHI PHÍ VẬT TƯ / NHÂN CÔNG", snapshot)
-            self.assertIn("[BOQ-COMPONENT:", snapshot)
-            self.assertIn("đơn_giá_vật_tư=100 VND", snapshot)
-            self.assertIn("chi_phí_vật_tư=1,000 VND", snapshot)
-            self.assertIn("đơn_giá_nhân_công=20 VND", snapshot)
-            self.assertIn("chi_phí_nhân_công=200 VND", snapshot)
-            self.assertIn("không được tự chia", snapshot.lower())
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from qlda.runtime_core.ai_service import (
+from qlda.infrastructure.ai.presentation_facade import (
     AIServiceError,
     AISettings,
     GeminiProjectAssistant,

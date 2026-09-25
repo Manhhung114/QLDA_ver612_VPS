@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 
@@ -29,28 +30,30 @@ def _num(value: Any) -> float:
         return 0.0
 
 
+def _norm(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower().replace("đ", "d")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _wanted_claim_no(question: str) -> str:
-    try:
-        import qlda.runtime_core.ai_claim_context as claim_ai
-        text = claim_ai._norm(question)
-    except Exception:
-        text = str(question or "").lower()
+    text = _norm(question)
     match = re.search(r"(?:claim|ipc)\s*#?\s*0*([0-9]+)", text)
     return str(int(match.group(1))) if match else ""
 
 
+
 def _component_intent(question: str) -> bool:
-    try:
-        import qlda.runtime_core.ai_claim_context as claim_ai
-        text = claim_ai._norm(question)
-    except Exception:
-        text = str(question or "").lower()
+    text = _norm(question)
     return bool(
         any(x in text for x in ("claim", "ipc", "nghiem thu"))
         and any(x in text for x in (
             "nhan cong", "vat tu", "vat lieu", "chi phi", "gia tri", "don gia", "luy ke", "khoi luong"
         ))
     )
+
 
 
 def _recover_prices(connection, project_id: int, question: str) -> None:
@@ -348,96 +351,3 @@ def _fmt_money(value: Any) -> str:
         return f"{float(value or 0):,.0f}"
     except Exception:
         return "0"
-
-
-def install_claim_component_fullscan() -> None:
-    """Append validated per-Claim component totals to the AI Claim context."""
-    import qlda.runtime_core.ai_claim_context as claim_ai
-    if getattr(claim_ai, "_qlda_claim_component_fullscan_installed", False):
-        return
-
-    original = claim_ai._claim_appendix
-
-    def claim_appendix_with_component_fullscan(builder, project_id: int, question: str) -> str:
-        q = str(question or "")
-        needs_components = _component_intent(q)
-
-        stats: list[dict[str, Any]] = []
-        if needs_components:
-            try:
-                with builder.connect() as connection:
-                    stats = fullscan_claim_components(connection, int(project_id), q, persist=False)
-            except Exception:
-                stats = []
-
-        base = original(builder, int(project_id), q)
-        if not needs_components:
-            return base
-
-        lines = [str(base or "").rstrip(), "", "### CLAIM FULL-SCAN VẬT TƯ / NHÂN CÔNG — NGUỒN ĐÃ KIỂM SOÁT"]
-        lines.append(
-            "QUY TẮC BẮT BUỘC: tuyệt đối không mặc định cột legacy installation_*_pct là khối lượng. "
-            "Chỉ được tính Khối lượng lắp đặt × Đơn giá nhân công khi workbook đã được parser đánh dấu installation_measure=quantity."
-        )
-        lines.append(
-            "ĐỐI VỚI LŨY KẾ, ưu tiên danh tính trên sheet Thanh toán: "
-            "Nhân công = Nghiệm thu lắp đặt lũy kế - Khấu trừ vật tư lũy kế; "
-            "Vật tư + Nhân công phải khớp Tổng nghiệm thu lũy kế và không được vượt trần hợp đồng/Claim."
-        )
-        if not stats:
-            lines.append("Không tạo được Claim FULL-SCAN. Không được suy đoán tổng nhân công từ một phần dòng.")
-            return "\n".join(lines) + "\n"
-
-        for item in stats:
-            code = item.get("claim_code", "")
-            if not item.get("ok"):
-                lines.append(f"[CLAIM-FULLSCAN:{code}] chưa có dữ liệu chi tiết để tính.")
-                continue
-
-            lines.append(f"[CLAIM-FULLSCAN:{code}] Đã quét {item['scanned_rows']:,}/{item['total_rows']:,} dòng GTHT.")
-            lines.append(
-                f"Kiểu dữ liệu lắp đặt: {item['installation_measure']}; "
-                f"trần kiểm soát={_fmt_money(item['control_ceiling'])} VND; "
-                f"giá trị hợp đồng={_fmt_money(item['contract_value'])} VND; "
-                f"tổng nghiệm thu lũy kế={_fmt_money(item['certified_cumulative'])} VND."
-            )
-
-            if item.get("selected_source") == "invalid":
-                lines.append(
-                    "CẢNH BÁO NGHIÊM TRỌNG: các phép tính chi tiết không vượt qua kiểm tra trần/danh tính Claim. "
-                    "AI KHÔNG ĐƯỢC trả một con số nhân công lũy kế từ các subtotal này; phải yêu cầu kiểm tra mapping workbook."
-                )
-                continue
-
-            lines.extend([
-                f"GIÁ TRỊ VẬT TƯ LŨY KẾ ĐƯỢC PHÉP DÙNG: {_fmt_money(item['selected_material_cumulative'])} VND.",
-                f"GIÁ TRỊ NHÂN CÔNG LŨY KẾ ĐƯỢC PHÉP DÙNG: {_fmt_money(item['selected_labor_cumulative'])} VND.",
-                f"GIÁ TRỊ NHÂN CÔNG KỲ NÀY ĐƯỢC PHÉP DÙNG: {_fmt_money(item['selected_labor_current'])} VND.",
-                f"Nguồn lũy kế được chọn: {item['selected_source']}.",
-            ])
-
-            if item.get("summary_identity_ok"):
-                lines.append(
-                    f"Đối chiếu sheet Thanh toán: vật tư {_fmt_money(item['summary_material_cumulative'])} + "
-                    f"nhân công {_fmt_money(item['summary_labor_cumulative'])} = "
-                    f"{_fmt_money(item['summary_components'])} VND, khớp tổng nghiệm thu lũy kế."
-                )
-            if item.get("installation_measure") != "quantity":
-                lines.append(
-                    "Mẫu Claim này không xác nhận installation_*_pct là khối lượng; vì vậy phép nhân trực tiếp trường đó với đơn giá nhân công bị cấm."
-                )
-            elif not item.get("detail_quantity_labor_valid"):
-                lines.append(
-                    "Phép tính chi tiết Khối lượng lắp đặt × Đơn giá nhân công bị loại do không vượt qua kiểm tra trần hợp đồng/Claim."
-                )
-
-        if len(stats) > 1:
-            lines.append(
-                "LƯU Ý: Không cộng các giá trị LŨY KẾ của IPC-01 + IPC-02 + ... vì sẽ cộng trùng. "
-                "Muốn biết lũy kế đến IPC-N thì dùng trực tiếp lũy kế đã kiểm soát của IPC-N."
-            )
-        return "\n".join(lines) + "\n"
-
-    claim_ai._claim_appendix = claim_appendix_with_component_fullscan
-    claim_ai._qlda_claim_component_fullscan_installed = True
-    claim_ai._qlda_claim_component_fullscan_marker = PATCH_MARKER

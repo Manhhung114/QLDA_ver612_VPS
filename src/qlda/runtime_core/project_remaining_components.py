@@ -125,7 +125,7 @@ def project_remaining_components(connection, project_id: int) -> dict[str, Any]:
     already carries cumulative-to-date quantities/values.
     """
     try:
-        from qlda.runtime_core.boq_ai_fullscan import fullscan_boq_component_totals
+        from qlda.runtime_core.boq_component_fullscan import fullscan_boq_component_totals
         boq = fullscan_boq_component_totals(connection, int(project_id))
     except Exception as exc:
         return {"ok": False, "valid": False, "reason": f"boq_fullscan_failed:{exc}"}
@@ -219,69 +219,3 @@ def project_remaining_components(connection, project_id: int) -> dict[str, Any]:
         "boq": boq,
         "claim": claim,
     }
-
-
-def install_project_remaining_components() -> None:
-    """Append authoritative whole-project remaining material/labor to AI context."""
-    import qlda.runtime_core.ai_claim_context as claim_ai
-    if getattr(claim_ai, "_qlda_project_remaining_installed", False):
-        return
-
-    original = claim_ai._claim_appendix
-
-    def claim_appendix_with_project_remaining(builder, project_id: int, question: str) -> str:
-        base = original(builder, int(project_id), str(question or ""))
-        if not _remaining_intent(str(question or "")):
-            return base
-
-        try:
-            with builder.connect() as connection:
-                result = project_remaining_components(connection, int(project_id))
-        except Exception as exc:
-            result = {"ok": False, "valid": False, "reason": f"remaining_calculation_failed:{exc}"}
-
-        lines = [
-            str(base or "").rstrip(),
-            "",
-            "### GIÁ TRỊ CÒN LẠI TOÀN DỰ ÁN — NGUỒN TÍNH BẮT BUỘC",
-            "QUY TẮC BẮT BUỘC: IPC lớn nhất = IPC có SỐ KỲ numeric lớn nhất đang lưu trong dự án; "
-            "không phải Claim có số tiền lớn nhất và không phải Claim cập nhật gần nhất.",
-            "KHÔNG cộng IPC-01 + IPC-02 + ... vì mỗi IPC là số LŨY KẾ. Chỉ dùng lũy kế của IPC lớn nhất.",
-            "VẬT TƯ CÒN LẠI TOÀN DỰ ÁN = TỔNG VẬT TƯ BOQ FULL-SCAN - VẬT TƯ LŨY KẾ IPC LỚN NHẤT.",
-            "NHÂN CÔNG CÒN LẠI TOÀN DỰ ÁN = TỔNG NHÂN CÔNG BOQ FULL-SCAN - NHÂN CÔNG LŨY KẾ IPC LỚN NHẤT.",
-            "Nếu phần ngữ cảnh khác mâu thuẫn với PROJECT-REMAINING, AI phải dùng PROJECT-REMAINING này.",
-        ]
-
-        if not result.get("ok"):
-            lines.append(
-                f"[PROJECT-REMAINING] CHƯA TÍNH ĐƯỢC: {result.get('reason') or 'thiếu dữ liệu BOQ/IPC'}. "
-                "Không được tự lấy một IPC thấp hơn hoặc cộng nhiều IPC để thay thế."
-            )
-            return "\n".join(lines) + "\n"
-
-        code = str(result.get("latest_claim_code") or f"IPC-{int(result.get('latest_ipc_number') or 0):02d}")
-        lines.extend([
-            f"[PROJECT-REMAINING] IPC lớn nhất hiện có: {code} (kỳ {int(result.get('latest_ipc_number') or 0)}).",
-            f"BOQ FULL-SCAN: {result.get('boq_scanned_rows',0):,}/{result.get('boq_total_rows',0):,} dòng.",
-            f"Tổng VẬT TƯ BOQ: {_fmt_money(result.get('boq_material_total'))} VND.",
-            f"Vật tư LŨY KẾ {code}: {_fmt_money(result.get('ipc_material_cumulative'))} VND.",
-            f"VẬT TƯ CÒN LẠI TOÀN DỰ ÁN: {_fmt_money(result.get('remaining_material'))} VND.",
-            f"Tổng NHÂN CÔNG BOQ: {_fmt_money(result.get('boq_labor_total'))} VND.",
-            f"Nhân công LŨY KẾ {code}: {_fmt_money(result.get('ipc_labor_cumulative'))} VND.",
-            f"NHÂN CÔNG CÒN LẠI TOÀN DỰ ÁN: {_fmt_money(result.get('remaining_labor'))} VND.",
-            f"TỔNG VẬT TƯ + NHÂN CÔNG CÒN LẠI: {_fmt_money(result.get('remaining_total'))} VND.",
-            f"Nguồn lũy kế {code}: {result.get('ipc_component_source') or 'chưa xác định'}; "
-            f"đã quét {result.get('ipc_scanned_rows',0):,}/{result.get('ipc_total_rows',0):,} dòng Claim.",
-        ])
-        if result.get("valid"):
-            lines.append("Trạng thái PROJECT-REMAINING: HỢP LỆ — được phép dùng làm kết quả còn lại toàn dự án.")
-        else:
-            lines.append(
-                f"Trạng thái PROJECT-REMAINING: CHƯA HỢP LỆ — {result.get('reason') or 'cần đối chiếu dữ liệu'}. "
-                "AI phải nêu cảnh báo và không được trình bày các số trên như kết quả cuối cùng."
-            )
-        return "\n".join(lines) + "\n"
-
-    claim_ai._claim_appendix = claim_appendix_with_project_remaining
-    claim_ai._qlda_project_remaining_installed = True
-    claim_ai._qlda_project_remaining_marker = PATCH_MARKER

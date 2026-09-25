@@ -1151,7 +1151,7 @@ class AdvancedAutomation:
             raise ValueError("Site Vision hiện chỉ nhận attachment hình ảnh PNG/JPEG/WebP.")
 
         from qlda.runtime_core.settings_store import get_ai_runtime_settings
-        from qlda.runtime_core.ai_service import AISettings, GeminiProjectAssistant, GeminiSettings, OpenAIProjectAssistant
+        from qlda.infrastructure.ai.presentation_facade import AISettings, GeminiProjectAssistant, GeminiSettings, OpenAIProjectAssistant
 
         settings = dict(get_ai_runtime_settings() or {})
         api_key = str(settings.get("api_key") or "").strip()

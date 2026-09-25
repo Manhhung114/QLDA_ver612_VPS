@@ -381,117 +381,12 @@ def _patch_database_class(cls) -> None:
     cls._qlda_cost_components_installed = True
 
 
-def _fmt_nullable_money(ai, value: Any) -> str:
-    if value is None:
-        return "chưa có"
-    return f"{ai._fmt_money(value)} VND"
 
 
-def _install_ai_patch() -> None:
-    import qlda.runtime_core.ai_live_context as ai
-    if getattr(ai, "_qlda_cost_components_installed", False):
-        return
-
-    original_boq_appendix = ai._boq_query_appendix
-
-    def boq_query_with_components(connection, project_id: int, question: str, total_rows: int) -> list[str]:
-        lines = original_boq_appendix(connection, project_id, question, total_rows)
-        qnorm = ai._norm(question)
-        component_intent = any(term in qnorm for term in (
-            "vat tu", "nhan cong", "don gia", "chi phi", "material", "labor", "labour",
-        ))
-        if not component_intent or total_rows <= 0:
-            return lines
-
-        try:
-            columns = _column_names(connection, "cost_budgets")
-        except Exception:
-            return lines
-        if not set(_COMPONENT_COLUMNS).issubset(columns):
-            lines += [
-                "",
-                "#### PHÂN TÁCH CHI PHÍ VẬT TƯ / NHÂN CÔNG",
-                "Database hiện chưa có các trường thành phần đơn giá của BOQ; không được tự suy đoán tỷ lệ vật tư/nhân công.",
-            ]
-            return lines
-
-        try:
-            rows = [_rowdict(row) for row in connection.execute(
-                """SELECT id,task_ref,boq_item,quantity,unit,unit_price,budget_total,
-                          material_unit_price,labor_unit_price,material_cost,labor_cost,
-                          contract_type,contractor,note,updated_at
-                   FROM cost_budgets WHERE project_id=? ORDER BY id""",
-                (int(project_id),),
-            ).fetchall()]
-        except Exception:
-            return lines
-
-        tokens, _ = ai._question_terms(question)
-        component_words = {"vat", "tu", "nhan", "cong", "don", "gia", "chi", "phi", "material", "labor", "labour"}
-        filters = [token for token in tokens if token not in component_words]
-
-        selected: list[dict] = []
-        if filters:
-            for row in rows:
-                haystack = ai._norm(" ".join(str(row.get(k) or "") for k in ("boq_item", "task_ref", "unit", "note", "contractor")))
-                if any(token in haystack for token in filters):
-                    selected.append(row)
-        else:
-            selected = rows
-
-        known_material = [row for row in selected if row.get("material_unit_price") is not None or row.get("material_cost") is not None]
-        known_labor = [row for row in selected if row.get("labor_unit_price") is not None or row.get("labor_cost") is not None]
-        material_total = sum(float(row.get("material_cost") or 0) for row in known_material)
-        labor_total = sum(float(row.get("labor_cost") or 0) for row in known_labor)
-
-        lines += [
-            "",
-            "#### PHÂN TÁCH CHI PHÍ VẬT TƯ / NHÂN CÔNG",
-            "QUY TẮC DỮ LIỆU: chi phí vật tư = số lượng × đơn giá vật tư; chi phí nhân công = số lượng × đơn giá nhân công. "
-            "Trường nào là 'chưa có' thì AI không được tự chia từ đơn giá tổng hoặc tự giả định tỷ lệ.",
-            f"Phạm vi truy xuất thành phần: {len(selected):,} dòng BOQ; có dữ liệu vật tư {len(known_material):,} dòng, "
-            f"nhân công {len(known_labor):,} dòng.",
-        ]
-        if known_material:
-            lines.append(f"Tổng chi phí vật tư theo dữ liệu đã tách: {ai._fmt_money(material_total)} VND.")
-        if known_labor:
-            lines.append(f"Tổng chi phí nhân công theo dữ liệu đã tách: {ai._fmt_money(labor_total)} VND.")
-        if not known_material and not known_labor:
-            lines.append("Các dòng trong phạm vi này chưa có dữ liệu phân tách vật tư/nhân công.")
-            return lines
-
-        evidence = [
-            row for row in selected
-            if row.get("material_unit_price") is not None
-            or row.get("labor_unit_price") is not None
-            or row.get("material_cost") is not None
-            or row.get("labor_cost") is not None
-        ]
-        for row in evidence[: ai.MAX_BOQ_MATCH_ROWS]:
-            lines.append(
-                f"[BOQ-COMPONENT:{row.get('id','')}] {row.get('boq_item','')} | "
-                f"SL={ai._fmt_qty(row.get('quantity'))} {row.get('unit','')} | "
-                f"đơn_giá_vật_tư={_fmt_nullable_money(ai, row.get('material_unit_price'))} | "
-                f"chi_phí_vật_tư={_fmt_nullable_money(ai, row.get('material_cost'))} | "
-                f"đơn_giá_nhân_công={_fmt_nullable_money(ai, row.get('labor_unit_price'))} | "
-                f"chi_phí_nhân_công={_fmt_nullable_money(ai, row.get('labor_cost'))} | "
-                f"đơn_giá_tổng={ai._fmt_money(row.get('unit_price'))} VND | "
-                f"thành_tiền={ai._fmt_money(row.get('budget_total'))} VND"
-            )
-        if len(evidence) > ai.MAX_BOQ_MATCH_ROWS:
-            lines.append(
-                f"Còn {len(evidence) - ai.MAX_BOQ_MATCH_ROWS:,} dòng thành phần chưa đưa nguyên văn vào prompt do giới hạn context; "
-                "các dòng đó vẫn đã tham gia tổng hợp ở trên."
-            )
-        return lines
-
-    ai._boq_query_appendix = boq_query_with_components
-    ai._qlda_cost_components_installed = True
-    ai._qlda_cost_components_marker = PATCH_MARKER
 
 
 def install_boq_cost_components() -> None:
-    """Install non-destructive BOQ material/labor split for database, parser and AI."""
+    """Install non-destructive BOQ material/labor split for database and parser."""
     import qlda.runtime_core.project_store as cloud_db
     if getattr(cloud_db, "_qlda_cost_components_global_installed", False):
         return
@@ -519,6 +414,5 @@ def install_boq_cost_components() -> None:
             _patch_database_class(cls)
 
         _install_parser_patch()
-        _install_ai_patch()
         cloud_db._qlda_cost_components_global_installed = True
         cloud_db._qlda_cost_components_marker = PATCH_MARKER

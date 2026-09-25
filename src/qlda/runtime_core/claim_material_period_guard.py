@@ -205,76 +205,16 @@ def _augment_one(connection, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def install_claim_material_period_guard() -> None:
-    """Make previous/current/cumulative material values form-independent and AI-safe."""
+    """Augment deterministic Claim scans with validated period identities."""
     import qlda.runtime_core.claim_component_fullscan as fullscan
-    import qlda.runtime_core.ai_claim_context as claim_ai
     if getattr(fullscan, "_qlda_claim_material_period_guard_installed", False):
         return
-
     original_fullscan = fullscan.fullscan_claim_components
 
     def guarded_fullscan(connection, project_id: int, question: str = "", *, persist: bool = False):
         rows = original_fullscan(connection, int(project_id), str(question or ""), persist=persist)
-        augmented = [_augment_one(connection, dict(row or {})) for row in rows]
-        _STATE.last = (int(project_id), str(question or ""), augmented)
-        return augmented
+        return [_augment_one(connection, dict(row or {})) for row in rows]
 
     fullscan.fullscan_claim_components = guarded_fullscan
-
-    original_appendix = claim_ai._claim_appendix
-
-    def appendix_with_material_period_guard(builder, project_id: int, question: str) -> str:
-        q = str(question or "")
-        base = original_appendix(builder, int(project_id), q)
-        last = getattr(_STATE, "last", None)
-        stats = []
-        if isinstance(last, tuple) and len(last) == 3 and last[0] == int(project_id) and last[1] == q:
-            stats = list(last[2] or [])
-
-        if not stats:
-            return base
-
-        lines = [str(base or "").rstrip(), "", "### ĐỐI CHIẾU VẬT TƯ THEO KỲ — NGUỒN BẮT BUỘC"]
-        lines.append(
-            "QUY TẮC: Vật tư kỳ này = Vật tư lũy kế đến hết kỳ này - Vật tư lũy kế kỳ trước. "
-            "Ưu tiên các dòng tổng hợp được nhận diện theo NGỮ NGHĨA/QUAN HỆ, không theo số dòng hay địa chỉ ô cố định."
-        )
-        lines.append(
-            "Nếu form chèn/xóa dòng, đổi cột hoặc đổi tên sheet, hệ thống vẫn dò các khối KỲ TRƯỚC / KỲ NÀY / LŨY KẾ "
-            "và kiểm tra Previous + Current = Cumulative trước khi cho AI dùng."
-        )
-
-        for item in stats:
-            code = str(item.get("claim_code") or "")
-            if not item.get("ok"):
-                continue
-            if not item.get("material_period_identity_ok"):
-                lines.append(
-                    f"[MATERIAL-PERIOD:{code}] CHƯA XÁC NHẬN ĐƯỢC bộ Kỳ trước/Kỳ này/Lũy kế nhất quán; "
-                    "AI không được dùng subtotal chi tiết làm Giá trị vật tư kỳ này."
-                )
-                continue
-            lines.extend(
-                [
-                    f"[MATERIAL-PERIOD:{code}] Giá trị vật tư kỳ trước: {_fmt_money(item.get('selected_material_previous'))} VND.",
-                    f"[MATERIAL-PERIOD:{code}] Giá trị vật tư kỳ này: {_fmt_money(item.get('selected_material_current'))} VND.",
-                    f"[MATERIAL-PERIOD:{code}] Giá trị vật tư lũy kế: {_fmt_money(item.get('selected_material_cumulative'))} VND.",
-                    f"[MATERIAL-PERIOD:{code}] Kiểm tra: {_fmt_money(item.get('selected_material_cumulative'))} - "
-                    f"{_fmt_money(item.get('selected_material_previous'))} = {_fmt_money(item.get('selected_material_current'))} VND.",
-                    f"Nguồn vật tư theo kỳ: {item.get('selected_material_period_source')}; "
-                    f"sheet nhận diện={item.get('semantic_payment_sheet') or 'GTHT/tổng hợp'}.",
-                ]
-            )
-            detail_current = _num(item.get("material_current_total"))
-            selected_current = _num(item.get("selected_material_current"))
-            if detail_current and not _close(detail_current, selected_current):
-                lines.append(
-                    f"CẢNH BÁO: subtotal Khối lượng × Đơn giá vật tư từ chi tiết = {_fmt_money(detail_current)} VND, "
-                    f"không khớp nguồn tổng hợp {_fmt_money(selected_current)} VND; AI phải dùng nguồn tổng hợp đã qua identity, "
-                    "không dùng subtotal chi tiết."
-                )
-        return "\n".join(lines) + "\n"
-
-    claim_ai._claim_appendix = appendix_with_material_period_guard
     fullscan._qlda_claim_material_period_guard_installed = True
     fullscan._qlda_claim_material_period_guard_marker = PATCH_MARKER

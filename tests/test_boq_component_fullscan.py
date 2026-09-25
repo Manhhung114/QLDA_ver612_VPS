@@ -4,7 +4,7 @@ import sqlite3
 import unittest
 
 import qlda.runtime_core.boq_persistence as persistence
-from qlda.runtime_core.boq_ai_fullscan import PATCH_MARKER, fullscan_boq_component_totals
+from qlda.runtime_core.boq_component_fullscan import PATCH_MARKER, fullscan_boq_component_totals
 
 
 def _row(row_no: int, values: dict[int, object], width: int = 14) -> list[object]:
@@ -29,7 +29,7 @@ def _snapshot(sheet: str, header_row: int, data_row: int, material: float, labor
     }
 
 
-class BOQAIFullscanTests(unittest.TestCase):
+class BOQComponentFullscanTests(unittest.TestCase):
     def test_scans_all_saved_sheets_and_header_below_row_30(self):
         c = sqlite3.connect(":memory:")
         c.row_factory = sqlite3.Row

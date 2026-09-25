@@ -357,22 +357,6 @@ def install_finance_consistency_core() -> None:
     except Exception:
         pass
 
-    try:
-        import qlda.runtime_core.ai_vo_context as ai_vo
-        if not getattr(ai_vo, "_qlda_finance_consistency_v23_installed", False):
-            original_ai_appendix = ai_vo._vo_appendix
-            @wraps(original_ai_appendix)
-            def ai_appendix_consistent(builder, project_id: int, question: str) -> str:
-                try:
-                    with builder.connect() as connection:
-                        _normalize_vo_connection(connection, int(project_id))
-                except Exception:
-                    pass
-                return original_ai_appendix(builder, int(project_id), question)
-            ai_vo._vo_appendix = ai_appendix_consistent
-            ai_vo._qlda_finance_consistency_v23_installed = True
-    except Exception:
-        pass
 
     pcm._qlda_finance_consistency_v23_core_installed = True
     pcm._qlda_finance_consistency_v23_marker = PATCH_MARKER
