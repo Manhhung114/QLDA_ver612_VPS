@@ -1,5 +1,20 @@
 # AI Architecture
 
+## Trạng thái hiện tại
+
+Roadmap hiện đại hóa AI production đã hoàn thành ở cấp **boundary + retrieval + tool-calling + observability + deterministic quality gate**. Các tiêu chí đã khóa bằng code/test gồm:
+
+- `application/ai` là boundary native, không phụ thuộc `runtime_core`;
+- RAG tenant-scoped theo `workspace_project_id`, có provenance và lexical fallback;
+- pgvector được dùng khi PostgreSQL cho phép, không làm chat phụ thuộc cứng vào extension;
+- AI Planner ưu tiên native OpenAI/Gemini function calling thay vì regex JSON parsing;
+- RBAC, Data Integrity Gate, Approval Gate và ToolRegistry vẫn nằm downstream, LLM không override được;
+- audit/telemetry theo workspace ghi provider/model/context/source/tool/latency/usage khi khả dụng;
+- deterministic AI quality eval chạy riêng trong **AI Quality Gate**;
+- chỉ `infrastructure/ai/legacy_provider.py` còn được phép bridge tới AI engine compatibility cũ.
+
+Phần còn lại trong `runtime_core` là **compatibility retirement backlog**, không phải thiếu capability của kiến trúc AI mới. Các slice cũ chỉ được xóa sau khi owner native tương ứng và regression của slice đó đã ổn định.
+
 ## Mục tiêu
 
 AI của QLDA phải hỗ trợ kỹ sư nhưng không được trở thành đường tắt bỏ qua nghiệp vụ.
@@ -33,7 +48,7 @@ infrastructure/ai
 `runtime_core`. `infrastructure/native_ai.py` không được import provider legacy
 trực tiếp. Trong giai đoạn strangler hiện tại, chỉ
 `infrastructure/ai/legacy_provider.py` được phép bridge tới engine AI/settings cũ.
-Architecture Guard khóa invariant này.
+Architecture Guard và `test_ai_architecture_boundary.py` khóa invariant này.
 
 ## Grounded retrieval / RAG
 
@@ -106,7 +121,7 @@ Model tool choice
 
 Text-JSON planner chỉ là opt-in compatibility fallback
 (`QLDA_AI_TEXT_PLANNER_FALLBACK=1`) và parse bằng `json.loads` nghiêm ngặt; regex
-JSON extraction đã bị Architecture Guard cấm. Mặc định, native provider failure
+JSON extraction đã bị Architecture Guard/test cấm. Mặc định, native provider failure
 không gọi text planner mà quay thẳng về `HeuristicPlanner` deterministic.
 
 ## Audit / telemetry
@@ -139,8 +154,11 @@ CI không gọi provider thật. Golden/deterministic eval bao phủ:
 - provider failure phải fallback deterministic mặc định;
 - các schema quan trọng phải có required fields;
 - planner không được quay lại regex JSON extraction;
-- Contractor Data Hub application không được quay lại import `runtime_core`.
+- Contractor Data Hub application không được quay lại import `runtime_core`;
+- infrastructure AI không được phát sinh bridge thứ hai tới `runtime_core`.
 
+Workflow `.github/workflows/ai-quality.yml` chạy riêng các regression AI architecture,
+RAG/provenance, planner contract, quality eval, workspace indexer và contractor tenant isolation.
 Live/provider eval có thể chạy ngoài CI với bộ dữ liệu đã ẩn thông tin nhạy cảm.
 
 ## Cấu hình chính
@@ -162,5 +180,19 @@ QLDA_AI_TEXT_PLANNER_FALLBACK=0
 Provider/context engine lịch sử vẫn còn trong `runtime_core` vì nhiều context patch
 production đang monkey-patch các assistant class. Nó không còn là dependency được
 phép của application/native adapters; toàn bộ bridge provider/settings đã được gom
-về `infrastructure.ai.legacy_provider`. Chỉ xóa engine cũ sau khi từng context slice
-được migrate và regression tương ứng xanh. Đây là strangler, không phải big-bang.
+về `infrastructure.ai.legacy_provider`.
+
+Nguyên tắc retirement:
+
+```text
+legacy slice
+   -> native owner
+   -> parity regression
+   -> production soak
+   -> remove composition entry / compatibility bridge usage
+   -> delete legacy file
+```
+
+Không xóa hàng loạt `ai_service.py` hoặc các context patch đang phục vụ production.
+Mục tiêu tiếp theo là giảm dần bridge compatibility về 0; khi bridge cuối cùng không
+còn caller, test/guard sẽ được đổi từ “exactly one bridge” thành “zero runtime AI bridge”.
