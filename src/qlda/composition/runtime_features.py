@@ -2,8 +2,9 @@ from __future__ import annotations
 
 """Deterministic runtime feature composition.
 
-All compatibility installers are explicit, ordered, and grouped by stage. Importing
-this module has no side effects; callers must invoke ``install_stage``.
+Compatibility installers are explicit, ordered, and grouped by non-AI stage.
+AI is intentionally absent: native application/infrastructure boundaries own the
+entire AI execution path and must never be reintroduced as runtime monkey patches.
 """
 
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ from typing import Callable
 class RuntimeStage(str, Enum):
     DATA = "data"
     BUSINESS = "business"
-    AI = "ai"
     UI = "ui"
 
 
@@ -62,29 +62,6 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("boq-claim-terms", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_terms", "install_boq_claim_terms"),
     RuntimeFeature("boq-claim-price-recovery", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_recovery", "install_boq_claim_price_recovery"),
     RuntimeFeature("boq-claim-price-header-guard", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_header_guard", "install_boq_claim_price_header_guard"),
-
-    RuntimeFeature("contractor-data-official-ai-pre", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
-    RuntimeFeature("contract-ai-large-pdf", RuntimeStage.AI, "qlda.runtime_core.contract_ai_large_pdf", "install_contract_ai_large_pdf_v622"),
-    RuntimeFeature("gemini-resilience", RuntimeStage.AI, "qlda.runtime_core.gemini_resilience", "install_gemini_resilience"),
-    RuntimeFeature("ai-live-context", RuntimeStage.AI, "qlda.runtime_core.ai_live_context", "install_ai_live_context"),
-    RuntimeFeature("ai-claim-context", RuntimeStage.AI, "qlda.runtime_core.ai_claim_context", "install_ai_claim_context"),
-    RuntimeFeature("ai-vo-context", RuntimeStage.AI, "qlda.runtime_core.ai_vo_context", "install_ai_vo_context"),
-    RuntimeFeature("ai-streaming", RuntimeStage.AI, "qlda.runtime_core.ai_streaming", "install_ai_streaming"),
-    RuntimeFeature("boq-ai-fullscan", RuntimeStage.AI, "qlda.runtime_core.boq_ai_fullscan", "install_boq_ai_fullscan"),
-    RuntimeFeature("claim-component-fullscan", RuntimeStage.AI, "qlda.runtime_core.claim_component_fullscan", "install_claim_component_fullscan"),
-    RuntimeFeature("claim-material-period-guard", RuntimeStage.AI, "qlda.runtime_core.claim_material_period_guard", "install_claim_material_period_guard"),
-    RuntimeFeature("project-remaining-components", RuntimeStage.AI, "qlda.runtime_core.project_remaining_components", "install_project_remaining_components"),
-    RuntimeFeature("contractor-ai-capture-scope", RuntimeStage.AI, "qlda.runtime_core.contractor_access_control", "capture_single_contractor_ai_context"),
-    RuntimeFeature("contractor-ai-context", RuntimeStage.AI, "qlda.runtime_core.contractor_ai_context", "install_contractor_ai_context"),
-    RuntimeFeature("contractor-ai-access-guard", RuntimeStage.AI, "qlda.runtime_core.contractor_access_control", "install_ai_access_guard"),
-    RuntimeFeature("ai-vps-pdf-fullscan", RuntimeStage.AI, "qlda.runtime_core.ai_vps_pdf_fullscan", "install_ai_vps_pdf_fullscan"),
-    RuntimeFeature("ai-vps-pdf-vision", RuntimeStage.AI, "qlda.runtime_core.ai_vps_pdf_vision", "install_ai_vps_pdf_vision"),
-    RuntimeFeature("owner-material-ai-context", RuntimeStage.AI, "qlda.runtime_core.owner_material_ai_context", "install_owner_material_ai_context"),
-    RuntimeFeature("cashflow-ai-context", RuntimeStage.AI, "qlda.runtime_core.cashflow_ai_context", "install_cashflow_ai_context"),
-    RuntimeFeature("finance-consistency-core", RuntimeStage.AI, "qlda.runtime_core.finance_consistency", "install_finance_consistency_core"),
-    RuntimeFeature("project-cost-ai-context", RuntimeStage.AI, "qlda.runtime_core.project_cost_ai_context", "install_project_cost_ai_context"),
-    RuntimeFeature("contractor-data-shared-ai", RuntimeStage.AI, "qlda.runtime_core.contractor_data_shared_ai", "install_contractor_data_shared_ai_context"),
-    RuntimeFeature("contractor-data-official-ai-post", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
 
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.presentation.streamlit.upload_policy", "install_upload_ui_200mb_policy"),
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.presentation.streamlit.document_management_vps_ui", "install_document_management_vps_ui"),
