@@ -16,8 +16,9 @@ class HeuristicPlanner:
     """Deterministic fallback planner used when an LLM planner is unavailable.
 
     It never invents direct database writes; every step must map to a registered
-    service tool. The LLM planner can replace this class while preserving the same
-    ExecutionPlan contract.
+    service tool. Advanced draft tools are only planned automatically when their
+    required structured payload exists in ``context`` so a vague user request can
+    never fabricate quantities, rates, task IDs or image evidence.
     """
 
     def plan(self, project_id: int, objective: str, context: dict[str, Any] | None = None) -> ExecutionPlan:
@@ -33,9 +34,49 @@ class HeuristicPlanner:
         if any(key in text for key in ("đồng bộ", "google", "sản lượng", "production")):
             add("sync_google_data", "Cần dữ liệu nguồn mới nhất trước khi phân tích.")
             add("check_data_integrity", "Đối soát dữ liệu trước khi AI kết luận.")
+
         add("get_project_status", "Thu thập trạng thái dự án hiện tại.")
+
+        # V9.2 Contract Audit: deterministic ledger from real dates/evidence.
+        if any(key in text for key in ("hợp đồng", "nghĩa vụ", "bảo lãnh", "bảo hiểm", "gia hạn", "contract")):
+            add("audit_contract_obligations", "Kiểm tra các nghĩa vụ và mốc có due-date thực tế trong workspace nhà thầu.")
+
+        # V9.3 QS reconciliation does the arithmetic in code, not in the LLM.
+        if any(key in text for key in ("đối soát ipc", "ipc boq", "boq ipc", "khối lượng ipc", "đơn giá ipc", "reconcile")):
+            arguments: dict[str, Any] = {}
+            selected_claim = str(context.get("claim_id") or "").strip()
+            if selected_claim:
+                arguments["claim_id"] = selected_claim
+            add("reconcile_ipc_boq", "Đối soát IPC với BOQ trước khi đưa ra kết luận QS.", arguments)
+
+        # V9.5: schedule prediction is deterministic velocity extrapolation and
+        # verified due-date cash needs; payment-overdue is not part of Health.
+        if any(key in text for key in ("dự báo", "forecast", "predict", "milestone", "nguy cơ trễ", "rủi ro tiến độ")):
+            add(
+                "forecast_project_risk",
+                "Tạo cảnh báo sớm tiến độ từ velocity có kiểm chứng.",
+                {"horizon_days": int(context.get("forecast_horizon_days") or 60)},
+            )
+
+        # V9.4 only creates a DRAFT when the caller supplied actual change facts.
+        change_payload = context.get("change_payload")
+        if isinstance(change_payload, dict) and any(key in text for key in ("vo", "phát sinh", "thay đổi", "variation", "change")):
+            add("draft_vo_from_change", "Lập bản nháp VO từ thay đổi đã định lượng; không phê duyệt tự động.", dict(change_payload))
+
+        # V9.6 never infers a task/image from prose. It needs a structured site
+        # observation or a scoped attachment ID and produces a proposal only.
+        site_payload = context.get("site_observation")
+        if isinstance(site_payload, dict) and any(key in text for key in ("ảnh", "camera", "drone", "vision", "hiện trường", "site")):
+            add("analyze_site_progress", "Phân tích bằng chứng ảnh/quan sát và chỉ đề xuất phần trăm hoàn thành.", dict(site_payload))
+
+        # V9.1 routing is useful only when an actual finding payload exists.
+        route_payload = context.get("finding_payload")
+        if isinstance(route_payload, dict) and any(key in text for key in ("phân công", "assign", "routing", "giao việc", "người phụ trách")):
+            add("route_work_task", "Xác định discipline, SLA và người phụ trách từ finding đã xác minh.", dict(route_payload))
+
         if any(key in text for key in ("báo cáo", "report", "đánh giá", "tình hình", "rủi ro")):
             add("generate_report", "Tổng hợp kết quả thành báo cáo có kiểm chứng.")
+
         if any(key in text for key in ("nhắc", "giao việc", "task", "xử lý")):
             assignee_email = str(context.get("default_assignee_email") or "").strip()
             if assignee_email:
