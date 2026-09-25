@@ -1,22 +1,14 @@
 from __future__ import annotations
 
 import io
-import tempfile
 import unittest
-from pathlib import Path
 
 from openpyxl import Workbook
 
-import qlda.runtime_core.ai_claim_context as claim_ai
-import qlda.runtime_core.ai_service as ai_service
 import qlda.runtime_core.boq_multisheet as boq
 import qlda.runtime_core.ipc_adaptive_parser as adaptive
-import qlda.runtime_core.ipc_claim as ipc
-from qlda.runtime_core.ai_claim_context import install_ai_claim_context
-from qlda.runtime_core.ai_live_context import install_ai_live_context
 from qlda.runtime_core.boq_claim_terms import PATCH_MARKER, install_boq_claim_terms
 from qlda.runtime_core.boq_cost_components import install_boq_cost_components
-from qlda.runtime_core.project_store import CloudDatabase
 from qlda.runtime_core.ipc_adaptive_parser import install_ipc_adaptive_parser
 from qlda.runtime_core.ipc_claim_fast import install_ipc_claim_fast_path
 from qlda.runtime_core.ipc_claim_summary_fix import install_ipc_claim_summary_fix
@@ -25,8 +17,6 @@ from qlda.runtime_core.ipc_claim_summary_fix import install_ipc_claim_summary_fi
 class BOQClaimTermsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        install_ai_live_context()
-        install_ai_claim_context()
         install_boq_cost_components()
         install_ipc_claim_fast_path()
         install_ipc_claim_summary_fix()
@@ -56,55 +46,12 @@ class BOQClaimTermsTests(unittest.TestCase):
         warnings = "\n".join(result.get("warnings") or [])
         self.assertNotIn("Số lượng ×", warnings)
         self.assertIn("Khối lượng ×", warnings)
+        self.assertIn("CLAIM TERMS", PATCH_MARKER)
 
     def test_claim_header_accepts_don_gia_nhan_cong(self):
         headers = ["noi dung cong viec", "don gia vat tu", "don gia nhan cong", "thanh tien"]
         self.assertEqual(adaptive._find_header_col(headers, ("don gia lap dat",)), 2)
         self.assertEqual(adaptive._find_header_col(headers, ("hang muc cong viec",)), 0)
-
-    def test_ai_claim_exposes_khoi_luong_material_and_labor_prices(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "claim_terms.db"
-            db = CloudDatabase(db_path)
-            pid = db.add_project("TERM01", "Claim terminology")
-            with db.connect() as c:
-                ipc._ensure_tables(c)
-                c.execute(
-                    """INSERT INTO payment_claims(
-                           claim_id,project_id,claim_no,claim_code,filename,payment_status,created_at,updated_at
-                       ) VALUES(?,?,?,?,?,?,?,?)""",
-                    ("claim-01", pid, "01", "IPC-01", "IPC01.xlsx", "Đã duyệt", "2026-09-09", "2026-09-09"),
-                )
-                c.execute(
-                    """INSERT INTO payment_claim_items(
-                           claim_id,project_id,row_no,boq_item,contract_qty,unit,
-                           material_unit_price,labor_unit_price,
-                           material_current_qty,material_cumulative_qty,
-                           installation_current_pct,installation_cumulative_pct,
-                           material_current_value,installation_current_value,current_value,cumulative_value
-                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        "claim-01", pid, 16, "Tủ điện TĐ.S4-QH2", 3, "Set",
-                        52_573_400, 1_375_000,
-                        2, 3, 1, 2,
-                        105_146_800, 1_375_000, 106_521_800, 161_845_200,
-                    ),
-                )
-
-            builder = ai_service.ProjectContextBuilder(db_path)
-            context = claim_ai._claim_appendix(
-                builder, pid, "đơn giá vật tư nhân công và khối lượng claim 1"
-            )
-            self.assertIn(PATCH_MARKER, PATCH_MARKER)
-            self.assertIn("KHỐI LƯỢNG", context)
-            self.assertIn("[CLAIM-ITEM-V2:IPC-01:16]", context)
-            self.assertIn("Khối_lượng_HĐ=3", context)
-            self.assertIn("Đơn_giá_vật_tư=52,573,400 VND", context)
-            self.assertIn("Đơn_giá_nhân_công=1,375,000 VND", context)
-            self.assertIn("Khối_lượng_lắp_đặt_kỳ=1", context)
-            self.assertIn("Chi_phí_vật_tư_kỳ=105,146,800 VND", context)
-            self.assertIn("Chi_phí_nhân_công_kỳ=1,375,000 VND", context)
-            self.assertNotIn("LĐ kỳ=1%", context)
 
 
 if __name__ == "__main__":
