@@ -1,0 +1,24 @@
+name: Architecture Quality Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  architecture:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile architectural surfaces
+        run: python -m compileall -q src/qlda/composition src/qlda/domain src/qlda/application src/qlda/presentation tests/test_architecture_boundaries.py tools/architecture_guard.py
+      - name: Enforce architecture boundaries
+        run: python tools/architecture_guard.py
+      - name: Run architecture regression tests
+        run: python -m unittest tests.test_architecture_boundaries tests.test_v7_repository_contract -v
