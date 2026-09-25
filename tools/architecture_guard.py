@@ -2,10 +2,9 @@ from __future__ import annotations
 
 """Fail CI when architectural debt grows.
 
-This guard is deliberately migration-safe: existing compatibility debt is
-allow-listed as a shrinking baseline, while any *new* debt is rejected. The
-materialized Streamlit shell is frozen at its current size; new UI work must live
-in modular presentation files.
+The guard is migration-safe: existing compatibility debt is a shrinking baseline,
+while new debt is rejected. New AI work must cross application/infrastructure ports;
+only one explicit infrastructure compatibility adapter may touch the legacy AI engine.
 """
 
 import ast
@@ -17,6 +16,11 @@ TESTS = ROOT / "tests"
 RUNTIME = SRC / "runtime_core"
 LEGACY_APP = SRC / "presentation" / "streamlit" / "app.py"
 ENTRYPOINT = SRC / "presentation" / "streamlit" / "main.py"
+AI_APPLICATION = SRC / "application" / "ai"
+AI_INFRA = SRC / "infrastructure" / "ai"
+NATIVE_AI = SRC / "infrastructure" / "native_ai.py"
+LEGACY_AI_PROVIDER = AI_INFRA / "legacy_provider.py"
+AI_PLANNER = SRC / "autonomy" / "ai_planner.py"
 
 LEGACY_APP_MAX_BYTES = 315_715
 ENTRYPOINT_MAX_BYTES = 8_192
@@ -34,12 +38,9 @@ ALLOWED_DEBT_FILENAMES = frozenset(
 )
 DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 
-# UI is now fully owned by qlda.presentation; runtime_core gets no exceptions.
 ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset()
-
-ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
-    {"src/qlda/application/contractor_data_hub/service.py"}
-)
+# Application/domain now have zero permitted imports from compatibility runtime_core.
+ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset()
 
 RETIRED_MODULES = {
     "qlda.runtime_core.autonomy_runtime": RUNTIME / "autonomy_runtime.py",
@@ -101,6 +102,46 @@ def check_layer_boundaries() -> list[str]:
     stale = ALLOWED_RUNTIME_CORE_DEPENDENCIES - seen_legacy_dependencies
     for relative in sorted(stale):
         errors.append(f"Remove stale runtime_core dependency baseline entry: {relative}")
+    return errors
+
+
+def check_ai_boundary() -> list[str]:
+    """Prevent AI modernization from leaking back into runtime_core."""
+    errors: list[str] = []
+    if not AI_APPLICATION.is_dir():
+        return ["Missing qlda.application.ai boundary"]
+    for path in _python_files(AI_APPLICATION):
+        source = path.read_text(encoding="utf-8")
+        if "qlda.runtime_core" in source:
+            errors.append(f"{path.relative_to(ROOT)} must not import runtime_core")
+
+    if not NATIVE_AI.is_file():
+        errors.append("Missing qlda.infrastructure.native_ai")
+    elif "qlda.runtime_core" in NATIVE_AI.read_text(encoding="utf-8"):
+        errors.append("src/qlda/infrastructure/native_ai.py must use AI infrastructure ports, not runtime_core directly")
+
+    if not LEGACY_AI_PROVIDER.is_file():
+        errors.append("Missing explicit AI legacy compatibility adapter")
+    if AI_INFRA.is_dir():
+        for path in _python_files(AI_INFRA):
+            if path == LEGACY_AI_PROVIDER:
+                continue
+            if "qlda.runtime_core" in path.read_text(encoding="utf-8"):
+                errors.append(
+                    f"{path.relative_to(ROOT)} imports runtime_core; only infrastructure/ai/legacy_provider.py may do so"
+                )
+
+    if not AI_PLANNER.is_file():
+        errors.append("Missing autonomy AI planner")
+    else:
+        planner = AI_PLANNER.read_text(encoding="utf-8")
+        for token in ("_extract_json", "re.search(", "re.findall("):
+            if token in planner:
+                errors.append(
+                    f"{AI_PLANNER.relative_to(ROOT)} contains legacy regex JSON parsing token: {token}"
+                )
+        if "tool_caller" not in planner or "ToolDefinition" not in planner:
+            errors.append("AI planner must retain provider-native structured tool-calling path")
     return errors
 
 
@@ -233,6 +274,7 @@ def run_checks() -> list[str]:
     errors: list[str] = []
     errors.extend(check_runtime_init_side_effect_free())
     errors.extend(check_layer_boundaries())
+    errors.extend(check_ai_boundary())
     errors.extend(check_streamlit_shell_frozen())
     errors.extend(check_no_new_patch_debt())
     errors.extend(check_runtime_ui_feature_budget())
@@ -255,9 +297,11 @@ def main() -> int:
     print(f" - tracked application->runtime_core dependencies: {len(ALLOWED_RUNTIME_CORE_DEPENDENCIES)}")
     print(f" - retired compatibility modules locked out: {len(RETIRED_MODULES)}")
     print(f" - tracked legacy dynamic-execution modules: {len(ALLOWED_DYNAMIC_EXECUTION)}")
-    print(" - no new domain/application dependency on runtime_core")
+    print(" - application AI boundary cannot import runtime_core")
+    print(" - native AI adapter cannot import runtime_core directly")
+    print(" - only explicit infrastructure legacy AI adapter may bridge runtime_core")
+    print(" - AI planner cannot restore regex JSON extraction")
     print(" - no runtime_core-owned UI feature")
-    print(" - retired compatibility imports cannot return")
     print(" - dynamic exec/eval cannot spread or increase")
     print(" - runtime_core import is side-effect free")
     return 0
