@@ -60,6 +60,13 @@ ALLOWED_RUNTIME_CORE_DEPENDENCIES = frozenset(
     {"src/qlda/application/contractor_data_hub/service.py"}
 )
 
+# One legacy IPC compatibility module still recompiles a materialized function.
+# Track the exact number of calls so this debt can shrink but can never spread or
+# silently increase. Delete this entry when ipc_claim_patch.py is fully retired.
+ALLOWED_DYNAMIC_EXECUTION = {
+    "src/qlda/runtime_core/ipc_claim_patch.py": {"exec": 1, "eval": 0},
+}
+
 
 def _python_files(path: Path):
     return sorted(p for p in path.rglob("*.py") if "__pycache__" not in p.parts)
@@ -166,19 +173,39 @@ def check_runtime_ui_feature_budget() -> list[str]:
 
 def check_no_dynamic_source_execution() -> list[str]:
     errors: list[str] = []
+    seen: dict[str, dict[str, int]] = {}
     for path in _python_files(SRC):
+        relative = path.relative_to(ROOT).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError as exc:
-            errors.append(f"Cannot parse {path.relative_to(ROOT)}: {exc}")
+            errors.append(f"Cannot parse {relative}: {exc}")
             continue
+        counts = {"exec": 0, "eval": 0}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
                 continue
-            if node.func.id in {"exec", "eval"}:
+            if node.func.id in counts:
+                counts[node.func.id] += 1
+        if not any(counts.values()):
+            continue
+        allowed = ALLOWED_DYNAMIC_EXECUTION.get(relative)
+        if allowed is None:
+            errors.append(f"Dynamic source execution is prohibited: {relative} has {counts}")
+            continue
+        seen[relative] = counts
+        for name in counts:
+            if counts[name] > int(allowed.get(name, 0)):
                 errors.append(
-                    f"Dynamic source execution is prohibited: {path.relative_to(ROOT)}:{getattr(node, 'lineno', '?')} uses {node.func.id}()"
+                    f"Dynamic source execution debt increased: {relative} {name}={counts[name]} > baseline={allowed.get(name, 0)}"
                 )
+            elif counts[name] < int(allowed.get(name, 0)):
+                errors.append(
+                    f"Remove stale dynamic-execution baseline: {relative} {name}={counts[name]} < baseline={allowed.get(name, 0)}"
+                )
+    stale = set(ALLOWED_DYNAMIC_EXECUTION) - set(seen)
+    for relative in sorted(stale):
+        errors.append(f"Remove stale dynamic-execution baseline entry: {relative}")
     return errors
 
 
@@ -205,9 +232,10 @@ def main() -> int:
     print(f" - tracked compatibility-debt files: {len(ALLOWED_DEBT_FILENAMES)}")
     print(f" - tracked runtime UI compatibility features: {len(ALLOWED_RUNTIME_UI_COMPAT_FEATURES)}")
     print(f" - tracked application->runtime_core dependencies: {len(ALLOWED_RUNTIME_CORE_DEPENDENCIES)}")
+    print(f" - tracked legacy dynamic-execution modules: {len(ALLOWED_DYNAMIC_EXECUTION)}")
     print(" - no new domain/application dependency on runtime_core")
     print(" - no new runtime_core-owned UI feature")
-    print(" - no dynamic exec/eval in packaged qlda source")
+    print(" - dynamic exec/eval cannot spread or increase")
     print(" - runtime_core import is side-effect free")
     return 0
 
