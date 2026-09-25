@@ -18,7 +18,7 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    """V7.8 application tool boundary used by humans, workers and AI.
+    """V7.8+ application tool boundary used by humans, workers and AI.
 
     AI never writes the database directly. Every action crosses this registry,
     which centralizes RBAC, approval, idempotency and audit metadata.
@@ -103,8 +103,13 @@ class ToolRegistry:
 
 
 def default_tool_specs() -> tuple[ToolSpec, ...]:
-    """Canonical V7.8→V9 tool contract. Concrete handlers are wired by adapters."""
-    return (
+    """Canonical V7.8→V9.6 tool contract.
+
+    Advanced capabilities are imported lazily to keep module dependencies acyclic.
+    Concrete handlers are always wired by QLDA service adapters; missing handlers
+    fail closed rather than allowing an LLM to write directly to storage.
+    """
+    base = (
         ToolSpec("get_project_status", "Đọc trạng thái dự án", RiskLevel.LOW, ActionMode.READ_ONLY),
         ToolSpec("sync_google_data", "Đồng bộ nguồn Google read-only", RiskLevel.LOW, ActionMode.AUTO, ("admin",)),
         ToolSpec("check_data_integrity", "Kiểm tra đối soát dữ liệu nguồn", RiskLevel.LOW, ActionMode.AUTO),
@@ -119,3 +124,6 @@ def default_tool_specs() -> tuple[ToolSpec, ...]:
         ToolSpec("generate_report", "Lập báo cáo dự án", RiskLevel.LOW, ActionMode.AUTO),
         ToolSpec("send_notification", "Gửi thông báo theo workflow", RiskLevel.LOW, ActionMode.AUTO, ("admin", "update")),
     )
+    from .advanced_automation import advanced_tool_specs
+
+    return base + advanced_tool_specs()
