@@ -1,18 +1,9 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "COMPACT DENSITY UI V1"
+PATCH_MARKER = "COMPACT DENSITY UI V2 DEFERRED"
 
-
-def install_compact_density() -> None:
-    """Tighten vertical density without changing the V7 color system."""
-    import streamlit as st
-
-    if getattr(st, "_qlda_compact_density_installed", False):
-        return
-
-    st.markdown(
-        """
+_COMPACT_CSS = """
 <style>
 .block-container{
   padding-top:.42rem!important;
@@ -98,11 +89,26 @@ def install_compact_density() -> None:
   .qlda-ai-page-subtitle{margin-bottom:.45rem}
 }
 </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st._qlda_compact_density_installed = True
-    st._qlda_compact_density_marker = PATCH_MARKER
+"""
+
+
+def install_compact_density() -> None:
+    """Apply compact density immediately after the normal V7 theme is rendered."""
+    import qlda.runtime_core.ui_v7_compact as ui
+
+    if getattr(ui, "_qlda_compact_density_installed", False):
+        return
+
+    original = ui.install_theme_v7
+
+    def install_theme_with_compact_density(st) -> None:
+        original(st)
+        st.markdown(_COMPACT_CSS, unsafe_allow_html=True)
+        st._qlda_compact_density_marker = PATCH_MARKER
+
+    ui.install_theme_v7 = install_theme_with_compact_density
+    ui._qlda_compact_density_installed = True
+    ui._qlda_compact_density_marker = PATCH_MARKER
 
 
 __all__ = ["PATCH_MARKER", "install_compact_density"]
