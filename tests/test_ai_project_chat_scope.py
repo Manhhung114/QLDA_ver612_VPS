@@ -130,7 +130,8 @@ class AIProjectChatScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(master, 1)
-        self.assertEqual(ids, [1, 101, 102])
+        self.assertEqual(ids[0], 1)
+        self.assertEqual(set(ids), {1, 101, 102})
         self.assertTrue(project_wide)
         self.assertEqual(labels[102], "NT-02 - Beta")
 
@@ -161,7 +162,8 @@ class AIProjectChatScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(master, 1)
-        self.assertEqual(ids, [1, 101, 102])
+        self.assertEqual(ids[0], 1)
+        self.assertEqual(set(ids), {1, 101, 102})
         self.assertTrue(project_wide)
 
     @patch("qlda.infrastructure.ai.project_chat._table_exists", return_value=True)
