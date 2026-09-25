@@ -23,7 +23,6 @@ ENTRYPOINT_MAX_BYTES = 8_192
 
 ALLOWED_DEBT_FILENAMES = frozenset(
     {
-        "attachment_upload_reopen_fix.py",
         "boq_claim_price_header_guard.py",
         "boq_claim_price_recovery.py",
         "claim_material_period_guard.py",
@@ -39,7 +38,6 @@ DEBT_SUFFIXES = ("_fix.py", "_patch.py", "_recovery.py", "_guard.py")
 ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
     {
         "upload-ui-policy",
-        "attachment-upload-reopen",
         "owner-supplied-materials",
         "project-cost-management",
         "finance-consistency-ui",
@@ -65,6 +63,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.contractor_data_admin_visibility": RUNTIME / "contractor_data_admin_visibility.py",
     "qlda.runtime_core.document_management_uniform_interaction": RUNTIME / "document_management_uniform_interaction.py",
     "qlda.runtime_core.document_management_vps_ui": RUNTIME / "document_management_vps_ui.py",
+    "qlda.runtime_core.attachment_upload_reopen_fix": RUNTIME / "attachment_upload_reopen_fix.py",
 }
 
 # One legacy IPC compatibility module still recompiles a materialized function.
