@@ -5,9 +5,7 @@ import platform
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -15,14 +13,30 @@ from urllib.parse import urlsplit, urlunsplit
 import qlda.runtime_core.settings_store as ss
 from qlda.runtime_core.google_oauth_admin_ui import render_google_oauth_settings
 
-PATCH_MARKER = "V6.22 ADMIN SYSTEM SETTINGS V1"
+PATCH_MARKER = "V6.22 ADMIN SYSTEM SETTINGS V2-EXACT-GEMINI-MODEL"
 _ALLOWED_STORAGE_ROOT = Path(
     str(os.environ.get("QLDA_ADMIN_STORAGE_ALLOWED_ROOT", "/opt/qlda") or "/opt/qlda")
 ).expanduser()
+_DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _canonical_gemini_model(value: Any) -> str:
+    """Normalize a UI label/resource name without switching Gemini generations."""
+    raw = _text(value)
+    if not raw or raw.lower() in {"auto", "default"}:
+        return _DEFAULT_GEMINI_MODEL
+    lowered = raw.lower().strip()
+    if lowered.startswith("models/"):
+        lowered = lowered.split("/", 1)[1].strip()
+    elif "/models/" in lowered:
+        lowered = lowered.split("/models/", 1)[1].strip()
+    if lowered.startswith("gemini "):
+        lowered = "-".join(lowered.split())
+    return lowered or _DEFAULT_GEMINI_MODEL
 
 
 def _masked_secret(value: str) -> str:
@@ -46,8 +60,7 @@ def _sanitize_database_url(value: str) -> str:
         port = f":{parsed.port}" if parsed.port else ""
         user = parsed.username or ""
         auth = f"{user}:••••@" if user else ""
-        netloc = f"{auth}{host}{port}"
-        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, ""))
+        return urlunsplit((parsed.scheme, f"{auth}{host}{port}", parsed.path, parsed.query, ""))
     except Exception:
         return "Đã cấu hình"
 
@@ -87,7 +100,7 @@ def _test_database(db: Any) -> tuple[bool, str]:
     try:
         with db.connect() as connection:
             row = connection.execute("SELECT 1").fetchone()
-        return (bool(row and int(row[0]) == 1), "PostgreSQL kết nối bình thường.")
+        return bool(row and int(row[0]) == 1), "PostgreSQL kết nối bình thường."
     except Exception as exc:
         return False, f"Kết nối database lỗi: {exc}"
 
@@ -108,20 +121,30 @@ def _test_openai(api_key: str) -> tuple[bool, str]:
         return False, f"OpenAI chưa kết nối được: {exc}"
 
 
-def _test_gemini(api_key: str) -> tuple[bool, str]:
+def _test_gemini(api_key: str, model: str) -> tuple[bool, str]:
+    """Validate the API key by generating with the exact model selected by Admin."""
     key = _text(api_key)
+    model_id = _canonical_gemini_model(model)
     if not key:
         return False, "Chưa có Gemini API key."
     try:
         from google import genai
 
         client = genai.Client(api_key=key)
-        pager = client.models.list()
-        first = next(iter(pager), None)
-        label = _text(getattr(first, "name", "")) if first is not None else ""
-        return True, f"Gemini xác thực thành công{f' · model thấy được: {label}' if label else ''}."
+        try:
+            response = client.models.generate_content(
+                model=model_id,
+                contents="Trả lời đúng một từ: OK",
+            )
+            _ = _text(getattr(response, "text", ""))
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+        return True, f"Gemini xác thực thành công · model đã test: {model_id}."
     except Exception as exc:
-        return False, f"Gemini chưa kết nối được: {exc}"
+        return False, f"Gemini model {model_id} chưa dùng được: {exc}"
 
 
 def _proc_meminfo() -> dict[str, int]:
@@ -131,8 +154,7 @@ def _proc_meminfo() -> dict[str, int]:
             if ":" not in line:
                 continue
             key, tail = line.split(":", 1)
-            number = int(tail.strip().split()[0]) * 1024
-            values[key] = number
+            values[key] = int(tail.strip().split()[0]) * 1024
     except Exception:
         pass
     return values
@@ -167,9 +189,7 @@ def _format_uptime(seconds: float | None) -> str:
     days, rem = divmod(total, 86400)
     hours, rem = divmod(rem, 3600)
     minutes = rem // 60
-    if days:
-        return f"{days} ngày {hours} giờ"
-    return f"{hours} giờ {minutes} phút"
+    return f"{days} ngày {hours} giờ" if days else f"{hours} giờ {minutes} phút"
 
 
 def _render_ai(st: Any, actor: str) -> None:
@@ -198,13 +218,17 @@ def _render_ai(st: Any, actor: str) -> None:
     col1, col2 = st.columns(2)
     gemini_model = col1.text_input(
         "Gemini model",
-        value=_text(cfg.get("gemini_model")) or "auto",
+        value=_canonical_gemini_model(cfg.get("gemini_model")),
         key="sys_gemini_model_v622",
     )
     openai_model = col2.text_input(
         "OpenAI model",
         value=_text(cfg.get("openai_model")) or "gpt-5-mini",
         key="sys_openai_model_v622",
+    )
+    st.caption(
+        "Gemini dùng model cố định. Có thể nhập tên hiển thị như ‘Gemini 3.5 Flash’ hoặc API ID "
+        "‘gemini-3.5-flash’; hệ thống chuẩn hóa tên nhưng không tự đổi sang model khác."
     )
 
     st.caption(
@@ -234,18 +258,19 @@ def _render_ai(st: Any, actor: str) -> None:
 
     t1, t2, save_col = st.columns([1, 1, 1.3])
     if t1.button("🧪 Test Gemini", key="sys_test_gemini_v622", use_container_width=True):
-        ok, message = _test_gemini(new_gemini_key or gemini_runtime.get("api_key", ""))
+        ok, message = _test_gemini(
+            new_gemini_key or gemini_runtime.get("api_key", ""),
+            gemini_model,
+        )
         (st.success if ok else st.error)(message)
     if t2.button("🧪 Test OpenAI", key="sys_test_openai_v622", use_container_width=True):
         ok, message = _test_openai(new_openai_key or openai_runtime.get("api_key", ""))
         (st.success if ok else st.error)(message)
     if save_col.button("💾 Lưu cấu hình AI", type="primary", key="sys_save_ai_v622", use_container_width=True):
-        # When switching from qlda.env to Admin-managed mode, blank password boxes
-        # preserve the currently effective keys instead of accidentally disabling AI.
         updates = {
             "managed_ai": True,
             "ai_provider": provider,
-            "gemini_model": _text(gemini_model) or "auto",
+            "gemini_model": _canonical_gemini_model(gemini_model),
             "openai_model": _text(openai_model) or "gpt-5-mini",
             "gemini_api_key": _text(new_gemini_key) or _text(gemini_runtime.get("api_key")),
             "openai_api_key": _text(new_openai_key) or _text(openai_runtime.get("api_key")),
@@ -259,7 +284,7 @@ def _render_ai(st: Any, actor: str) -> None:
         else:
             ss.save_app_settings(updates)
             ss.append_settings_audit(actor, "update_ai", list(updates))
-            st.success("Đã lưu cấu hình AI. Các request AI mới sử dụng cấu hình này ngay.")
+            st.success("Đã lưu cấu hình AI. Các request AI mới sử dụng đúng model đã chọn.")
             st.rerun()
 
     if bool(cfg.get("managed_ai")) and st.button(
@@ -292,35 +317,25 @@ def _render_storage(st: Any, actor: str) -> None:
 
     c1, c2, c3 = st.columns(3)
     direct_mb = c1.number_input(
-        "Upload trực tiếp tối đa (MB)",
-        min_value=1,
-        max_value=4096,
+        "Upload trực tiếp tối đa (MB)", min_value=1, max_value=4096,
         value=int(float(ss.get_runtime_value("QLDA_LOCAL_DIRECT_MAX_UPLOAD_MB", "2048") or 2048)),
-        step=50,
-        key="sys_direct_mb_v622",
+        step=50, key="sys_direct_mb_v622",
     )
     legacy_mb = c2.number_input(
-        "Upload legacy tối đa (MB)",
-        min_value=1,
-        max_value=1024,
+        "Upload legacy tối đa (MB)", min_value=1, max_value=1024,
         value=int(float(ss.get_runtime_value("QLDA_LOCAL_LEGACY_MAX_UPLOAD_MB", "200") or 200)),
-        step=10,
-        key="sys_legacy_mb_v622",
+        step=10, key="sys_legacy_mb_v622",
     )
     ttl_hours = c3.number_input(
-        "Phiên upload (giờ)",
-        min_value=1,
-        max_value=720,
+        "Phiên upload (giờ)", min_value=1, max_value=720,
         value=int(float(ss.get_runtime_value("QLDA_LOCAL_SESSION_TTL_HOURS", "12") or 12)),
-        step=1,
-        key="sys_ttl_v622",
+        step=1, key="sys_ttl_v622",
     )
 
     b1, b2 = st.columns([1, 1.4])
     if b1.button("🧪 Test đọc/ghi", key="sys_storage_test_v622", use_container_width=True):
         try:
-            tested = _safe_storage_path(root, allow_equal_root=False)
-            ok, message = _storage_test(tested)
+            ok, message = _storage_test(_safe_storage_path(root, allow_equal_root=False))
             (st.success if ok else st.error)(message)
         except Exception as exc:
             st.error(str(exc))
@@ -352,10 +367,7 @@ def _render_storage(st: Any, actor: str) -> None:
         except Exception as exc:
             st.error(str(exc))
 
-    if bool(cfg.get("managed_storage")) and st.button(
-        "↩️ Trả lưu trữ về qlda.env",
-        key="sys_reset_storage_v622",
-    ):
+    if bool(cfg.get("managed_storage")) and st.button("↩️ Trả lưu trữ về qlda.env", key="sys_reset_storage_v622"):
         ss.save_app_settings({"managed_storage": False})
         ss.append_settings_audit(actor, "reset_storage_to_env", ["managed_storage"])
         st.success("Đã trả cấu hình lưu trữ về qlda.env.")
@@ -377,34 +389,23 @@ def _render_performance(st: Any, actor: str) -> None:
     c1, c2, c3 = st.columns(3)
     workers_current = int(float(ss.get_runtime_value("QLDA_CPU_WORKERS", str(min(3, max_workers))) or min(3, max_workers)))
     workers = c1.number_input(
-        "Excel child workers",
-        min_value=1,
-        max_value=max_workers,
-        value=max(1, min(max_workers, workers_current)),
-        step=1,
-        key="sys_workers_v622",
+        "Excel child workers", min_value=1, max_value=max_workers,
+        value=max(1, min(max_workers, workers_current)), step=1, key="sys_workers_v622",
     )
     min_mb = c2.number_input(
-        "File tối thiểu chạy multicore (MB)",
-        min_value=0.0,
-        max_value=512.0,
-        value=float(ss.get_runtime_value("QLDA_PARALLEL_EXCEL_MIN_MB", "2") or 2),
-        step=0.5,
+        "File tối thiểu chạy multicore (MB)", min_value=0.0, max_value=512.0,
+        value=float(ss.get_runtime_value("QLDA_PARALLEL_EXCEL_MIN_MB", "2") or 2), step=0.5,
         key="sys_parallel_mb_v622",
     )
     min_sheets = c3.number_input(
-        "Số sheet tối thiểu chạy multicore",
-        min_value=1,
-        max_value=100,
-        value=int(float(ss.get_runtime_value("QLDA_PARALLEL_MIN_SHEETS", "2") or 2)),
-        step=1,
+        "Số sheet tối thiểu chạy multicore", min_value=1, max_value=100,
+        value=int(float(ss.get_runtime_value("QLDA_PARALLEL_MIN_SHEETS", "2") or 2)), step=1,
         key="sys_parallel_sheets_v622",
     )
-    available_methods = [x for x in ("forkserver", "spawn", "fork") if x]
+    available_methods = ["forkserver", "spawn", "fork"]
     current_method = ss.get_runtime_value("QLDA_MP_START_METHOD", "forkserver")
     method = st.selectbox(
-        "Multiprocessing start method",
-        available_methods,
+        "Multiprocessing start method", available_methods,
         index=available_methods.index(current_method) if current_method in available_methods else 0,
         key="sys_mp_method_v622",
     )
@@ -422,10 +423,7 @@ def _render_performance(st: Any, actor: str) -> None:
         st.success("Đã lưu cấu hình hiệu năng. Các tác vụ Excel mới sẽ sử dụng giá trị mới.")
         st.rerun()
 
-    if bool(cfg.get("managed_performance")) and st.button(
-        "↩️ Trả hiệu năng về qlda.env",
-        key="sys_reset_perf_v622",
-    ):
+    if bool(cfg.get("managed_performance")) and st.button("↩️ Trả hiệu năng về qlda.env", key="sys_reset_perf_v622"):
         ss.save_app_settings({"managed_performance": False})
         ss.append_settings_audit(actor, "reset_performance_to_env", ["managed_performance"])
         st.success("Đã trả hiệu năng về qlda.env.")
@@ -451,7 +449,6 @@ def _render_vps(st: Any, db: Any) -> None:
     c2.metric("RAM", f"{total / (1024 ** 3):.2f} GB" if total else "—")
     c3.metric("RAM đang dùng", f"{used / (1024 ** 3):.2f} GB" if total else "—")
     c4.metric("Disk còn trống", f"{disk.free / (1024 ** 3):.2f} GB")
-
     st.caption(
         f"Host: {socket.gethostname()} · Load 1/5/15 phút: {load[0]:.2f} / {load[1]:.2f} / {load[2]:.2f} · "
         f"Uptime: {_format_uptime(_uptime_seconds())}"
@@ -462,16 +459,11 @@ def _render_vps(st: Any, db: Any) -> None:
     r2.code(f"App commit {_git_commit()}", language=None)
     r3.code(f"Platform {platform.system()} {platform.release()}", language=None)
 
-    db_url = (
-        _text(os.environ.get("DATABASE_URL"))
-        or _text(os.environ.get("QLDA_DATABASE_URL"))
-        or _text(os.environ.get("POSTGRES_URL"))
-    )
+    db_url = _text(os.environ.get("DATABASE_URL")) or _text(os.environ.get("QLDA_DATABASE_URL")) or _text(os.environ.get("POSTGRES_URL"))
     st.text_input("Database (đã che mật khẩu)", value=_sanitize_database_url(db_url), disabled=True)
     if st.button("🧪 Test database", key="sys_db_test_v622"):
         ok, message = _test_database(db)
         (st.success if ok else st.error)(message)
-
     st.info(
         "CPU, RAM, dung lượng đĩa, DATABASE_URL, port dịch vụ, firewall, SSH và Linux service user là "
         "thông số hạ tầng. App chỉ hiển thị/kiểm tra; không cho sửa trực tiếp để tránh tự làm mất kết nối VPS."
@@ -479,32 +471,25 @@ def _render_vps(st: Any, db: Any) -> None:
 
 
 def _render_audit(st: Any) -> None:
-    st.markdown("#### 🧾 Nhật ký thay đổi cài đặt")
     rows = ss.read_settings_audit(150)
+    st.markdown("#### 🧾 Nhật ký thay đổi cài đặt")
     if not rows:
         st.info("Chưa có thay đổi cài đặt được ghi nhận từ giao diện Admin.")
         return
-    table = []
-    for row in rows:
-        table.append(
-            {
-                "UTC": row.get("time_utc", ""),
-                "Admin": row.get("actor", ""),
-                "Thao tác": row.get("action", ""),
-                "Trường thay đổi": ", ".join(row.get("changed_keys") or []),
-            }
-        )
+    table = [
+        {
+            "UTC": row.get("time_utc", ""),
+            "Admin": row.get("actor", ""),
+            "Thao tác": row.get("action", ""),
+            "Trường thay đổi": ", ".join(row.get("changed_keys") or []),
+        }
+        for row in rows
+    ]
     st.dataframe(table, use_container_width=True, hide_index=True)
     st.caption("Nhật ký chỉ lưu tên trường thay đổi, không bao giờ lưu API key hoặc mật khẩu.")
 
 
-def render_system_settings_admin(
-    st: Any,
-    db: Any,
-    *,
-    is_admin: bool = False,
-    actor: str = "",
-) -> None:
+def render_system_settings_admin(st: Any, db: Any, *, is_admin: bool = False, actor: str = "") -> None:
     """Admin-only system console for AI, Google OAuth, storage, app limits and VPS status."""
     if not bool(is_admin):
         st.error("🔒 Cài đặt hệ thống chỉ dành cho Admin.")
@@ -515,7 +500,6 @@ def render_system_settings_admin(
         "V6.22 · Các thay đổi ở đây không sửa dữ liệu nghiệp vụ. Bootstrap secrets như DATABASE_URL, "
         "upload signing secret và SSH vẫn được giữ ngoài app."
     )
-
     tab_ai, tab_google, tab_storage, tab_perf, tab_vps, tab_audit = st.tabs(
         ["🤖 AI", "🔐 Google OAuth", "💾 Lưu trữ", "⚙️ Hiệu năng", "🖥️ VPS", "🧾 Nhật ký"]
     )
