@@ -101,7 +101,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.runtime_core.document_management_vps_ui", "install_document_management_vps_ui"),
     RuntimeFeature("attachment-upload-reopen", RuntimeStage.UI, "qlda.runtime_core.attachment_upload_reopen_fix", "install_attachment_upload_reopen_fix"),
     RuntimeFeature("owner-supplied-materials", RuntimeStage.UI, "qlda.runtime_core.owner_supplied_materials", "install_owner_supplied_material_erp"),
-    RuntimeFeature("finance-title-policy", RuntimeStage.UI, "qlda.runtime_core.finance_title_policy", "install_finance_title_policy"),
+    RuntimeFeature("finance-title-policy", RuntimeStage.UI, "qlda.presentation.streamlit.finance_title_policy", "install_finance_title_policy"),
     RuntimeFeature("project-cost-management", RuntimeStage.UI, "qlda.runtime_core.project_cost_management", "install_project_cost_management"),
     RuntimeFeature("finance-consistency-ui", RuntimeStage.UI, "qlda.runtime_core.finance_consistency", "install_finance_consistency_ui"),
     RuntimeFeature("money-display-format", RuntimeStage.UI, "qlda.presentation.streamlit.money_display", "install_money_display_format"),
