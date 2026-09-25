@@ -39,7 +39,6 @@ ALLOWED_RUNTIME_UI_COMPAT_FEATURES = frozenset(
         "owner-supplied-materials",
         "project-cost-management",
         "finance-consistency-ui",
-        "production-progress-shared-ai",
     }
 )
 
