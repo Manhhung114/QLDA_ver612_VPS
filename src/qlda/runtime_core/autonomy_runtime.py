@@ -16,8 +16,9 @@ from qlda.autonomy.supervisor_data_collector import collect_supervisor_data
 _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
+_ADVANCED: dict[int, Any] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-SUPERVISOR_SCHEMA_VERSION = "V5_AUTO_DATA_NO_PAYMENT_NO_TWIN"
+SUPERVISOR_SCHEMA_VERSION = "V6_ADVANCED_V9_1_TO_V9_6_NO_PAYMENT_NO_TWIN"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -100,7 +101,7 @@ def get_autonomy_platform(
     approve_vo: Callable[..., Any] | None = None,
     force_rebuild: bool = False,
 ) -> AutomationPlatform:
-    """Return one durable V7.7→V9.0 automation platform per DB instance."""
+    """Return one durable V7.7→V9.6 automation platform per DB instance."""
     key = id(db)
     with _LOCK:
         if not force_rebuild and key in _PLATFORMS:
@@ -115,18 +116,33 @@ def get_autonomy_platform(
             approve_ipc=approve_ipc,
             approve_vo=approve_vo,
         )
-        platform = build_platform(handlers=adapters.handlers(), audit_sink=repository.audit)
+
+        # V9.1→V9.6 extends the same service boundary; advanced engines do not get
+        # an alternative database-writing path. Every user/AI-invoked action is a
+        # ToolRegistry handler and therefore retains RBAC, approval and audit gates.
+        from qlda.autonomy.advanced_automation import build_advanced_automation
+
+        advanced = build_advanced_automation(adapters)
+        handlers = dict(adapters.handlers())
+        handlers.update(advanced.handlers())
+        platform = build_platform(handlers=handlers, audit_sink=repository.audit)
         _install_common_ai_planner(platform)
 
         platform.events.subscribe("*", repository.save_event)
         _PLATFORMS[key] = platform
         _REPOSITORIES[key] = repository
+        _ADVANCED[key] = advanced
         return platform
 
 
 def get_autonomy_repository(db) -> AutomationRepository:
     get_autonomy_platform(db)
     return _REPOSITORIES[id(db)]
+
+
+def get_advanced_automation(db):
+    get_autonomy_platform(db)
+    return _ADVANCED[id(db)]
 
 
 def run_project_supervisor(
@@ -136,15 +152,18 @@ def run_project_supervisor(
     actor: str = "AI Supervisor",
     extra_indicators: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run the contractor-isolated supervisor using live data collected by itself.
+    """Run one contractor AI Supervisor with live V7.7→V9.6 data.
 
-    The Supervisor reads schedule, contract, Data Integrity, NCR/RFI/inspection and
-    production-source freshness directly from the selected contractor workspace.
-    Finance/payment amounts are intentionally excluded from Project Health.
+    In addition to schedule/Data Integrity/NCR/RFI/inspection/production, V9.1→V9.6
+    automatically refreshes Contract Obligation Audit, latest IPC↔BOQ reconciliation,
+    deterministic schedule-risk forecast and task-routing proposals. Payment-overdue
+    and Digital Twin remain deliberately absent.
     """
     tenant_id = int(project_id)
     platform = get_autonomy_platform(db)
     repository = get_autonomy_repository(db)
+    advanced = get_advanced_automation(db)
+
     status = platform.tools.execute(
         "get_project_status",
         project_id=tenant_id,
@@ -166,8 +185,6 @@ def run_project_supervisor(
             now=datetime.now(_VN_TZ).replace(tzinfo=None),
         )
     except Exception as exc:
-        # Optional source collection must not make the whole project dashboard fail.
-        # The error is persisted in the snapshot so Admin can inspect it.
         auto_data = {
             "workspace_project_id": tenant_id,
             "collected_at": datetime.now(_VN_TZ).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds"),
@@ -175,19 +192,50 @@ def run_project_supervisor(
             "evidence": {"collector_error": str(exc)},
         }
 
-    # Built-in live indicators are the default. Explicit extras are retained as a
-    # compatibility/plugin extension layer and may intentionally override a field,
-    # except payment overdue which remains forbidden from Project Health.
+    try:
+        advanced_data = advanced.collect_supervisor_data(project_id=tenant_id, actor=actor)
+    except Exception as exc:
+        # Advanced analysis must fail open for the dashboard but fail closed for
+        # conclusions: no synthetic indicators are inserted when evidence is absent.
+        advanced_data = {
+            "project_id": tenant_id,
+            "schema": "advanced_collector_error",
+            "indicators": {},
+            "error": str(exc),
+        }
+
+    # Built-in live indicators are the default. Explicit extras remain a plugin
+    # extension layer; only the historical unsafe payment-overdue field is banned.
     indicators = {
         "data_integrity_score": float(integrity.get("score") or 0),
         "schedule_delay_percent": float((status.get("schedule") or {}).get("delay_percent") or 0),
         "contract_days_remaining": status.get("contract_days_remaining"),
     }
     indicators.update(dict(auto_data.get("indicators") or {}))
+    indicators.update(dict(advanced_data.get("indicators") or {}))
     extra = dict(extra_indicators or {})
     extra.pop("payment_overdue_value", None)
     indicators.update(extra)
     health = platform.supervisor.evaluate(tenant_id, indicators)
+
+    finding_rows = [
+        {
+            "code": x.code,
+            "severity": x.severity.value,
+            "title": x.title,
+            "detail": x.detail,
+            "recommended_action": x.recommended_action,
+        }
+        for x in health.findings
+    ]
+
+    # V9.1 persists a deterministic route proposal for every finding. It does NOT
+    # auto-create tasks unless a later explicit tool call supplies/identifies a
+    # reliable email and asks create_task=True.
+    try:
+        task_routes = advanced.route_findings(tenant_id, finding_rows, actor=actor)
+    except Exception as exc:
+        task_routes = [{"status": "ROUTING_ERROR", "error": str(exc)}]
 
     for finding in health.findings:
         platform.events.publish(
@@ -212,21 +260,14 @@ def run_project_supervisor(
         "workspace_project_id": tenant_id,
         "supervisor_schema": SUPERVISOR_SCHEMA_VERSION,
         "health_score": health.score,
-        "findings": [
-            {
-                "code": x.code,
-                "severity": x.severity.value,
-                "title": x.title,
-                "detail": x.detail,
-                "recommended_action": x.recommended_action,
-            }
-            for x in health.findings
-        ],
+        "findings": finding_rows,
         "proposed_actions": platform.supervisor.proposed_actions(health),
+        "task_routes": task_routes,
         "integrity": integrity,
         "status": status,
         "indicators": indicators,
         "auto_data": auto_data,
+        "advanced_data": advanced_data,
         "extra_indicators": extra,
         "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
@@ -278,6 +319,7 @@ __all__ = [
     "SUPERVISOR_SCHEMA_VERSION",
     "get_autonomy_platform",
     "get_autonomy_repository",
+    "get_advanced_automation",
     "run_project_supervisor",
     "run_daily_supervisor_if_due",
 ]
