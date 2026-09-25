@@ -4,6 +4,12 @@ import unittest
 
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
 from qlda.modules.contractor_data.worker import project_ids_for_supervisor
+from qlda.runtime_core.ai_supervisor_navigation import (
+    AI_NAV_LABEL,
+    HOME_NAV_LABEL,
+    _inject_ai_nav_option,
+    _is_main_navigation,
+)
 
 
 class _Row(dict):
@@ -114,6 +120,22 @@ class ContractorAITenantIsolationTests(unittest.TestCase):
         self.assertIn(102, ids)
         self.assertIn(200, ids)
         self.assertNotIn(1, ids)
+
+    def test_ai_supervisor_is_its_own_main_navigation_item(self):
+        original = [
+            HOME_NAV_LABEL,
+            "📋 Công việc",
+            "🏗️ Thi công",
+            "📁 Hồ sơ",
+            "💰 Tài chính",
+            "📚 Công cụ",
+        ]
+        options = _inject_ai_nav_option(original)
+        self.assertTrue(_is_main_navigation("Nhóm chức năng", original))
+        self.assertEqual(options.count(AI_NAV_LABEL), 1)
+        self.assertEqual(options.index(AI_NAV_LABEL), options.index(HOME_NAV_LABEL) + 1)
+        self.assertEqual(original[0], HOME_NAV_LABEL)
+        self.assertNotIn(AI_NAV_LABEL, original)
 
 
 if __name__ == "__main__":
