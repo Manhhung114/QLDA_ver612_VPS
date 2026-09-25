@@ -65,7 +65,7 @@ def initialize_ai_runtime() -> None:
 
 
 def initialize_runtime() -> None:
-    """Initialize database/business/UI compatibility without legacy AI patches."""
+    """Initialize database/business/UI compatibility without a legacy AI stage."""
     global _UI_READY
     if _UI_READY:
         return
@@ -74,10 +74,17 @@ def initialize_runtime() -> None:
             return
 
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
+        from qlda.presentation.streamlit.legacy_ai_streaming_contract import (
+            install_legacy_ai_streaming_contract,
+        )
 
         apply_streamlit_secrets_to_env()
         initialize_business_runtime()
         install_stage(RuntimeStage.UI)
+        # The source-controlled Streamlit shell still calls ask_project_stream on
+        # the legacy assistant classes. Restore only this presentation contract;
+        # provider execution remains outside RuntimeStage composition.
+        install_legacy_ai_streaming_contract()
         _UI_READY = True
 
 
