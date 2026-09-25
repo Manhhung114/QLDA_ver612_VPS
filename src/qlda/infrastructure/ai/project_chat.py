@@ -34,6 +34,17 @@ _STOPWORDS = {
     "nha", "thau", "cong", "viec", "san", "luong", "tien", "do", "sheet", "worksheet",
     "danh", "gia", "hoan", "thanh", "lap", "dat", "he", "thong", "toan", "bo", "an",
 }
+_CORE_TABLES = (
+    "tasks",
+    "documents",
+    "drawings",
+    "cost_budgets",
+    "payment_tracking",
+    "cost_variations",
+    "material_master",
+    "procurement_schedule",
+    "inventory_inspection",
+)
 
 
 def _norm(value: Any) -> str:
@@ -82,6 +93,58 @@ def _scalar(connection, sql: str, params: tuple[Any, ...], default: Any = 0) -> 
         return default
 
 
+def _project_scope_ids(master: int, labels: dict[int, str]) -> list[int]:
+    """Return the complete management-visible project scope, including master data."""
+    ids: list[int] = []
+    for raw in (int(master), *labels.keys()):
+        value = int(raw or 0)
+        if value > 0 and value not in ids:
+            ids.append(value)
+    return ids or [int(master)]
+
+
+def _scope_has_live_data(connection, master: int, workspace_ids: Sequence[int]) -> bool:
+    """Cheap existence probe used only to recover an empty management workspace.
+
+    Contractor users never reach the recovery branch because ``allow_project_wide``
+    is false for that role. This keeps tenant isolation intact while preventing a
+    management user from receiving a false 'no data' answer merely because the
+    selected contractor workspace is empty and the live data sits on the master
+    project or another authorized contractor workspace.
+    """
+    ids = [int(value) for value in workspace_ids if int(value or 0) > 0]
+    if not ids:
+        return False
+    for table in _CORE_TABLES:
+        if not _table_exists(connection, table):
+            continue
+        count = int(
+            _scalar(
+                connection,
+                f"SELECT COUNT(*) FROM {table} WHERE project_id=ANY(%s)",
+                (ids,),
+                0,
+            )
+            or 0
+        )
+        if count > 0:
+            return True
+    if _table_exists(connection, "contractor_data_records"):
+        count = int(
+            _scalar(
+                connection,
+                """SELECT COUNT(*) FROM contractor_data_records
+                   WHERE master_project_id=%s AND workspace_project_id=ANY(%s)""",
+                (int(master), ids),
+                0,
+            )
+            or 0
+        )
+        if count > 0:
+            return True
+    return False
+
+
 def _resolve_scope(
     connection,
     project_id: int,
@@ -117,16 +180,138 @@ def _resolve_scope(
         except Exception:
             master = selected
 
-    project_wide = bool(allow_project_wide and project_wide_intent(question))
-    if project_wide:
-        ids = [wid for wid in labels if wid > 0]
-        if not ids:
-            ids = [master]
-        return master, list(dict.fromkeys(ids)), labels, True
+    labels.setdefault(int(master), "Dự án tổng")
+    all_ids = _project_scope_ids(master, labels)
+    explicit_project_wide = bool(allow_project_wide and project_wide_intent(question))
+    if explicit_project_wide:
+        return master, all_ids, labels, True
+
+    # Management-safe recovery: if the currently selected workspace has literally
+    # no live business/Data-Hub data but the authorized project does, widen this
+    # read-only chat request to the project scope. CONTRACTOR identities pass
+    # allow_project_wide=False and can therefore never cross their tenant boundary.
+    if allow_project_wide and len(all_ids) > 1:
+        selected_has_data = _scope_has_live_data(connection, master, [selected])
+        if not selected_has_data and _scope_has_live_data(connection, master, all_ids):
+            return master, all_ids, labels, True
+
     return master, [selected], labels, False
 
 
-def _core_context(connection, master: int, workspace_ids: list[int], labels: dict[int, str]) -> list[str]:
+def _task_detail_context(
+    connection,
+    workspace_ids: list[int],
+    labels: dict[int, str],
+    question: str,
+    total_tasks: int,
+) -> list[str]:
+    if total_tasks <= 0 or not _table_exists(connection, "tasks"):
+        return []
+    ids = [int(x) for x in workspace_ids if int(x) > 0]
+    terms = _question_terms(question)
+    qnorm = _norm(question)
+    generic_schedule_intent = any(
+        phrase in qnorm
+        for phrase in (
+            "tien do",
+            "cong viec",
+            "ke hoach",
+            "cham tien do",
+            "critical",
+            "milestone",
+        )
+    )
+    try:
+        rows = connection.execute(
+            """SELECT id,project_id,wbs,name,responsible,start_date,end_date,duration,
+                      planned_progress,actual_progress,actual_override,actual_update_date,
+                      actual_finish_date,status,predecessor,note,critical,total_slack,
+                      resource_names,source_type
+               FROM tasks WHERE project_id=ANY(%s)
+               ORDER BY critical DESC,id DESC LIMIT 6000""",
+            (ids,),
+        ).fetchall()
+    except Exception:
+        try:
+            rows = connection.execute(
+                """SELECT id,project_id,wbs,name,responsible,start_date,end_date,duration,
+                          planned_progress,actual_progress,status,predecessor,note,critical,
+                          total_slack,resource_names,source_type
+                   FROM tasks WHERE project_id=ANY(%s)
+                   ORDER BY critical DESC,id DESC LIMIT 6000""",
+                (ids,),
+            ).fetchall()
+        except Exception:
+            rows = []
+
+    scored: list[tuple[int, dict[str, Any]]] = []
+    all_rows: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        all_rows.append(row)
+        haystack = _norm(
+            " ".join(
+                str(row.get(key) or "")
+                for key in (
+                    "wbs",
+                    "name",
+                    "responsible",
+                    "status",
+                    "note",
+                    "resource_names",
+                    "source_type",
+                )
+            )
+        )
+        score = sum(1 for term in terms if term in haystack)
+        if score > 0:
+            scored.append((score, row))
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            int(item[1].get("critical") or 0),
+            int(item[1].get("id") or 0),
+        ),
+        reverse=True,
+    )
+    if scored:
+        selected = [row for _, row in scored[:40]]
+        lines = ["### CÔNG VIỆC LIVE PHÙ HỢP CÂU HỎI"]
+    elif generic_schedule_intent:
+        selected = all_rows[:40]
+        lines = ["### CÔNG VIỆC LIVE ƯU TIÊN"]
+    else:
+        return [
+            f"[TASK-SEARCH] Có {total_tasks} công việc trong phạm vi nhưng chưa có dòng khớp trực tiếp từ khóa câu hỏi."
+        ]
+
+    for row in selected:
+        wid = int(row.get("project_id") or 0)
+        override = row.get("actual_override")
+        actual = row.get("actual_progress") if override is None else override
+        lines.append(
+            f"[TASK:{row.get('id','')}] {labels.get(wid, f'Workspace {wid}')} | "
+            f"WBS={row.get('wbs','')} | {row.get('name','')} | "
+            f"KH={float(row.get('planned_progress') or 0):.1f}% | TT={float(actual or 0):.1f}% | "
+            f"trạng thái={row.get('status','')} | {row.get('start_date','')} -> {row.get('end_date','')} | "
+            f"phụ trách={row.get('responsible','')} | critical={int(row.get('critical') or 0)} | "
+            f"ghi chú={str(row.get('note') or '')[:240]}"
+        )
+    if len(scored) > len(selected):
+        lines.append(
+            f"[TASK-SEARCH] Còn {len(scored) - len(selected)} công việc khớp chưa đưa nguyên văn vào context do giới hạn prompt."
+        )
+    return lines
+
+
+def _core_context(
+    connection,
+    master: int,
+    workspace_ids: list[int],
+    labels: dict[int, str],
+    question: str,
+) -> list[str]:
     ids = [int(x) for x in workspace_ids if int(x) > 0]
     if not ids:
         return []
@@ -182,6 +367,7 @@ def _core_context(connection, master: int, workspace_ids: list[int], labels: dic
         f"[LIVE-SUMMARY] hồ sơ={documents} | bản vẽ={drawings} | BOQ={boq_rows} dòng | BAC={bac:,.0f} VND | đã thanh toán={paid:,.0f} VND | VO duyệt={vo:,.0f} VND",
         f"[LIVE-SUMMARY] vật tư={materials} | mua sắm={procurements} | nhập/xuất/kiểm định={inventory}",
     ]
+    lines.extend(_task_detail_context(connection, ids, labels, question, tasks))
 
     if _table_exists(connection, "project_contractors") and len(ids) > 1:
         lines.append("### PHẠM VI NHÀ THẦU")
@@ -229,6 +415,48 @@ def _data_hub_context(
         lines.append("[DATA-HUB] Không có record trong đúng phạm vi workspace hiện tại.")
         return lines
 
+    # Put query-relevant evidence before broad group summaries so the important
+    # rows survive the final context-size cap even on large Data Hubs.
+    terms = _question_terms(question)
+    scored: list[tuple[int, dict[str, Any]]] = []
+    if terms:
+        try:
+            rows = connection.execute(
+                """SELECT workspace_project_id,source_name,category,worksheet,record_type,record_ref,
+                          work_item,zone,progress_percent,content,source_row,synced_at
+                   FROM contractor_data_records
+                   WHERE master_project_id=%s AND workspace_project_id=ANY(%s)
+                   ORDER BY synced_at DESC,source_row DESC LIMIT 8000""",
+                params,
+            ).fetchall()
+        except Exception:
+            rows = []
+        for raw in rows:
+            row = dict(raw)
+            haystack = _norm(" ".join(str(row.get(key) or "") for key in (
+                "source_name", "category", "worksheet", "record_type", "work_item", "zone", "content"
+            )))
+            score = sum(1 for term in terms if term in haystack)
+            if score:
+                scored.append((score, row))
+        scored.sort(key=lambda item: (item[0], int(item[1].get("source_row") or 0)), reverse=True)
+        if scored:
+            lines.append("### DATA HUB – DÒNG PHÙ HỢP CÂU HỎI")
+        for _, row in scored[:60]:
+            wid = int(row.get("workspace_project_id") or 0)
+            content = str(row.get("content") or "").replace("\n", " ").strip()
+            if len(content) > 550:
+                content = content[:547] + "..."
+            progress = row.get("progress_percent")
+            progress_text = "" if progress is None else f" | tiến độ={float(progress):.1f}%"
+            lines.append(
+                f"[DATA-HUB-ROW] {labels.get(wid, f'Workspace {wid}')} | worksheet={row.get('worksheet','')} | "
+                f"công tác={row.get('work_item','')} | zone={row.get('zone','')}{progress_text} | "
+                f"dòng={row.get('source_row','')} | {content}"
+            )
+        if not scored:
+            lines.append("[DATA-HUB-SEARCH] Data Hub có dữ liệu nhưng chưa có dòng khớp trực tiếp từ khóa câu hỏi.")
+
     try:
         groups = connection.execute(
             """SELECT workspace_project_id,source_name,worksheet,zone,COUNT(*) AS records,
@@ -238,11 +466,13 @@ def _data_hub_context(
                FROM contractor_data_records
                WHERE master_project_id=%s AND workspace_project_id=ANY(%s)
                GROUP BY workspace_project_id,source_name,worksheet,zone
-               ORDER BY production_points DESC,records DESC LIMIT 120""",
+               ORDER BY production_points DESC,records DESC LIMIT 60""",
             params,
         ).fetchall()
     except Exception:
         groups = []
+    if groups:
+        lines.append("### DATA HUB – TỔNG QUAN NGUỒN / WORKSHEET")
     for row in groups:
         wid = int(row.get("workspace_project_id") or 0)
         avg = row.get("avg_progress")
@@ -251,45 +481,6 @@ def _data_hub_context(
             f"[DATA-HUB] {labels.get(wid, f'Workspace {wid}')} | worksheet={row.get('worksheet','')} | "
             f"zone={row.get('zone','')} | records={int(row.get('records') or 0)} | "
             f"điểm sản lượng={int(row.get('production_points') or 0)} | TB={avg_text} | nguồn={row.get('source_name','')}"
-        )
-
-    terms = _question_terms(question)
-    if not terms:
-        return lines
-    try:
-        rows = connection.execute(
-            """SELECT workspace_project_id,source_name,category,worksheet,record_type,record_ref,
-                      work_item,zone,progress_percent,content,source_row,synced_at
-               FROM contractor_data_records
-               WHERE master_project_id=%s AND workspace_project_id=ANY(%s)
-               ORDER BY synced_at DESC,source_row DESC LIMIT 8000""",
-            params,
-        ).fetchall()
-    except Exception:
-        rows = []
-    scored: list[tuple[int, dict[str, Any]]] = []
-    for raw in rows:
-        row = dict(raw)
-        haystack = _norm(" ".join(str(row.get(key) or "") for key in (
-            "source_name", "category", "worksheet", "record_type", "work_item", "zone", "content"
-        )))
-        score = sum(1 for term in terms if term in haystack)
-        if score:
-            scored.append((score, row))
-    scored.sort(key=lambda item: (item[0], int(item[1].get("source_row") or 0)), reverse=True)
-    if scored:
-        lines.append("### DATA HUB – DÒNG PHÙ HỢP CÂU HỎI")
-    for _, row in scored[:60]:
-        wid = int(row.get("workspace_project_id") or 0)
-        content = str(row.get("content") or "").replace("\n", " ").strip()
-        if len(content) > 550:
-            content = content[:547] + "..."
-        progress = row.get("progress_percent")
-        progress_text = "" if progress is None else f" | tiến độ={float(progress):.1f}%"
-        lines.append(
-            f"[DATA-HUB-ROW] {labels.get(wid, f'Workspace {wid}')} | worksheet={row.get('worksheet','')} | "
-            f"công tác={row.get('work_item','')} | zone={row.get('zone','')}{progress_text} | "
-            f"dòng={row.get('source_row','')} | {content}"
         )
     return lines
 
@@ -300,24 +491,37 @@ def build_live_project_context(
     *,
     workspace_scope: int | None = None,
     allow_project_wide: bool = False,
-    max_chars: int = 24000,
+    max_chars: int = 32000,
 ) -> tuple[str, dict[str, Any]]:
     """Return deterministic live context and resolved scope metadata."""
+    explicit_project_wide = bool(allow_project_wide and project_wide_intent(question))
     with connect() as connection:
         master, ids, labels, project_wide = _resolve_scope(
             connection, int(project_id), workspace_scope, str(question or ""), bool(allow_project_wide)
         )
+        auto_scope_recovery = bool(project_wide and not explicit_project_wide)
+        if auto_scope_recovery:
+            scope_label = "TOÀN DỰ ÁN – TỰ KHÔI PHỤC VÌ WORKSPACE ĐANG CHỌN KHÔNG CÓ DỮ LIỆU"
+        else:
+            scope_label = "TOÀN DỰ ÁN" if project_wide else "WORKSPACE ĐANG CHỌN"
         lines = [
             "# NGỮ CẢNH QLDA LIVE – NGUỒN POSTGRESQL",
-            f"Phạm vi={'TOÀN DỰ ÁN' if project_wide else 'WORKSPACE ĐANG CHỌN'} | master_project_id={master} | workspace_ids={','.join(str(x) for x in ids)}",
+            f"Phạm vi={scope_label} | master_project_id={master} | workspace_ids={','.join(str(x) for x in ids)}",
         ]
-        lines.extend(_core_context(connection, master, ids, labels))
+        if auto_scope_recovery:
+            lines.append(
+                "[SCOPE-RECOVERY] Workspace được chọn không có dữ liệu live. Vì người dùng có quyền quản lý dự án, AI đã mở rộng CHỈ yêu cầu đọc này sang các workspace được phép trong cùng dự án để tránh kết luận sai rằng hệ thống không có dữ liệu."
+            )
+        lines.extend(_core_context(connection, master, ids, labels, str(question or "")))
         lines.extend(_data_hub_context(connection, master, ids, labels, str(question or "")))
     context = "\n".join(lines)
-    return context[: max(4000, min(int(max_chars), 50000))], {
+    cap = max(6000, min(int(max_chars), 50000))
+    return context[:cap], {
         "master_project_id": master,
         "workspace_ids": ids,
         "project_wide": project_wide,
+        "auto_scope_recovery": auto_scope_recovery,
+        "scope_reason": "empty_workspace_recovered" if auto_scope_recovery else "explicit_project_wide" if explicit_project_wide else "selected_workspace",
     }
 
 
@@ -347,7 +551,9 @@ def ask_project_chat(
         "Dữ liệu LIVE dưới đây có độ ưu tiên cao hơn lịch sử hội thoại và mọi snapshot cũ.\n\n"
         f"{context}\n\n"
         "Chỉ kết luận từ các dòng LIVE ở trên. Nếu DATA HUB có dữ liệu thì không được kết luận 'hệ thống không có dữ liệu' chỉ vì bảng tasks bằng 0. "
-        "Khi viện dẫn số liệu sản lượng, nêu rõ worksheet/zone/công tác hoặc nhãn DATA-HUB tương ứng."
+        "Nếu có TASK phù hợp câu hỏi thì phải dùng các dòng TASK đó khi đánh giá tiến độ. "
+        "Khi viện dẫn số liệu sản lượng, nêu rõ worksheet/zone/công tác hoặc nhãn DATA-HUB/TASK tương ứng. "
+        "Nếu có [SCOPE-RECOVERY], phải nói rõ dữ liệu được tìm thấy sau khi mở rộng phạm vi quản lý hợp lệ; không được nói workspace ban đầu có dữ liệu."
     )
     source_refs = [
         f"workspace:{wid}" for wid in list(scope.get("workspace_ids") or [])
