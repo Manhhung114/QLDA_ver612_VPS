@@ -10,6 +10,33 @@ from qlda.application.ai.ports import ToolChoice, ToolDefinition
 from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
 
 
+def _usage_value(obj: Any, *names: str) -> int:
+    for name in names:
+        try:
+            value = getattr(obj, name)
+        except Exception:
+            try:
+                value = obj.get(name) if isinstance(obj, dict) else None
+            except Exception:
+                value = None
+        try:
+            if value is not None:
+                return max(0, int(value))
+        except Exception:
+            pass
+    return 0
+
+
+def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
+    """Estimate cost only from operator-configured rates; never hard-code pricing."""
+    try:
+        in_rate = float(os.environ.get("QLDA_AI_COST_INPUT_USD_PER_1M", "0") or 0)
+        out_rate = float(os.environ.get("QLDA_AI_COST_OUTPUT_USD_PER_1M", "0") or 0)
+    except Exception:
+        return 0.0
+    return max(0.0, (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000.0)
+
+
 class NativeToolCallingAdapter:
     """Provider-native function/tool calling with no database execution authority."""
 
@@ -35,9 +62,13 @@ class NativeToolCallingAdapter:
         started = time.perf_counter()
         try:
             if self.provider in {"openai", "gpt"}:
-                choices, model = self._openai(objective, tools, context=context, max_steps=max_steps)
+                choices, model, input_tokens, output_tokens = self._openai(
+                    objective, tools, context=context, max_steps=max_steps
+                )
             elif self.provider in {"gemini", "google"}:
-                choices, model = self._gemini(objective, tools, context=context, max_steps=max_steps)
+                choices, model, input_tokens, output_tokens = self._gemini(
+                    objective, tools, context=context, max_steps=max_steps
+                )
             else:
                 raise RuntimeError(f"AI Planner provider không hỗ trợ: {self.provider}")
             safe = [choice for choice in choices if choice.tool_name in allowed][: max(1, int(max_steps))]
@@ -54,6 +85,9 @@ class NativeToolCallingAdapter:
                 "tool_arguments": {str(i + 1): x.arguments for i, x in enumerate(safe)},
                 "decision_reason": " | ".join(x.reason for x in safe)[:4000],
                 "latency_ms": int((time.perf_counter() - started) * 1000),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "estimated_cost_usd": _estimate_cost(input_tokens, output_tokens),
                 "success": True,
             })
             return safe
@@ -88,7 +122,7 @@ class NativeToolCallingAdapter:
         *,
         context: dict[str, Any] | None,
         max_steps: int,
-    ) -> tuple[list[ToolChoice], str]:
+    ) -> tuple[list[ToolChoice], str, int, int]:
         from openai import OpenAI
 
         key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
@@ -125,7 +159,13 @@ class NativeToolCallingAdapter:
                 break
         if not choices:
             raise RuntimeError("OpenAI không trả function call")
-        return choices, model
+        usage = getattr(response, "usage", None)
+        return (
+            choices,
+            model,
+            _usage_value(usage, "input_tokens", "prompt_tokens"),
+            _usage_value(usage, "output_tokens", "completion_tokens"),
+        )
 
     def _gemini(
         self,
@@ -134,7 +174,7 @@ class NativeToolCallingAdapter:
         *,
         context: dict[str, Any] | None,
         max_steps: int,
-    ) -> tuple[list[ToolChoice], str]:
+    ) -> tuple[list[ToolChoice], str, int, int]:
         from google import genai
         from google.genai import types
 
@@ -144,19 +184,27 @@ class NativeToolCallingAdapter:
         model = str(os.environ.get("QLDA_AUTONOMY_GEMINI_MODEL") or os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash").strip()
         if model.lower() in {"auto", "default", ""}:
             model = "gemini-2.5-flash"
-        declarations = []
-        for tool in tools:
-            declarations.append(
-                types.FunctionDeclaration(
-                    name=tool.name,
-                    description=tool.description,
-                    parameters_json_schema=tool.parameters_schema or {"type": "object", "properties": {}},
-                )
+        declarations = [
+            types.FunctionDeclaration(
+                name=tool.name,
+                description=tool.description,
+                parameters_json_schema=tool.parameters_schema or {"type": "object", "properties": {}},
             )
+            for tool in tools
+        ]
+        config_kwargs: dict[str, Any] = {
+            "tools": [types.Tool(function_declarations=declarations)],
+        }
+        try:
+            config_kwargs["tool_config"] = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+            )
+        except Exception:
+            pass
         response = genai.Client(api_key=key).models.generate_content(
             model=model,
             contents=self._instruction(objective, context),
-            config=types.GenerateContentConfig(tools=[types.Tool(function_declarations=declarations)]),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
         calls = getattr(response, "function_calls", None) or []
         choices: list[ToolChoice] = []
@@ -175,7 +223,13 @@ class NativeToolCallingAdapter:
             )
         if not choices:
             raise RuntimeError("Gemini không trả function call")
-        return choices, model
+        usage = getattr(response, "usage_metadata", None)
+        return (
+            choices,
+            model,
+            _usage_value(usage, "prompt_token_count", "input_tokens"),
+            _usage_value(usage, "candidates_token_count", "output_tokens"),
+        )
 
 
 __all__ = ["NativeToolCallingAdapter"]
