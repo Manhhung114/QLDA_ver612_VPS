@@ -114,7 +114,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("autonomy-overview", RuntimeStage.UI, "qlda.presentation.streamlit.autonomy_overview", "install_autonomy_overview_patch"),
     RuntimeFeature("advanced-automation-ui", RuntimeStage.UI, "qlda.presentation.streamlit.advanced_automation", "install_advanced_automation_ui"),
     RuntimeFeature("ai-supervisor-navigation", RuntimeStage.UI, "qlda.presentation.streamlit.ai_supervisor_navigation", "install_ai_supervisor_navigation"),
-    RuntimeFeature("contractor-data-admin-visibility", RuntimeStage.UI, "qlda.runtime_core.contractor_data_admin_visibility", "install_contractor_data_admin_visibility"),
+    RuntimeFeature("contractor-data-admin-visibility", RuntimeStage.UI, "qlda.presentation.streamlit.contractor_data_admin_visibility", "install_contractor_data_admin_visibility"),
 )
 
 _LOCK = RLock()
