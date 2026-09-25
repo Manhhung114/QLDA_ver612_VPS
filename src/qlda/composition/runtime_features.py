@@ -97,7 +97,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.presentation.streamlit.expander_policy", "install_expanders_default_collapsed"),
     RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.presentation.streamlit.document_selection_autopen", "install_document_selection_autopen"),
     RuntimeFeature("production-progress-overview", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_overview", "install_production_progress_overview_patch"),
-    RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.runtime_core.contractor_data_shared_ai", "install_production_progress_shared_ai_ui"),
+    RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_shared", "install_production_progress_shared_ai_ui"),
     RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.presentation.streamlit.multiselect_tag_style", "install_multiselect_tag_style_patch"),
     RuntimeFeature("production-progress-source-exact", RuntimeStage.UI, "qlda.presentation.streamlit.production_progress_source_exact", "install_production_progress_source_exact"),
     RuntimeFeature("autonomy-overview", RuntimeStage.UI, "qlda.presentation.streamlit.autonomy_overview", "install_autonomy_overview_patch"),
