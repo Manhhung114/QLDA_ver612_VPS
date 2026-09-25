@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tools.architecture_guard import (
+    check_ai_boundary,
     check_layer_boundaries,
     check_no_dynamic_source_execution,
     check_no_new_patch_debt,
@@ -18,6 +19,9 @@ class ArchitectureBoundaryTests(unittest.TestCase):
 
     def test_domain_and_application_do_not_depend_on_runtime_core(self):
         self.assertEqual(check_layer_boundaries(), [])
+
+    def test_ai_boundary_and_native_planner_are_locked(self):
+        self.assertEqual(check_ai_boundary(), [])
 
     def test_materialized_streamlit_shell_cannot_grow(self):
         self.assertEqual(check_streamlit_shell_frozen(), [])
