@@ -3,46 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 
-PATCH_MARKER = "V6.22 ADMIN SETTINGS RUNTIME BRIDGE V2"
+PATCH_MARKER = "V6.22 ADMIN SETTINGS RUNTIME BRIDGE V3-NO-AI"
 
 
 def install_runtime_settings_bridge() -> None:
-    """Route mutable VPS settings through settings_store without touching bootstrap secrets.
+    """Route non-AI mutable VPS settings through the legacy settings store.
 
-    The bridge is deliberately narrow. DATABASE_URL, auth/upload signing secrets,
-    service ports, SSH and systemd controls remain environment-only values.
+    AI settings are now resolved natively by
+    ``qlda.infrastructure.ai.provider_settings``. This compatibility bridge is
+    intentionally limited to storage/performance slices that have not yet been
+    migrated out of ``runtime_core``.
     """
     import qlda.runtime_core.settings_store as ss
-    # AI assistants historically construct provider settings from environment
-    # variables. Patch those constructors so Admin-managed encrypted settings are
-    # honored by every project/file/contract AI call while preserving env fallback.
-    try:
-        import qlda.runtime_core.ai_service as ai
-        if not getattr(ai, "_qlda_admin_settings_bridge_installed", False):
-            def _openai_from_runtime(cls):
-                value = ss.get_openai_runtime_settings()
-                return cls(
-                    api_key=str(value.get("api_key") or "").strip(),
-                    model=str(value.get("model") or "gpt-5-mini").strip() or "gpt-5-mini",
-                    use_web=bool(value.get("use_web", False)),
-                )
-
-            def _gemini_from_runtime(cls):
-                value = ss.get_gemini_runtime_settings()
-                return cls(
-                    api_key=str(value.get("api_key") or "").strip(),
-                    model=str(value.get("model") or "auto").strip() or "auto",
-                    use_web=bool(value.get("use_web", False)),
-                )
-
-            ai.AISettings.from_env = classmethod(_openai_from_runtime)
-            ai.GeminiSettings.from_env = classmethod(_gemini_from_runtime)
-            ai._qlda_admin_settings_bridge_installed = True
-            ai._qlda_admin_settings_bridge_marker = PATCH_MARKER
-    except Exception:
-        # The file upload service does not need the AI module. Failure to import
-        # an optional provider must not prevent local file service startup.
-        pass
 
     try:
         import qlda.runtime_core.local_vps_backend as lb
@@ -54,8 +26,6 @@ def install_runtime_settings_bridge() -> None:
             lb._qlda_admin_settings_bridge_installed = True
             lb._qlda_admin_settings_bridge_marker = PATCH_MARKER
     except Exception:
-        # Streamlit deployments that do not use the local VPS backend must still
-        # be able to start and use AI/settings normally.
         pass
 
     try:
@@ -73,7 +43,7 @@ def install_runtime_settings_bridge() -> None:
                     value = float(ss.get_runtime_value(name, str(default)))
                 except Exception:
                     value = float(default)
-                return max(float(minimum), min(float(maximum), value))
+                return max(float(minimum), min(int(maximum), value))
 
             original_start_method = mc._start_method
 
@@ -102,11 +72,6 @@ def runtime_bridge_status() -> dict[str, Any]:
         "local_vps": False,
         "multicore_excel": False,
     }
-    try:
-        import qlda.runtime_core.ai_service as ai
-        out["ai"] = bool(getattr(ai, "_qlda_admin_settings_bridge_installed", False))
-    except Exception:
-        pass
     try:
         import qlda.runtime_core.local_vps_backend as lb
         out["local_vps"] = bool(getattr(lb, "_qlda_admin_settings_bridge_installed", False))
