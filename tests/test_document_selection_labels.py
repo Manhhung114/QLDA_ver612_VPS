@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qlda.runtime_core.document_management_uniform_interaction import (
+from qlda.presentation.streamlit.document_management_uniform_interaction import (
     _document_option_label,
     _drawing_option_label,
 )
