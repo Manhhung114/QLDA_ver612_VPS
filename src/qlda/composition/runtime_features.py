@@ -45,14 +45,10 @@ class RuntimeFeature:
         return fn
 
 
-# Order is intentional and therefore source-controlled. It replaces the old
-# nested monkey-patch order hidden in runtime_core.__init__ + bootstrap.py.
 FEATURES: tuple[RuntimeFeature, ...] = (
-    # Data ingestion semantics are required by Streamlit *and* background workers.
     RuntimeFeature("contractor-data-complete-rows", RuntimeStage.DATA, "qlda.runtime_core.contractor_data_complete_rows", "install_contractor_data_complete_rows"),
     RuntimeFeature("contractor-data-source-semantics", RuntimeStage.DATA, "qlda.runtime_core.contractor_data_source_semantics", "install_contractor_data_source_semantics"),
 
-    # Business/runtime compatibility boundary.
     RuntimeFeature("runtime-optimizations", RuntimeStage.BUSINESS, "qlda.runtime_core.runtime_optimizations", "install_runtime"),
     RuntimeFeature("local-vps-runtime", RuntimeStage.BUSINESS, "qlda.runtime_core.local_runtime", "install_local_vps_runtime"),
     RuntimeFeature("runtime-settings-bridge", RuntimeStage.BUSINESS, "qlda.runtime_core.runtime_settings_bridge", "install_runtime_settings_bridge"),
@@ -78,9 +74,6 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("boq-claim-price-recovery", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_recovery", "install_boq_claim_price_recovery"),
     RuntimeFeature("boq-claim-price-header-guard", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_header_guard", "install_boq_claim_price_header_guard"),
 
-    # AI composition. Official Data Hub semantics are installed both before and
-    # after context wrapping, matching the proven production order without
-    # replacing initialize_ai_runtime itself.
     RuntimeFeature("contractor-data-official-ai-pre", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
     RuntimeFeature("contract-ai-large-pdf", RuntimeStage.AI, "qlda.runtime_core.contract_ai_large_pdf", "install_contract_ai_large_pdf_v622"),
     RuntimeFeature("gemini-resilience", RuntimeStage.AI, "qlda.runtime_core.gemini_resilience", "install_gemini_resilience"),
@@ -104,8 +97,6 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("contractor-data-shared-ai", RuntimeStage.AI, "qlda.runtime_core.contractor_data_shared_ai", "install_contractor_data_shared_ai_context"),
     RuntimeFeature("contractor-data-official-ai-post", RuntimeStage.AI, "qlda.runtime_core.contractor_data_official_ai", "install_contractor_data_official_ai"),
 
-    # Streamlit presentation composition. The order is visible, testable and
-    # deterministic; Admin visibility stays last by design.
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.runtime_core.upload_ui_200mb_policy", "install_upload_ui_200mb_policy"),
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.runtime_core.document_management_vps_ui", "install_document_management_vps_ui"),
     RuntimeFeature("attachment-upload-reopen", RuntimeStage.UI, "qlda.runtime_core.attachment_upload_reopen_fix", "install_attachment_upload_reopen_fix"),
@@ -114,11 +105,11 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("project-cost-management", RuntimeStage.UI, "qlda.runtime_core.project_cost_management", "install_project_cost_management"),
     RuntimeFeature("finance-consistency-ui", RuntimeStage.UI, "qlda.runtime_core.finance_consistency", "install_finance_consistency_ui"),
     RuntimeFeature("money-display-format", RuntimeStage.UI, "qlda.runtime_core.money_display_format", "install_money_display_format"),
-    RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.runtime_core.ui_expander_default_collapsed", "install_expanders_default_collapsed"),
+    RuntimeFeature("expander-default-collapsed", RuntimeStage.UI, "qlda.presentation.streamlit.expander_policy", "install_expanders_default_collapsed"),
     RuntimeFeature("document-selection-autopen", RuntimeStage.UI, "qlda.runtime_core.document_selection_autopen", "install_document_selection_autopen"),
     RuntimeFeature("production-progress-overview", RuntimeStage.UI, "qlda.runtime_core.production_progress_overview_patch", "install_production_progress_overview_patch"),
     RuntimeFeature("production-progress-shared-ai", RuntimeStage.UI, "qlda.runtime_core.contractor_data_shared_ai", "install_production_progress_shared_ai_ui"),
-    RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.runtime_core.multiselect_tag_style", "install_multiselect_tag_style_patch"),
+    RuntimeFeature("multiselect-tag-style", RuntimeStage.UI, "qlda.presentation.streamlit.multiselect_tag_style", "install_multiselect_tag_style_patch"),
     RuntimeFeature("production-progress-source-exact", RuntimeStage.UI, "qlda.runtime_core.production_progress_source_exact", "install_production_progress_source_exact"),
     RuntimeFeature("autonomy-overview", RuntimeStage.UI, "qlda.runtime_core.autonomy_overview_patch", "install_autonomy_overview_patch"),
     RuntimeFeature("advanced-automation-ui", RuntimeStage.UI, "qlda.runtime_core.advanced_automation_ui", "install_advanced_automation_ui"),
@@ -146,7 +137,6 @@ def install_stage(stage: RuntimeStage | str) -> tuple[str, ...]:
 
 
 def feature_status() -> dict[str, object]:
-    """Return a deterministic snapshot useful for diagnostics and tests."""
     with _LOCK:
         return {
             "declared": tuple(feature.name for feature in FEATURES),
