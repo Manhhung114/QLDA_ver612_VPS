@@ -147,7 +147,7 @@ def run_daily_supervisor_pass(db) -> list[dict[str, Any]]:
     if (now.hour, now.minute) < (6, 20):
         return []
 
-    from qlda.runtime_core.autonomy_runtime import run_daily_supervisor_if_due
+    from qlda.autonomy.runtime import run_daily_supervisor_if_due
 
     results: list[dict[str, Any]] = []
     for workspace_id in project_ids_for_supervisor(db):
