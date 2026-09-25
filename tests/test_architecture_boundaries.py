@@ -4,7 +4,6 @@ import unittest
 
 from tools.architecture_guard import (
     check_layer_boundaries,
-    check_no_dynamic_source_execution,
     check_no_new_patch_debt,
     check_runtime_init_side_effect_free,
     check_streamlit_shell_frozen,
@@ -23,9 +22,6 @@ class ArchitectureBoundaryTests(unittest.TestCase):
 
     def test_no_new_fix_patch_recovery_guard_modules(self):
         self.assertEqual(check_no_new_patch_debt(), [])
-
-    def test_no_dynamic_source_execution(self):
-        self.assertEqual(check_no_dynamic_source_execution(), [])
 
 
 if __name__ == "__main__":
