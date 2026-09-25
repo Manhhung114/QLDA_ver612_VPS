@@ -45,4 +45,4 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=8s --start-period=30s --retries=3 \
   CMD curl --fail --silent --show-error --max-time 8 http://127.0.0.1:8501/_stcore/health || exit 1
 
-CMD ["streamlit", "run", "src/qlda/presentation/streamlit/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+CMD ["streamlit", "run", "src/qlda/presentation/streamlit/main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
