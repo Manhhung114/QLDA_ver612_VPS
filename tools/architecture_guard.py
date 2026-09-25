@@ -27,7 +27,6 @@ ALLOWED_DEBT_FILENAMES = frozenset(
         "boq_claim_price_header_guard.py",
         "boq_claim_price_recovery.py",
         "claim_material_period_guard.py",
-        "contractor_access_patch.py",
         "default_workspace_admin_guard.py",
         "ipc_claim_number_fix.py",
         "ipc_claim_patch.py",

@@ -9,6 +9,7 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | AI Supervisor navigation | `qlda.presentation.streamlit.ai_supervisor_navigation` | **Đã migrate khỏi runtime_core** | Composition gọi trực tiếp presentation owner; runtime module cũ đã xóa |
 | Multiselect visual policy | `qlda.presentation.streamlit.multiselect_tag_style` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
 | Expander behavior policy | `qlda.presentation.streamlit.expander_policy` | **Đã migrate khỏi runtime_core** | Chỉ còn presentation code; runtime module cũ đã xóa |
+| Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller và không còn trong composition baseline |
 | AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
@@ -31,8 +32,11 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 - `app.py` legacy không được tăng kích thước;
 - không được thêm file `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` mới trong `runtime_core`;
 - UI feature mới không được sở hữu bởi `runtime_core`;
-- không cho phép `exec()` / `eval()` trong packaged source;
+- không cho phép `exec()` / `eval()` trong packaged source ngoài đúng một debt IPC đã khóa;
 - BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
+
+Các regression cleanup lịch sử `test_cleanup_v1`, `test_cleanup_v2*` đã được hợp nhất thành
+`tests/test_cleanup_invariants.py` để giữ cùng invariant nhưng bỏ file test theo phiên bản.
 
 ## Thứ tự ưu tiên
 
@@ -48,6 +52,7 @@ architecture CI, critical-domain CI.
 - AI Supervisor navigation — hoàn tất.
 - Multiselect style policy — hoàn tất.
 - Expander behavior policy — hoàn tất.
+- Contractor access source patch cũ — đã xóa; runtime dùng `contractor_access_control.py`.
 - Autonomy runtime — native owner đã có; còn facade caller cũ.
 - Settings/Google OAuth infrastructure — tiếp theo.
 
@@ -87,8 +92,11 @@ Không xóa module cũ chỉ vì code native đã tồn tại. Chỉ xóa khi:
 2. focused regression xanh;
 3. Native Regression xanh;
 4. Docker Check xanh;
-5. deploy/healthcheck production đã soak ổn định;
+5. deploy/healthcheck production đã soak ổn định đối với module đang tham gia runtime;
 6. rollback không phụ thuộc module đó.
+
+Các file patch đã rời khỏi composition và không có production caller có thể được xóa như dead source,
+nhưng phải đồng thời giảm baseline trong Architecture Guard để CI không che giấu nợ cũ.
 
 ## Nguyên tắc chống big-bang rewrite
 
