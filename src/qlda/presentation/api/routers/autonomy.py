@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from qlda.bootstrap import get_application
 from qlda.presentation.api.dependencies import Principal, require_roles
 from qlda.modules.contractor_data.worker import build_db
-from qlda.runtime_core.autonomy_runtime import (
+from qlda.autonomy.runtime import (
     get_autonomy_platform,
     get_autonomy_repository,
     run_project_supervisor,
