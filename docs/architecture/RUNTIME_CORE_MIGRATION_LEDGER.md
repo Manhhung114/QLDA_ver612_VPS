@@ -9,13 +9,15 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 | AI Supervisor overview/navigation/automation | `qlda.presentation.streamlit.*` | **Hoàn tất** | Composition gọi trực tiếp presentation owner |
 | UI policies (money/expander/multiselect/finance title/upload) | `qlda.presentation.streamlit.*` | **Hoàn tất** | Runtime không còn sở hữu UI feature |
 | Document VPS / attachment reopen / selection | `qlda.presentation.streamlit.*` | **Hoàn tất owner** | Runtime compatibility owners đã xóa; business/storage services giữ nguyên |
-| Production overview / source-exact / shared view | `qlda.presentation.streamlit.*` | **Hoàn tất owner** | Overview và source-exact đã rời runtime; shared AI context vẫn tách riêng ở runtime cho tới P2 AI migration |
+| Production overview / source-exact / shared view | `qlda.presentation.streamlit.*` | **Hoàn tất owner** | Overview và source-exact đã rời runtime; shared AI context cũ chỉ còn compatibility trong strangler |
 | Owner-supplied material UI | `qlda.presentation.streamlit.owner_supplied_materials_ui` | **Hoàn tất owner** | Nghiệp vụ/ledger tạm thời còn ở runtime; UI installer đã rời runtime |
 | Project Cost UI | `qlda.presentation.streamlit.project_cost_management_ui` | **Hoàn tất owner** | Công thức PMBOK/ledger tạm thời còn ở runtime; UI installer đã rời runtime |
 | Finance consistency UI | `qlda.presentation.streamlit.finance_consistency_ui` | **Hoàn tất owner** | Core finance policy còn ở runtime cho tới P3; presentation installer riêng |
 | Contractor access source patch | `qlda.runtime_core.contractor_access_control` | **Đã xóa patch nguồn cũ** | `contractor_access_patch.py` không còn production caller |
-| AI context / provider (`ai_*`, `contract_ai_*`) | `application/ai` + `infrastructure/ai` | Chờ | Tách context builder khỏi provider/network adapter |
-| Contractor Data Hub AI provider | application port + infrastructure adapter | **Ưu tiên tiếp theo** | Xóa dependency cuối cùng từ application sang runtime_core |
+| AI application boundary | `qlda.application.ai` | **Hoàn tất native boundary** | Context/retrieval/tool/telemetry contracts không import `runtime_core` |
+| AI provider/network + RAG | `qlda.infrastructure.ai` | **Hoàn tất native owner; legacy engine cô lập** | OpenAI/Gemini adapter, embeddings, pgvector/lexical retrieval, telemetry và native tool-calling ở infrastructure; provider engine cũ chỉ còn nằm sau `legacy_provider` compatibility adapter |
+| Contractor Data Hub AI provider | application port + infrastructure adapter | **Hoàn tất dependency cleanup** | Application service không còn import `runtime_core`; RAG index chạy theo `workspace_project_id` |
+| AI planner/evaluation | `qlda.autonomy` + `application.ai.evaluation` | **Hoàn tất hardening** | Native function calling là mặc định; text JSON chỉ opt-in fallback; plan_id/tool/reason được audit; retrieval/planner eval chạy deterministic trong CI |
 | BOQ / IPC / VO business semantics | `domain/commercial` + `application/commercial` | Chờ | Khóa regression công thức trước khi di chuyển |
 | `contract_management.py`, `contract_duration.py` | `domain/contracts` + `application/contracts` | Chờ | Domain giữ deadline/rule, UI chỉ render |
 | `work_tasks_v1.py`, routing/email | `domain/tasks` + `application/tasks` + `infrastructure/notifications` | Chờ | Không gửi mail từ domain; giữ audit/idempotency |
@@ -36,7 +38,10 @@ migration có thứ tự, thay vì tiếp tục vá lỗi theo sự cố.
 - **không còn bất kỳ ngoại lệ runtime-owned UI feature nào**: mọi feature stage `UI` trong composition phải nằm dưới `qlda.presentation`;
 - các compatibility module đã retire không được tạo lại hoặc import lại;
 - không cho phép `exec()` / `eval()` trong packaged source ngoài đúng một debt IPC đã khóa;
-- BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng.
+- BOQ/IPC/VO/Schedule/Contract/Autonomy có workflow regression riêng;
+- AI planner không còn regex JSON extraction; native tool calling chỉ nhận tool đã đăng ký;
+- RAG retrieval và operational index luôn mang `workspace_project_id` + `source_ref` để kiểm tra tenant leakage/provenance;
+- telemetry AI lưu request/plan/tool/reason/latency/token/cost-estimate theo workspace khi dữ liệu tương ứng có sẵn.
 
 Các regression cleanup lịch sử `test_cleanup_v1`, `test_cleanup_v2*` đã được hợp nhất thành
 `tests/test_cleanup_invariants.py` để giữ cùng invariant nhưng bỏ file test theo phiên bản.
@@ -67,16 +72,27 @@ business/persistence logic chưa được gọi là presentation owner nữa và
 
 ### P2 — application/domain/infrastructure boundaries
 
-Ưu tiên theo thứ tự:
+Các slice AI được hoàn tất theo strangler, không big-bang:
 
-1. Xóa dependency cuối cùng `application/contractor_data_hub/service.py -> runtime_core` bằng AI provider port + infrastructure adapter.
-2. Settings/Google OAuth về `infrastructure/settings` và `infrastructure/google`.
-3. Tasks/routing/email về `domain/tasks`, `application/tasks`, `infrastructure/notifications`.
-4. Contract management về `domain/contracts` + `application/contracts`.
-5. Contractor workspace/access về `domain/access` + `application/access`.
-6. Repository/store về `infrastructure/postgres`.
-7. AI contexts/providers về `application/ai` + `infrastructure/ai`.
-8. Tiếp tục tách `app.py` theo navigation page.
+1. `application/ai`: context/retrieval/tool-calling/telemetry/evaluation ports.
+2. `infrastructure/ai`: provider adapter, embeddings, pgvector + lexical fallback, provenance index, durable telemetry.
+3. Autonomy planner: native OpenAI/Gemini function calling từ schema ToolRegistry; deterministic fallback vẫn giữ.
+4. Contractor Data Hub: background index theo từng contractor workspace; chat có operational evidence index throttle/fail-open.
+5. PDF text/vision giữ SHA/file-identity cache hiện hữu để tránh scan lại file không đổi.
+
+Phần provider engine cũ trong `runtime_core.ai_service` **không còn là application boundary**; nó được cô lập sau
+`infrastructure.ai.legacy_provider` để các compatibility AI-context installers cũ tiếp tục chạy trong giai đoạn
+strangler. Chỉ xóa engine này khi tất cả installer/context cũ đã có native replacement + regression tương ứng;
+không xóa nóng vì sẽ làm mất PDF/deep-scan/context production đang sử dụng.
+
+Các ưu tiên P2 còn lại:
+
+1. Settings/Google OAuth về `infrastructure/settings` và `infrastructure/google`.
+2. Tasks/routing/email về `domain/tasks`, `application/tasks`, `infrastructure/notifications`.
+3. Contract management về `domain/contracts` + `application/contracts`.
+4. Contractor workspace/access về `domain/access` + `application/access`.
+5. Repository/store về `infrastructure/postgres`.
+6. Tiếp tục tách `app.py` theo navigation page.
 
 ### P3 — tài chính/commercial rủi ro cao
 
@@ -102,7 +118,10 @@ Mỗi đợt migration phải làm ít nhất một chỉ số tốt hơn và kh
 - số import `qlda.runtime_core` từ code native giảm;
 - focused regression coverage tăng;
 - số file tên `*_fix.py`, `*_patch.py`, `*_recovery.py`, `*_guard.py` không tăng;
-- số UI feature còn do `runtime_core` sở hữu = **0** và không được tăng lại.
+- số UI feature còn do `runtime_core` sở hữu = **0** và không được tăng lại;
+- AI retrieval tenant leakage = **0**;
+- AI planner unknown/forbidden tool selection = **0** sau validation;
+- AI request latency/token/cost-estimate có audit trail theo workspace.
 
 ## Quy tắc xóa compatibility
 
