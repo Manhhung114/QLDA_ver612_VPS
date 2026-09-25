@@ -7,7 +7,7 @@ from pathlib import Path
 
 from qlda.autonomy.advanced_automation import AdvancedAutomation
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
-from qlda.runtime_core.autonomy_runtime import get_autonomy_platform, run_project_supervisor
+from qlda.autonomy.runtime import get_autonomy_platform, run_project_supervisor
 from qlda.runtime_core.project_store import CloudDatabase
 
 
