@@ -64,6 +64,7 @@ RETIRED_MODULES = {
     "qlda.runtime_core.finance_title_policy": RUNTIME / "finance_title_policy.py",
     "qlda.runtime_core.document_selection_autopen": RUNTIME / "document_selection_autopen.py",
     "qlda.runtime_core.contractor_data_admin_visibility": RUNTIME / "contractor_data_admin_visibility.py",
+    "qlda.runtime_core.document_management_uniform_interaction": RUNTIME / "document_management_uniform_interaction.py",
 }
 
 # One legacy IPC compatibility module still recompiles a materialized function.
