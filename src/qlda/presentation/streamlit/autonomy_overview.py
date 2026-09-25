@@ -134,7 +134,7 @@ def _select_ai_tenant(st, db, project_id: int, *, is_admin: bool) -> tuple[int, 
 
 def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -> None:
     """Contractor-isolated V7.7→V9 AI control center."""
-    from qlda.runtime_core.autonomy_runtime import (
+    from qlda.autonomy.runtime import (
         SUPERVISOR_SCHEMA_VERSION,
         get_autonomy_platform,
         get_autonomy_repository,
@@ -167,8 +167,6 @@ def render_autonomy_control_center(st, db, project_id: int, *, ui_module=None) -
         and str(payload.get("supervisor_schema") or "") != SUPERVISOR_SCHEMA_VERSION
     )
     if legacy_snapshot:
-        # Old snapshots used unpaid balance as payment-overdue and may contain the
-        # false warning that triggered this correction. Never render them as current.
         payload = None
 
     title = "### 🧠 AI Project Supervisor"
