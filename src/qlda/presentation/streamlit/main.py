@@ -8,18 +8,23 @@ from __future__ import annotations
 # architecture guards no longer need to treat the 300+ KB legacy shell as the
 # application entrypoint.
 #
-# New pages/features must be implemented outside ``app.py`` and wired through
-# the explicit composition root. Importing the compatibility shell executes the
-# normal Streamlit script exactly once for the current rerun.
+# Streamlit re-executes this entrypoint for every widget rerun while Python keeps
+# imported modules cached in ``sys.modules``. A plain ``import_module(app)``
+# therefore renders only on the first execution and later reruns can become a
+# blank page. ``run_module`` executes the known, source-controlled compatibility
+# shell once on every Streamlit rerun without generating or evaluating source.
 #
-# Keep this explanatory text as comments instead of a module docstring: Streamlit
+# Keep explanatory text as comments instead of a module docstring: Streamlit
 # "magic" can render a top-level string expression into the application UI.
 
-from importlib import import_module
+from runpy import run_module
+
+
+APP_MODULE = "qlda.presentation.streamlit.app"
 
 
 def main() -> None:
-    import_module("qlda.presentation.streamlit.app")
+    run_module(APP_MODULE, run_name="__main__")
 
 
 main()
