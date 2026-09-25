@@ -122,7 +122,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("production-progress-source-exact", RuntimeStage.UI, "qlda.runtime_core.production_progress_source_exact", "install_production_progress_source_exact"),
     RuntimeFeature("autonomy-overview", RuntimeStage.UI, "qlda.runtime_core.autonomy_overview_patch", "install_autonomy_overview_patch"),
     RuntimeFeature("advanced-automation-ui", RuntimeStage.UI, "qlda.runtime_core.advanced_automation_ui", "install_advanced_automation_ui"),
-    RuntimeFeature("ai-supervisor-navigation", RuntimeStage.UI, "qlda.runtime_core.ai_supervisor_navigation", "install_ai_supervisor_navigation"),
+    RuntimeFeature("ai-supervisor-navigation", RuntimeStage.UI, "qlda.presentation.streamlit.ai_supervisor_navigation", "install_ai_supervisor_navigation"),
     RuntimeFeature("contractor-data-admin-visibility", RuntimeStage.UI, "qlda.runtime_core.contractor_data_admin_visibility", "install_contractor_data_admin_visibility"),
 )
 
