@@ -24,21 +24,29 @@ class CleanupV1Tests(unittest.TestCase):
         self.assertNotIn("CREATE TABLE IF NOT EXISTS", facade)
 
     def test_requested_consistency_policies_are_consolidated(self):
-        bootstrap = (ROOT / "src/qlda/runtime_core/bootstrap.py").read_text(encoding="utf-8")
-        self.assertIn("install_finance_consistency_core", bootstrap)
-        self.assertIn("install_finance_consistency_ui", bootstrap)
-        self.assertNotIn("install_project_cost_signed_adjustments", bootstrap)
-        self.assertNotIn("install_vo_value_consistency", bootstrap)
-        self.assertNotIn("install_boq_after_tax_budget_policy", bootstrap)
-        self.assertNotIn("install_project_cost_budget_ui_simplify", bootstrap)
+        # Runtime wiring moved from bootstrap.py to the explicit composition
+        # registry. The cleanup invariant is still the same: one consolidated
+        # finance-consistency implementation and none of the retired installers.
+        composition = (ROOT / "src/qlda/composition/runtime_features.py").read_text(encoding="utf-8")
+        self.assertIn("install_finance_consistency_core", composition)
+        self.assertIn("install_finance_consistency_ui", composition)
+        self.assertNotIn("install_project_cost_signed_adjustments", composition)
+        self.assertNotIn("install_vo_value_consistency", composition)
+        self.assertNotIn("install_boq_after_tax_budget_policy", composition)
+        self.assertNotIn("install_project_cost_budget_ui_simplify", composition)
 
     def test_document_uniform_interaction_is_not_a_second_bootstrap_chain(self):
         bridge = (ROOT / "src/qlda/runtime_core/document_selection_autopen.py").read_text(encoding="utf-8")
         bootstrap = (ROOT / "src/qlda/runtime_core/bootstrap.py").read_text(encoding="utf-8")
+        composition = (ROOT / "src/qlda/composition/runtime_features.py").read_text(encoding="utf-8")
         self.assertIn("install_document_management_uniform_interaction", bridge)
         self.assertNotIn(
             "from qlda.runtime_core.document_management_uniform_interaction import",
             bootstrap,
+        )
+        self.assertNotIn(
+            "qlda.runtime_core.document_management_uniform_interaction",
+            composition,
         )
 
 
