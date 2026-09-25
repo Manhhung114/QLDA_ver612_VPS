@@ -32,6 +32,12 @@ class AutomationPlatform:
             "V8.1": "AI Project Supervisor",
             "V8.2": "Semi-Autonomous Policy",
             "V9.0": "Contractor-isolated Autonomous Project Operations",
+            "V9.1": "Autonomous Task Routing + SLA + duplicate guard",
+            "V9.2": "Smart Contract Obligation Audit",
+            "V9.3": "Smart IPC ↔ BOQ Reconciliation",
+            "V9.4": "Evidence-based Draft VO Generation",
+            "V9.5": "Predictive Schedule Risk + verified due-date cash needs",
+            "V9.6": "Site Vision Progress Proposal + human approval gate",
         }
 
 
