@@ -62,6 +62,7 @@ FEATURES: tuple[RuntimeFeature, ...] = (
     RuntimeFeature("boq-claim-terms", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_terms", "install_boq_claim_terms"),
     RuntimeFeature("boq-claim-price-recovery", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_recovery", "install_boq_claim_price_recovery"),
     RuntimeFeature("boq-claim-price-header-guard", RuntimeStage.BUSINESS, "qlda.runtime_core.boq_claim_price_header_guard", "install_boq_claim_price_header_guard"),
+    RuntimeFeature("finance-consistency-core", RuntimeStage.BUSINESS, "qlda.runtime_core.finance_consistency", "install_finance_consistency_core"),
 
     RuntimeFeature("upload-ui-policy", RuntimeStage.UI, "qlda.presentation.streamlit.upload_policy", "install_upload_ui_200mb_policy"),
     RuntimeFeature("document-management-vps-ui", RuntimeStage.UI, "qlda.presentation.streamlit.document_management_vps_ui", "install_document_management_vps_ui"),
