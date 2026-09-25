@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any, Callable, Iterable, Sequence
 
 from qlda.application.ai import AITelemetryPort, ToolChoice, ToolDefinition
@@ -14,13 +15,23 @@ CompletionFn = Callable[[int, str], str]
 ToolCallingFn = Callable[[int, str, Sequence[ToolDefinition], dict[str, Any] | None], Sequence[ToolChoice]]
 
 
+def _text_fallback_enabled() -> bool:
+    return str(os.environ.get("QLDA_AI_TEXT_PLANNER_FALLBACK", "0") or "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class StructuredAIPlanner:
     """LLM planner constrained to registered ToolRegistry actions.
 
-    Provider-native tool/function calling is the primary path. A strict JSON text
-    completion is retained only as an opt-in compatibility fallback; the old
-    regex-based extraction is gone. RBAC, integrity and approval remain downstream.
-    Every finalized plan can also be written to the provider-neutral AI audit sink.
+    Provider-native tool/function calling is the primary path. Strict JSON text
+    completion is available only when ``QLDA_AI_TEXT_PLANNER_FALLBACK=1``; the old
+    regex-based extraction is gone. If native calling is unavailable or invalid,
+    the default behavior is the deterministic HeuristicPlanner. RBAC, integrity and
+    approval remain downstream and every finalized plan can be audit-telemetried.
     """
 
     def __init__(
@@ -74,9 +85,6 @@ class StructuredAIPlanner:
                 continue
             step_id = f"S{index}"
             explicit = tuple(str(x).upper() for x in choice.depends_on if str(x).upper() in used_ids)
-            # Native providers normally return independent function calls. Chain
-            # them conservatively unless the model supplied a valid dependency so
-            # a later write cannot race ahead of an earlier integrity/read step.
             deps = explicit or ((steps[-1].step_id,) if steps else ())
             used_ids.add(step_id)
             steps.append(
@@ -91,7 +99,7 @@ class StructuredAIPlanner:
         return steps
 
     def _strict_text_choices(self, project_id: int, objective: str, context: dict[str, Any] | None) -> list[ToolChoice]:
-        if self.complete is None:
+        if self.complete is None or not _text_fallback_enabled():
             return []
         raw = self.complete(int(project_id), self._prompt(str(objective), context))
         payload = json.loads(str(raw or "").strip())
@@ -105,10 +113,11 @@ class StructuredAIPlanner:
             deps = item.get("depends_on") or []
             if isinstance(deps, str):
                 deps = [deps]
+            arguments = item.get("arguments") or {}
             choices.append(
                 ToolChoice(
                     tool_name=str(item.get("tool_name") or item.get("tool") or ""),
-                    arguments=dict(item.get("arguments") or {}) if isinstance(item.get("arguments") or {}, dict) else {},
+                    arguments=dict(arguments) if isinstance(arguments, dict) else {},
                     reason=str(item.get("reason") or "AI strict JSON fallback"),
                     depends_on=tuple(str(x) for x in deps),
                 )
@@ -150,7 +159,7 @@ class StructuredAIPlanner:
             created_by = "AI Native Tool Planner"
             if self.tool_caller is not None:
                 choices = self.tool_caller(int(project_id), str(objective), self._definitions(), context)
-            if not choices:
+            if not choices and _text_fallback_enabled():
                 choices = self._strict_text_choices(int(project_id), str(objective), context)
                 created_by = "AI Strict JSON Planner"
             steps = self._steps_from_choices(choices)
