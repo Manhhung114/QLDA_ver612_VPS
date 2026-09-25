@@ -11,6 +11,7 @@ from qlda.runtime_core.finance_consistency import effective_proposed_value
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src/qlda"
 RUNTIME = SRC / "runtime_core"
+PRESENTATION = SRC / "presentation/streamlit"
 COMPOSITION = SRC / "composition/runtime_features.py"
 
 
@@ -102,12 +103,14 @@ class CleanupInvariantTests(unittest.TestCase):
         self.assertEqual(effective_proposed_value({"proposed_amount": -15.0}), -15.0)
 
     def test_document_uniform_interaction_is_not_a_second_bootstrap_chain(self):
-        bridge = (RUNTIME / "document_selection_autopen.py").read_text(encoding="utf-8")
+        bridge = (PRESENTATION / "document_selection_autopen.py").read_text(encoding="utf-8")
         bootstrap = (RUNTIME / "bootstrap.py").read_text(encoding="utf-8")
         composition = COMPOSITION.read_text(encoding="utf-8")
         self.assertIn("install_document_management_uniform_interaction", bridge)
+        self.assertIn("qlda.presentation.streamlit.document_selection_autopen", composition)
         self.assertNotIn("qlda.runtime_core.document_management_uniform_interaction", composition)
         self.assertNotIn("from qlda.runtime_core.document_management_uniform_interaction import", bootstrap)
+        self.assertFalse((RUNTIME / "document_selection_autopen.py").exists())
 
     def test_obsolete_contractor_source_patch_is_removed(self):
         self.assertFalse((RUNTIME / "contractor_access_patch.py").exists())
