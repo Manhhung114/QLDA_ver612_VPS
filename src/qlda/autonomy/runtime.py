@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from qlda.autonomy.ai_planner import StructuredAIPlanner
 from qlda.autonomy.events import DomainEvent
+from qlda.autonomy.loop_engine import ClosedLoopEngine, ClosedLoopRepository
 from qlda.autonomy.persistence import AutomationRepository
 from qlda.autonomy.platform import AutomationPlatform, build_platform
 from qlda.autonomy.qlda_adapters import QLDAAutomationAdapters
@@ -24,8 +25,10 @@ _LOCK = RLock()
 _PLATFORMS: dict[int, AutomationPlatform] = {}
 _REPOSITORIES: dict[int, AutomationRepository] = {}
 _ADVANCED: dict[int, Any] = {}
+_LOOP_REPOSITORIES: dict[int, ClosedLoopRepository] = {}
+_LOOP_ENGINES: dict[int, ClosedLoopEngine] = {}
 _VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-SUPERVISOR_SCHEMA_VERSION = "V6_ADVANCED_V9_1_TO_V9_6_NO_PAYMENT_NO_TWIN"
+SUPERVISOR_SCHEMA_VERSION = "V7_CLOSED_LOOP_V1_ADVANCED_V9_1_TO_V9_6_NO_PAYMENT_NO_TWIN"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -172,6 +175,9 @@ def get_autonomy_platform(
         _PLATFORMS[key] = platform
         _REPOSITORIES[key] = repository
         _ADVANCED[key] = advanced
+        if force_rebuild:
+            _LOOP_REPOSITORIES.pop(key, None)
+            _LOOP_ENGINES.pop(key, None)
         return platform
 
 
@@ -183,6 +189,36 @@ def get_autonomy_repository(db) -> AutomationRepository:
 def get_advanced_automation(db):
     get_autonomy_platform(db)
     return _ADVANCED[id(db)]
+
+
+def get_closed_loop_repository(db) -> ClosedLoopRepository:
+    """Return one workspace-scoped persistence gateway for engineering loops."""
+    key = id(db)
+    get_autonomy_platform(db)
+    with _LOCK:
+        repository = _LOOP_REPOSITORIES.get(key)
+        if repository is None:
+            repository = ClosedLoopRepository(db.connect)
+            repository.ensure_schema()
+            _LOOP_REPOSITORIES[key] = repository
+        return repository
+
+
+def get_closed_loop_engine(db) -> ClosedLoopEngine:
+    """Compose the closed-loop engine over the existing guarded ToolRegistry."""
+    key = id(db)
+    platform = get_autonomy_platform(db)
+    automation_repository = get_autonomy_repository(db)
+    with _LOCK:
+        engine = _LOOP_ENGINES.get(key)
+        if engine is None:
+            engine = ClosedLoopEngine(
+                platform=platform,
+                automation_repository=automation_repository,
+                repository=get_closed_loop_repository(db),
+            )
+            _LOOP_ENGINES[key] = engine
+        return engine
 
 
 def run_project_supervisor(
@@ -198,6 +234,9 @@ def run_project_supervisor(
     automatically refreshes Contract Obligation Audit, latest IPC↔BOQ reconciliation,
     deterministic schedule-risk forecast and task-routing proposals. Payment-overdue
     and Digital Twin remain deliberately absent.
+
+    The result is also captured by the closed-loop engine. That capture is fail-soft:
+    a loop persistence issue must never suppress the underlying Supervisor result.
     """
     tenant_id = int(project_id)
     platform = get_autonomy_platform(db)
@@ -304,6 +343,28 @@ def run_project_supervisor(
         "extra_indicators": extra,
         "local_day": datetime.now(_VN_TZ).date().isoformat(),
     }
+
+    try:
+        loop = get_closed_loop_engine(db).capture_supervisor_result(
+            result,
+            actor=actor,
+            role="admin",
+        )
+        result["closed_loop"] = {
+            "loop_id": str(loop.get("loop_id") or ""),
+            "status": str(loop.get("status") or ""),
+            "stage": str(loop.get("current_stage") or ""),
+            "cycle_count": int(loop.get("cycle_count") or 0),
+            "verification": dict(loop.get("verification") or {}),
+            "recommendation_count": len(list(loop.get("recommendations") or [])),
+        }
+    except Exception as exc:
+        result["closed_loop"] = {
+            "status": "ERROR",
+            "stage": "SENSE",
+            "error": str(exc),
+        }
+
     repository.save_snapshot(
         project_id=tenant_id,
         snapshot_type="DAILY_SUPERVISOR",
@@ -353,6 +414,8 @@ __all__ = [
     "get_autonomy_platform",
     "get_autonomy_repository",
     "get_advanced_automation",
+    "get_closed_loop_repository",
+    "get_closed_loop_engine",
     "run_project_supervisor",
     "run_daily_supervisor_if_due",
 ]
