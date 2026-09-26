@@ -6,7 +6,7 @@ AI_NAV_LABEL = "🤖 AI Supervisor"
 HOME_NAV_LABEL = "🏠 Tổng quan"
 NAV_RADIO_LABEL = "Nhóm chức năng"
 _NAV_ACTIVE_KEY = "qlda_ai_supervisor_navigation_active"
-PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V3 COMPACT"
+PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V4 CLOSED LOOP"
 
 
 def _inject_ai_nav_option(options: Iterable[Any]) -> list[Any]:
@@ -29,9 +29,10 @@ def _is_main_navigation(label: Any, options: Iterable[Any]) -> bool:
 
 
 def install_ai_supervisor_navigation() -> None:
-    """Expose the compact AI Supervisor page as its own sidebar item."""
+    """Expose AI Supervisor plus Closed Loop Engineering as one sidebar page."""
     import streamlit as st
     from qlda.presentation.streamlit.ai_supervisor_page import render_ai_supervisor_page
+    from qlda.presentation.streamlit.closed_loop_panel import render_closed_loop_panel
     import qlda.runtime_core.ui_v7_compact as ui
 
     if getattr(st, "_qlda_ai_supervisor_navigation_installed", False):
@@ -57,7 +58,13 @@ def install_ai_supervisor_navigation() -> None:
 
     def render_overview_or_supervisor(st_obj, db, project_id: int, *args, **kwargs):
         if bool(st_obj.session_state.get(_NAV_ACTIVE_KEY, False)):
-            return render_ai_supervisor_page(
+            render_ai_supervisor_page(
+                st_obj,
+                db,
+                int(project_id),
+                ui_module=ui,
+            )
+            return render_closed_loop_panel(
                 st_obj,
                 db,
                 int(project_id),
