@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "COMPACT DENSITY UI V3 CREDIT LEGIBILITY"
+PATCH_MARKER = "COMPACT DENSITY UI V4 CREDIT SHADOW"
 
 _COMPACT_CSS = """
 <style>
@@ -47,8 +47,8 @@ _COMPACT_CSS = """
    This rule intentionally runs after the base V7 theme, so keep the requested
    size/color/weight here instead of in a separate branding stylesheet. */
 .qlda-v7-credit{
-  font-size:18px!important;
-  line-height:1.15!important;
+  font-size:14px!important;
+  line-height:1.18!important;
   font-weight:900!important;
   color:#000000!important;
   opacity:1!important;
@@ -58,7 +58,9 @@ _COMPACT_CSS = """
   padding:2px 6px!important;
   right:10px!important;
   bottom:6px!important;
-  text-shadow:none!important;
+  letter-spacing:.12px!important;
+  -webkit-text-stroke:.15px rgba(0,0,0,.28)!important;
+  text-shadow:0 1px 0 rgba(255,255,255,.95),0 1px 3px rgba(0,0,0,.30)!important;
 }
 .qlda-ai-page-head{
   display:flex;
@@ -94,7 +96,7 @@ _COMPACT_CSS = """
   [data-testid="stMetricValue"]{font-size:1.45rem!important}
   .qlda-ai-page-title{font-size:1.28rem}
   .qlda-ai-page-subtitle{margin-bottom:.45rem}
-  .qlda-v7-credit{font-size:18px!important;font-weight:900!important;color:#000000!important;opacity:1!important}
+  .qlda-v7-credit{font-size:14px!important;font-weight:900!important;color:#000000!important;opacity:1!important}
 }
 </style>
 """
