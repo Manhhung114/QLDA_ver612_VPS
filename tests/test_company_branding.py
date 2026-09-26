@@ -29,19 +29,21 @@ class CompanyBrandingTests(unittest.TestCase):
             self.assertIsNone(branding.current_logo_path())
             self.assertFalse(saved.exists())
 
-    def test_sidebar_logo_is_above_sidebar_heading_not_page_watermark(self):
+    def test_sidebar_logo_is_first_block_above_logout(self):
         css = branding._sidebar_logo_css(
             "data:image/png;base64,AAAA",
             opacity_pct=73,
             height_px=96,
             gap_px=11,
         )
-        self.assertIn('[data-testid="stSidebar"] h3::before', css)
+        self.assertIn('[data-testid="stSidebarContent"]::before', css)
         self.assertIn("height:96px", css)
-        self.assertIn("margin:0 0 11px 0", css)
+        self.assertIn("margin:4px 0 11px 0", css)
         self.assertIn("background-position:center center", css)
         self.assertIn("opacity:0.730", css)
         self.assertIn("pointer-events:none", css)
+        self.assertIn('[data-testid="stSidebar"] h3::before', css)
+        self.assertIn("display:none!important", css)
         self.assertNotIn("stAppViewContainer", css)
         self.assertNotIn("position:fixed", css)
 
@@ -52,6 +54,7 @@ class CompanyBrandingTests(unittest.TestCase):
             height_px=90,
             gap_px=10,
         )
+        self.assertIn('[data-testid="stSidebarContent"]::before', hidden)
         self.assertIn("display:none!important", hidden)
 
         full = branding._sidebar_logo_css(
