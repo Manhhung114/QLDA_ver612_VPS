@@ -12,7 +12,7 @@ from qlda.autonomy.closed_loop_runtime import (
 )
 
 
-PATCH_MARKER = "CLOSED LOOP ENGINEERING PANEL V2 APPROVAL LEARN"
+PATCH_MARKER = "CLOSED LOOP ENGINEERING PANEL V3 INPUTS APPROVAL LEARN"
 _STAGE_LABELS = {
     "SENSE": "Sense",
     "ANALYZE": "Analyze",
@@ -22,6 +22,25 @@ _STAGE_LABELS = {
     "VERIFY": "Verify",
     "LEARN": "Learn",
     "CLOSED": "Closed",
+}
+_INPUT_LABELS = {
+    "title": "Tiêu đề",
+    "subject": "Chủ đề",
+    "task_id": "ID công việc",
+    "actual_progress": "Tiến độ thực tế (%)",
+    "item_name": "Tên hạng mục",
+    "old_qty": "Khối lượng cũ",
+    "new_qty": "Khối lượng mới",
+    "planned_quantity": "Khối lượng kế hoạch",
+    "observed_quantity": "Khối lượng quan sát",
+    "unit_price": "Đơn giá",
+    "description": "Mô tả",
+    "due_date": "Hạn xử lý",
+    "due_at": "Hạn xử lý",
+    "discipline": "Bộ môn",
+    "contractor": "Nhà thầu",
+    "assignee": "Người/đơn vị xử lý",
+    "assignee_email": "Email người xử lý",
 }
 
 
@@ -110,7 +129,100 @@ def _render_learning(st, learning: dict[str, Any]) -> None:
         st.info(safety_note)
 
 
-def _render_loop_approvals(st, auto_repo, tenant_id: int, loop_id: str, actor: str) -> None:
+def _input_widget(st, *, name: str, field_schema: dict[str, Any], current: Any, key: str):
+    label = _INPUT_LABELS.get(name, name)
+    raw_type = field_schema.get("type")
+    types = [str(item) for item in raw_type] if isinstance(raw_type, list) else [str(raw_type or "string")]
+    enum = field_schema.get("enum")
+    if isinstance(enum, list) and enum:
+        options = list(enum)
+        index = options.index(current) if current in options else 0
+        return st.selectbox(label, options, index=index, key=key)
+    if "boolean" in types:
+        return st.checkbox(label, value=bool(current) if current is not None else False, key=key)
+
+    help_bits = []
+    for schema_key, prefix in (
+        ("minimum", "min="),
+        ("exclusiveMinimum", ">"),
+        ("maximum", "max="),
+        ("exclusiveMaximum", "<"),
+        ("maxLength", "max ký tự="),
+    ):
+        if field_schema.get(schema_key) is not None:
+            help_bits.append(f"{prefix}{field_schema.get(schema_key)}")
+    help_text = " · ".join(help_bits) or None
+    value = "" if current is None else str(current)
+    return st.text_input(label, value=value, key=key, help=help_text)
+
+
+def _render_required_inputs(st, engine, loop: dict[str, Any], tenant_id: int, actor: str, role: str) -> None:
+    needs_input = [
+        dict(rec)
+        for rec in list(loop.get("recommendations") or [])
+        if str(rec.get("status") or "") == "NEEDS_INPUT" or list(rec.get("required_inputs") or [])
+    ]
+    if not needs_input:
+        return
+
+    st.markdown("#### Recommend · Bổ sung dữ liệu bắt buộc")
+    st.warning("Một số hành động chưa đủ tham số. Closed Loop sẽ không Act các hành động này cho tới khi dữ liệu hợp lệ.")
+    for rec in needs_input:
+        tool_name = str(rec.get("tool") or "")
+        step_id = str(rec.get("step_id") or "")
+        required = [str(x) for x in list(rec.get("required_inputs") or [])]
+        arguments = dict(rec.get("arguments") or {})
+        try:
+            schema = engine.recommendation_schema(tool_name)
+        except Exception as exc:
+            st.error(f"Không đọc được schema {tool_name}: {exc}")
+            continue
+        properties = dict(schema.get("properties") or {})
+        with st.expander(f"{tool_name} · cần: {', '.join(required) or 'kiểm tra lại dữ liệu'}", expanded=True):
+            st.write(str(rec.get("reason") or ""))
+            values: dict[str, Any] = {}
+            for field_name in required:
+                values[field_name] = _input_widget(
+                    st,
+                    name=field_name,
+                    field_schema=dict(properties.get(field_name) or {}),
+                    current=arguments.get(field_name),
+                    key=f"closed_loop_input_{tenant_id}_{step_id}_{field_name}",
+                )
+            if st.button(
+                "💾 Lưu tham số",
+                key=f"closed_loop_input_save_{tenant_id}_{step_id}",
+                use_container_width=True,
+            ):
+                try:
+                    updated = engine.set_recommendation_inputs(
+                        project_id=int(tenant_id),
+                        loop_id=str(loop.get("loop_id") or ""),
+                        step_id=step_id,
+                        inputs=values,
+                        actor=str(actor),
+                        role=str(role),
+                    )
+                    target = next(
+                        (
+                            item for item in list(updated.get("recommendations") or [])
+                            if str(item.get("step_id") or "") == step_id
+                        ),
+                        {},
+                    )
+                    remaining = list(target.get("required_inputs") or [])
+                    if remaining:
+                        st.warning("Vẫn thiếu: " + ", ".join(str(x) for x in remaining))
+                    elif target.get("requires_approval"):
+                        st.success("Đã đủ dữ liệu. Hành động sẽ chuyển qua Approval Gate khi bấm Act.")
+                    else:
+                        st.success("Đã đủ dữ liệu. Hành động sẵn sàng cho Act.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Tham số chưa hợp lệ: {exc}")
+
+
+def _render_loop_approvals(st, auto_repo, engine, tenant_id: int, loop_id: str, actor: str) -> None:
     pending = [
         dict(item)
         for item in auto_repo.pending_approvals(project_id=int(tenant_id))
@@ -159,7 +271,14 @@ def _render_loop_approvals(st, auto_repo, tenant_id: int, loop_id: str, actor: s
                     approved_by=str(actor),
                     note=note,
                 )
-                st.warning("Đã từ chối hành động.")
+                engine.reject_recommendation(
+                    project_id=int(tenant_id),
+                    loop_id=str(loop_id),
+                    step_id=step_id,
+                    actor=str(actor),
+                    note=note,
+                )
+                st.warning("Đã từ chối hành động; recommendation đã được khóa ở trạng thái REJECTED.")
                 st.rerun()
 
 
@@ -176,7 +295,7 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
 
     st.divider()
     st.markdown("### 🔁 Closed Loop Engineering")
-    st.caption("Sense → Analyze → Recommend → Approve → Act → Verify → Learn. Mọi hành động vẫn đi qua RBAC, Approval, Data Integrity và Audit Gate.")
+    st.caption("Sense → Analyze → Recommend → Approve → Act → Verify → Learn. Mọi hành động vẫn đi qua Schema, RBAC, Approval, Data Integrity và Audit Gate.")
 
     repository = get_closed_loop_repository(db)
     engine = get_closed_loop_engine(db)
@@ -219,8 +338,12 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
     _render_learning(st, learning)
 
     if not is_admin:
-        st.info("Closed Loop đang ở chế độ chỉ xem. Chỉ Admin được chạy chu trình, phê duyệt hoặc thực thi hành động.")
+        st.info("Closed Loop đang ở chế độ chỉ xem. Chỉ Admin được nhập dữ liệu, chạy chu trình, phê duyệt hoặc thực thi hành động.")
         return
+
+    current_loop = latest_closed_loop(db, tenant_id)
+    if current_loop:
+        _render_required_inputs(st, engine, current_loop, tenant_id, actor, role)
 
     st.markdown("#### Sense / Analyze / Act / Verify")
     dry_run = st.checkbox(
@@ -265,6 +388,11 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
                 role=role,
                 dry_run=bool(dry_run),
             )
+            needs_input = [
+                str(x.get("tool") or "")
+                for x in list(updated.get("recommendations") or [])
+                if str(x.get("status") or "") == "NEEDS_INPUT"
+            ]
             pending = [
                 str(x.get("tool") or "")
                 for x in list(updated.get("recommendations") or [])
@@ -277,12 +405,14 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
             ]
             if blocked:
                 st.error("Data Integrity chưa hợp lệ; đã chặn action ghi dữ liệu: " + ", ".join(blocked))
+            elif needs_input:
+                st.warning("Chưa Act các tool thiếu tham số: " + ", ".join(needs_input))
             elif pending:
                 st.warning("Đã tạo yêu cầu phê duyệt: " + ", ".join(pending))
             elif dry_run:
                 st.success("Dry-run hoàn tất. Không có dữ liệu nghiệp vụ nào bị thay đổi.")
             else:
-                st.success("Hành động an toàn đã chạy qua ToolRegistry/Audit Gate. Chạy Verify ở chu kỳ kế tiếp.")
+                st.success("Hành động an toàn đã chạy qua Schema/RBAC/ToolRegistry/Audit Gate. Chạy Verify ở chu kỳ kế tiếp.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không thực thi được Closed Loop: {exc}")
@@ -292,6 +422,7 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
         _render_loop_approvals(
             st,
             auto_repo,
+            engine,
             tenant_id,
             str(current_loop.get("loop_id") or ""),
             actor,
@@ -313,7 +444,11 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
             key=f"closed_loop_feedback_note_{tenant_id}",
             height=70,
         )
-        tool_choices = [""] + sorted({str(x.get("tool") or "") for x in list(current_loop.get("recommendations") or []) if str(x.get("tool") or "")})
+        tool_choices = [""] + sorted({
+            str(x.get("tool") or "")
+            for x in list(current_loop.get("recommendations") or [])
+            if str(x.get("tool") or "")
+        })
         tool_name = st.selectbox(
             "Áp dụng cho tool (tùy chọn)",
             tool_choices,
