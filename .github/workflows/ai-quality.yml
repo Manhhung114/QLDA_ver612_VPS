@@ -9,6 +9,7 @@ on:
       - 'src/qlda/infrastructure/native_ai.py'
       - 'src/qlda/autonomy/ai_planner.py'
       - 'src/qlda/application/contractor_data_hub/**'
+      - 'src/qlda/presentation/streamlit/legacy_ai_streaming_contract.py'
       - 'src/qlda/composition/runtime_features.py'
       - 'src/qlda/runtime_core/bootstrap.py'
       - 'src/qlda/runtime_core/runtime_settings_bridge.py'
@@ -22,6 +23,7 @@ on:
       - 'src/qlda/infrastructure/native_ai.py'
       - 'src/qlda/autonomy/ai_planner.py'
       - 'src/qlda/application/contractor_data_hub/**'
+      - 'src/qlda/presentation/streamlit/legacy_ai_streaming_contract.py'
       - 'src/qlda/composition/runtime_features.py'
       - 'src/qlda/runtime_core/bootstrap.py'
       - 'src/qlda/runtime_core/runtime_settings_bridge.py'
@@ -65,4 +67,5 @@ jobs:
             tests.test_ai_provider_resilience \
             tests.test_ai_quality_eval \
             tests.test_ai_workspace_indexer \
-            tests.test_ai_contractor_tenant_isolation
+            tests.test_ai_contractor_tenant_isolation \
+            tests.test_ai_live_domain_context
