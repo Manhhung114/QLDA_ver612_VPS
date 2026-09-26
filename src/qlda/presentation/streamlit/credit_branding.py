@@ -9,15 +9,16 @@ def install_credit_branding_v7() -> None:
     if getattr(st, "_qlda_v7_credit_branding_installed", False):
         return
 
-    # The base V7 theme renders the credit element. This late CSS override keeps
-    # the existing placement but makes the byline clearly visible on desktop and
-    # mobile without competing with the working area of the app.
+    # Match the persistent byline to the normal Streamlit navigation item text
+    # size (for example the "Tổng quan" entry) by using the same 1rem scale on
+    # both desktop and mobile. Keep the byline black and bold for visibility.
     st.markdown(
         """
 <style>
 .qlda-v7-credit{
   color:#000000!important;
-  font-size:17px!important;
+  font-size:1rem!important;
+  line-height:1.35!important;
   font-weight:800!important;
   letter-spacing:.12px!important;
   background:rgba(255,255,255,.98)!important;
@@ -31,7 +32,8 @@ def install_credit_branding_v7() -> None:
   .qlda-v7-credit{
     right:8px!important;
     bottom:6px!important;
-    font-size:15px!important;
+    font-size:1rem!important;
+    line-height:1.35!important;
     font-weight:800!important;
     padding:5px 10px!important;
   }
