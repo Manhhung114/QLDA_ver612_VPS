@@ -25,11 +25,23 @@ class AIStreamingContractTests(unittest.TestCase):
 
     def test_project_chat_contract_uses_native_live_data_path(self):
         install_legacy_ai_streaming_contract()
-        source = inspect.getsource(contract._ask_project_stream)
-        self.assertIn("qlda.infrastructure.ai.project_chat", source)
-        self.assertNotIn("qlda.runtime_core.ai_streaming", source)
+        ask_source = inspect.getsource(contract._ask_project)
+        stream_source = inspect.getsource(contract._ask_project_stream)
+        self.assertIn("qlda.infrastructure.ai.project_chat_complete", ask_source)
+        self.assertIn("_active_scope", ask_source)
+        self.assertNotIn("qlda.runtime_core.ai_streaming", ask_source + stream_source)
+        self.assertIn("_ask_project(", stream_source)
+        self.assertIs(GeminiProjectAssistant.ask_project, contract._ask_project)
+        self.assertIs(OpenAIProjectAssistant.ask_project, contract._ask_project)
         self.assertIs(GeminiProjectAssistant.ask_project_stream, contract._ask_project_stream)
         self.assertIs(OpenAIProjectAssistant.ask_project_stream, contract._ask_project_stream)
+
+    def test_specialized_ai_entrypoints_are_workspace_guarded(self):
+        source = inspect.getsource(contract.install_legacy_ai_streaming_contract)
+        self.assertIn("assistant_cls.ask_project = _ask_project", source)
+        self.assertIn("summarize_file", source)
+        self.assertIn("attachment_catalog", source)
+        self.assertIn("_active_scope", source)
 
     def test_whole_project_intent_matches_current_production_question(self):
         self.assertTrue(
