@@ -83,6 +83,7 @@ sync_python_dependencies() {
   run_as_app "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$APP_DIR/requirements.lock"
   run_as_app env PYTHONPATH="$APP_DIR/src" "$VENV_DIR/bin/python" - <<'PY'
 import qlda
+import pymupdf
 from cryptography.fernet import Fernet
 from pypdf import PdfReader, PdfWriter
 import fastapi, jpype, mpxj, openai, uvicorn
@@ -92,9 +93,15 @@ from qlda.runtime_core import mpp_cloud_reader
 assert qlda.__version__ >= "7.6"
 assert qlda.LEGACY_ADAPTERS == ()
 assert qlda.LEGACY_RUNTIME is False
+# Fail deployment early if the PDF raster engine is absent or broken.
+doc = pymupdf.open()
+page = doc.new_page(width=100, height=100)
+raw = page.get_pixmap(dpi=96, alpha=False).tobytes("png")
+assert raw.startswith(b"\x89PNG")
+doc.close()
 mpp_cloud_reader._ensure_jvm()
 get_application()
-print("QLDA V7.6 packaged runtime OK")
+print("QLDA V7.6 packaged runtime + PDF raster engine OK")
 PY
 }
 
@@ -170,6 +177,9 @@ if [[ "$ok" -eq 1 ]] && contractor_data_background_enabled; then
 fi
 
 if [[ "$ok" -eq 1 ]]; then
+  printf '%s\n' "$NEW_COMMIT" > "$SHARED_DIR/runtime_revision"
+  chown "$RUN_USER:$RUN_USER" "$SHARED_DIR/runtime_revision"
+  echo "Runtime revision: $NEW_COMMIT"
   echo "Deploy OK: $OLD_COMMIT -> $NEW_COMMIT"
   exit 0
 fi
