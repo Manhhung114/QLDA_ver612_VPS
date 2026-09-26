@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Persistent company-logo watermark and Admin branding controls.
+"""Persistent company-logo branding and Admin controls.
 
-The logo is stored outside the Git checkout so it survives deploys.  The runtime
-renders it as a faint, centered page watermark behind the working area on every
-sheet.  It never captures pointer events and therefore cannot block the UI.
+The logo is stored outside the Git checkout so it survives deploys.  At runtime
+it is rendered in the sidebar immediately above the ``QLDA Xây dựng`` heading.
+The presentation is global because every sheet shares the same sidebar shell.
 """
 
 import base64
@@ -58,6 +58,7 @@ def save_company_logo(payload: bytes) -> Path:
         raise ValueError("File logo đang trống.")
     if len(data) > _MAX_LOGO_BYTES:
         raise ValueError("Logo tối đa 2 MB. Hãy giảm kích thước ảnh trước khi tải lên.")
+
     ext, _mime = _detect_logo_type(data)
     root = _branding_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -69,6 +70,7 @@ def save_company_logo(payload: bytes) -> Path:
     except OSError:
         pass
     temp.replace(target)
+
     for other in _logo_candidates():
         if other != target:
             other.unlink(missing_ok=True)
@@ -86,41 +88,75 @@ def delete_company_logo() -> bool:
 
 def _logo_data_uri(path: Path) -> str:
     payload = path.read_bytes()
-    ext, mime = _detect_logo_type(payload)
-    _ = ext
-    return f"data:{mime};base64,{base64.b64encode(payload).decode('ascii')}"
+    _ext, mime = _detect_logo_type(payload)
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
 
 
-def _watermark_css(data_uri: str | None, *, opacity: float, width_vw: int) -> str:
-    opacity = max(0.02, min(float(opacity), 0.20))
-    width_vw = max(18, min(int(width_vw), 60))
-    background = f'url("{html.escape(data_uri, quote=True)}")' if data_uri else "none"
+def _sidebar_logo_css(
+    data_uri: str | None,
+    *,
+    opacity_pct: int,
+    height_px: int,
+    gap_px: int,
+) -> str:
+    """Build CSS that places the logo directly above the sidebar H3 title."""
+    opacity_pct = max(0, min(int(opacity_pct), 100))
+    height_px = max(40, min(int(height_px), 220))
+    gap_px = max(0, min(int(gap_px), 40))
+
+    if not data_uri or opacity_pct <= 0:
+        return """
+<style id="qlda-company-logo-style">
+[data-testid="stSidebar"] h3::before{
+  content:none!important;
+  display:none!important;
+}
+</style>
+"""
+
+    background = f'url("{html.escape(data_uri, quote=True)}")'
+    opacity = float(opacity_pct) / 100.0
+
     return f"""
-<style id="qlda-company-watermark-style">
-[data-testid="stAppViewContainer"]::before{{
+<style id="qlda-company-logo-style">
+/*
+  Company logo shown in the sidebar header, immediately above
+  the H3 title 'QLDA Xây dựng'.  The pseudo element keeps the title itself
+  untouched and therefore does not require per-sheet rendering.
+*/
+[data-testid="stSidebar"] h3::before{{
   content:"";
-  position:fixed;
-  inset:0;
-  pointer-events:none;
-  z-index:0;
+  display:block;
+  width:100%;
+  height:{height_px}px;
+  margin:0 0 {gap_px}px 0;
+  padding:0;
   background-image:{background};
   background-repeat:no-repeat;
-  background-position:center 58%;
-  background-size:min({width_vw}vw, 560px) auto;
+  background-position:center center;
+  background-size:contain;
   opacity:{opacity:.3f};
+  pointer-events:none;
 }}
-[data-testid="stAppViewContainer"] > *{{
-  position:relative;
+
+/* Keep the heading close to the logo while preserving breathing room below. */
+[data-testid="stSidebar"] h3{{
+  margin-top:0!important;
+  padding-top:0!important;
+  margin-bottom:8px!important;
 }}
-[data-testid="stAppViewContainer"] [data-testid="stHeader"],
-[data-testid="stAppViewContainer"] [data-testid="stSidebar"],
-[data-testid="stAppViewContainer"] [data-testid="stMain"]{{
-  z-index:1;
+
+/* Reduce accidental extra spacing around the markdown block holding the title. */
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"]:has(h3){{
+  margin-top:0!important;
+  padding-top:0!important;
 }}
+
 @media(max-width:760px){{
-  [data-testid="stAppViewContainer"]::before{{
-    background-position:center 56%;
-    background-size:min({max(width_vw + 12, 42)}vw, 420px) auto;
+  [data-testid="stSidebar"] h3::before{{
+    height:{max(48, min(height_px, 150))}px;
+    margin-bottom:{min(gap_px, 18)}px;
   }}
 }}
 </style>
@@ -128,31 +164,46 @@ def _watermark_css(data_uri: str | None, *, opacity: float, width_vw: int) -> st
 
 
 def render_company_logo_watermark(st: Any) -> None:
-    """Render/clear the watermark CSS on every Streamlit rerun."""
+    """Compatibility name: refresh the global sidebar company logo CSS."""
     cfg = ss.load_app_settings()
     path = current_logo_path()
     enabled = bool(cfg.get("company_logo_enabled", True)) and path is not None
+
     data_uri: str | None = None
     if enabled and path is not None:
         try:
             data_uri = _logo_data_uri(path)
         except Exception:
             data_uri = None
-    opacity = float(cfg.get("company_logo_opacity", 0.055) or 0.055)
-    width_vw = int(cfg.get("company_logo_width_vw", 34) or 34)
+
+    opacity_pct = int(cfg.get("company_logo_opacity_pct", 100) or 0)
+    height_px = int(cfg.get("company_logo_height_px", 92) or 92)
+    gap_px = int(cfg.get("company_logo_gap_px", 10) or 0)
+
     st.markdown(
-        _watermark_css(data_uri, opacity=opacity, width_vw=width_vw),
+        _sidebar_logo_css(
+            data_uri,
+            opacity_pct=opacity_pct,
+            height_px=height_px,
+            gap_px=gap_px,
+        ),
         unsafe_allow_html=True,
     )
 
 
+def render_company_sidebar_logo(st: Any) -> None:
+    """Explicit alias for callers/tests that describe the new placement."""
+    render_company_logo_watermark(st)
+
+
 def render_company_logo_settings(st: Any, actor: str = "") -> None:
-    """Admin UI for upload/delete and watermark appearance."""
+    """Admin UI for upload/delete and sidebar-logo appearance."""
     cfg = ss.load_app_settings()
-    st.markdown("#### 🏢 Logo công ty · watermark nền")
+
+    st.markdown("#### 🏢 Logo công ty")
     st.caption(
-        "Logo hiển thị chìm giữa nền trang trên tất cả các sheet, không nằm ở một góc và không cản thao tác. "
-        "File được lưu tập trung trên VPS và giữ nguyên qua các lần deploy."
+        "Logo hiển thị ở đầu sidebar, ngay phía trên chữ ‘QLDA Xây dựng’, trên toàn bộ app. "
+        "File được lưu tập trung trên VPS và không mất khi deploy lại."
     )
 
     current = current_logo_path()
@@ -165,44 +216,79 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
         "Tải logo công ty",
         type=["png", "jpg", "jpeg", "webp"],
         accept_multiple_files=False,
-        key="qlda_company_logo_upload_v1",
-        help="PNG nền trong suốt cho hiệu ứng watermark đẹp nhất. Tối đa 2 MB.",
+        key="qlda_company_logo_upload_v2",
+        help="Khuyến nghị PNG nền trong suốt. Dung lượng tối đa 2 MB.",
+    )
+
+    current_opacity = int(cfg.get("company_logo_opacity_pct", 100) or 0)
+    current_height = int(cfg.get("company_logo_height_px", 92) or 92)
+    current_gap = int(cfg.get("company_logo_gap_px", 10) or 0)
+
+    opacity_pct = st.slider(
+        "Độ mờ logo (%)",
+        min_value=0,
+        max_value=100,
+        value=max(0, min(100, current_opacity)),
+        step=1,
+        key="qlda_company_logo_opacity_v2",
+        help="0% = ẩn hoàn toàn, 100% = hiển thị rõ hoàn toàn.",
     )
 
     c1, c2 = st.columns(2)
-    opacity_pct = c1.slider(
-        "Độ mờ logo (%)",
-        min_value=2,
-        max_value=20,
-        value=max(2, min(20, int(round(float(cfg.get("company_logo_opacity", 0.055) or 0.055) * 100)))),
-        step=1,
-        key="qlda_company_logo_opacity_v1",
+    height_px = c1.slider(
+        "Chiều cao logo (px)",
+        min_value=40,
+        max_value=220,
+        value=max(40, min(220, current_height)),
+        step=2,
+        key="qlda_company_logo_height_v2",
     )
-    width_vw = c2.slider(
-        "Kích thước logo nền (%)",
-        min_value=18,
-        max_value=60,
-        value=max(18, min(60, int(cfg.get("company_logo_width_vw", 34) or 34))),
+    gap_px = c2.slider(
+        "Khoảng cách dưới logo (px)",
+        min_value=0,
+        max_value=40,
+        value=max(0, min(40, current_gap)),
         step=1,
-        key="qlda_company_logo_width_v1",
+        key="qlda_company_logo_gap_v2",
+    )
+
+    st.caption(
+        "Gợi ý: logo ngang dùng 80–110 px; logo vuông/cao dùng 90–140 px. "
+        "Khoảng cách dưới logo thường 6–12 px."
     )
 
     save_col, delete_col = st.columns(2)
-    if save_col.button("💾 Lưu logo / hiển thị", type="primary", use_container_width=True, key="qlda_company_logo_save_v1"):
+
+    if save_col.button(
+        "💾 Lưu logo / hiển thị",
+        type="primary",
+        use_container_width=True,
+        key="qlda_company_logo_save_v2",
+    ):
         try:
-            changed = ["company_logo_enabled", "company_logo_opacity", "company_logo_width_vw"]
+            changed = [
+                "company_logo_enabled",
+                "company_logo_opacity_pct",
+                "company_logo_height_px",
+                "company_logo_gap_px",
+            ]
             if upload is not None:
                 save_company_logo(upload.getvalue())
                 changed.append("company_logo_file")
+
             if current_logo_path() is None:
                 raise ValueError("Hãy chọn file logo trước khi bật hiển thị.")
-            ss.save_app_settings({
-                "company_logo_enabled": True,
-                "company_logo_opacity": float(opacity_pct) / 100.0,
-                "company_logo_width_vw": int(width_vw),
-            })
+
+            ss.save_app_settings(
+                {
+                    "company_logo_enabled": True,
+                    "company_logo_opacity_pct": int(opacity_pct),
+                    "company_logo_height_px": int(height_px),
+                    "company_logo_gap_px": int(gap_px),
+                }
+            )
             ss.append_settings_audit(actor, "update_company_logo", changed)
-            st.success("Đã lưu logo. Logo sẽ hiển thị chìm dưới nền trên tất cả các sheet.")
+            st.success("Đã lưu logo. Logo sẽ nằm phía trên chữ ‘QLDA Xây dựng’ trên toàn app.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không thể lưu logo: {exc}")
@@ -211,31 +297,35 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
         "🗑️ Xóa logo",
         use_container_width=True,
         disabled=current is None,
-        key="qlda_company_logo_delete_v1",
+        key="qlda_company_logo_delete_v2",
     ):
         try:
             delete_company_logo()
             ss.save_app_settings({"company_logo_enabled": False})
-            ss.append_settings_audit(actor, "delete_company_logo", ["company_logo_enabled", "company_logo_file"])
-            st.success("Đã xóa logo. Watermark đã được tắt trên toàn app.")
+            ss.append_settings_audit(
+                actor,
+                "delete_company_logo",
+                ["company_logo_enabled", "company_logo_file"],
+            )
+            st.success("Đã xóa logo. Khoảng logo trên sidebar cũng được loại bỏ.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không thể xóa logo: {exc}")
 
 
 def install_company_branding_runtime(st: Any | None = None) -> None:
-    """Install settings integration once and refresh watermark every rerun."""
+    """Install Admin settings integration and refresh branding every rerun."""
     if st is None:
         import streamlit as st  # type: ignore[no-redef]
 
-    # Patch the Admin system-settings renderer before app.py imports it.  This
-    # keeps branding configuration in the central settings console without
-    # touching individual sheets.
+    # Patch the central Admin settings renderer once. Branding remains a single
+    # application-level setting rather than per-sheet state.
     try:
         import qlda.runtime_core.system_settings as system_settings
 
         original = system_settings.render_system_settings_admin
         if not getattr(original, "_qlda_company_branding_wrapped", False):
+
             def wrapped(st_arg: Any, db: Any, *, is_admin: bool = False, actor: str = "") -> None:
                 original(st_arg, db, is_admin=is_admin, actor=actor)
                 if bool(is_admin):
@@ -245,10 +335,10 @@ def install_company_branding_runtime(st: Any | None = None) -> None:
             wrapped._qlda_company_branding_wrapped = True  # type: ignore[attr-defined]
             system_settings.render_system_settings_admin = wrapped
     except Exception:
-        # Branding must never prevent the core app from starting.
+        # Branding must never prevent the core application from starting.
         pass
 
-    render_company_logo_watermark(st)
+    render_company_sidebar_logo(st)
 
 
 __all__ = [
@@ -257,5 +347,6 @@ __all__ = [
     "install_company_branding_runtime",
     "render_company_logo_settings",
     "render_company_logo_watermark",
+    "render_company_sidebar_logo",
     "save_company_logo",
 ]
