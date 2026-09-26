@@ -68,4 +68,5 @@ jobs:
             tests.test_ai_quality_eval \
             tests.test_ai_workspace_indexer \
             tests.test_ai_contractor_tenant_isolation \
-            tests.test_ai_live_domain_context
+            tests.test_ai_live_domain_context \
+            tests.test_ai_pdf_attachment_context
