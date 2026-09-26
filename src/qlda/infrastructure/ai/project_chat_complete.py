@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 from qlda.infrastructure.ai.aggregate_context import build_authoritative_aggregate_context
 from qlda.infrastructure.ai.live_domain_context import build_live_domain_context
+from qlda.infrastructure.ai.pdf_attachment_context import build_pdf_attachment_context
 from qlda.infrastructure.ai.project_chat import build_live_project_context
 from qlda.infrastructure.ai.provider_gateway import AIProviderError, NativeProviderGateway
 from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
@@ -49,6 +50,13 @@ def ask_project_chat(
             str(question or ""),
             max_chars=22000,
         )
+        pdf_context = build_pdf_attachment_context(
+            connection,
+            workspace_ids,
+            str(question or ""),
+            max_files=4,
+            max_chars=18000,
+        )
 
     effective_project = int(scope.get("master_project_id") or project_id) if scope.get("project_wide") else int(project_id)
     effective_tenant = effective_project if scope.get("project_wide") else int(workspace_scope or project_id)
@@ -60,6 +68,7 @@ def ask_project_chat(
         f"{base_context}\n\n"
         f"{aggregate_context}\n\n"
         f"{detail_context}\n\n"
+        f"{pdf_context}\n\n"
         "QUY TẮC TRẢ LỜI: chỉ kết luận từ dữ liệu LIVE. "
         "Nếu có [AGGREGATE-AUTHORITY], mọi số [EXACT-DOMAIN], [EXACT-DOC-TYPE] và [EXACT-DOC-SUMMARY] là tổng chính xác từ SQL và có quyền ưu tiên cao nhất. "
         "Tuyệt đối không dùng số lượng dòng chi tiết [DOC], [EXACT-DOC], top-k, kết quả tìm kiếm hoặc RAG để suy ra tổng số bản ghi. "
@@ -67,6 +76,9 @@ def ask_project_chat(
         "[LIVE-SUMMARY] và [DOMAIN-COVERAGE] là số đếm/index; các nhãn [DOC], [DRAWING], [BOQ], [PAYMENT], "
         "[IPC], [VO], [MATERIAL], [PROCUREMENT], [INVENTORY], [WORK-TASK], [CONTRACT], [APPROVAL], "
         "[DATA-HUB-ROW], [PRODUCTION-ROW] là bằng chứng chi tiết. "
+        "Các nhãn [PDF:<file_id>:P<trang>] là text trích trực tiếp từ file PDF đính kèm của đúng workspace và phải được ưu tiên khi người dùng hỏi nội dung file/biên bản. "
+        "Nếu có [PDF-SCAN-NO-TEXT], [PDF-ENCRYPTED], [PDF-READ-ERROR] hoặc [PDF-MISSING] thì phải nói rõ AI chưa đọc được phần nội dung file đó; tuyệt đối không suy nội dung PDF từ tên file, tiêu đề hồ sơ hoặc metadata. "
+        "Nếu [PDF-PARTIAL-NO-TEXT] xuất hiện thì chỉ được kết luận từ các trang [PDF:...] đã trích được và phải nói có trang chưa đọc được khi điều đó ảnh hưởng câu trả lời. "
         "Nếu số đếm lớn hơn 0 và có dòng chi tiết phù hợp thì tuyệt đối không nói 'chỉ có số tổng hợp', 'không có nội dung' hoặc 'không có dữ liệu'. "
         "Với yêu cầu 'gần đây nhất/mới nhất', ưu tiên dòng phù hợp đầu tiên vì các nhóm LIVE đã được sắp xếp mới nhất trước. "
         "Nếu DATA HUB bằng 0 nhưng có [PRODUCTION-ROW] thì phải dùng dữ liệu sản lượng live đó. "
@@ -77,6 +89,8 @@ def ask_project_chat(
     if aggregate_context:
         source_refs.append("postgres:authoritative-aggregate")
     source_refs.append("postgres:live-domain-details")
+    if pdf_context:
+        source_refs.append("vps:local-pdf-attachments")
     try:
         result = NativeProviderGateway.run(
             str(provider or "openai").lower(),
