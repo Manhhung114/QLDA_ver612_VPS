@@ -6,7 +6,7 @@ AI_NAV_LABEL = "🤖 AI Supervisor"
 HOME_NAV_LABEL = "🏠 Tổng quan"
 NAV_RADIO_LABEL = "Nhóm chức năng"
 _NAV_ACTIVE_KEY = "qlda_ai_supervisor_navigation_active"
-PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V4 CLOSED LOOP"
+PATCH_MARKER = "AI SUPERVISOR DEDICATED NAVIGATION V5 ADMIN CLOSED LOOP"
 
 
 def _inject_ai_nav_option(options: Iterable[Any]) -> list[Any]:
@@ -29,8 +29,9 @@ def _is_main_navigation(label: Any, options: Iterable[Any]) -> bool:
 
 
 def install_ai_supervisor_navigation() -> None:
-    """Expose AI Supervisor plus Closed Loop Engineering as one sidebar page."""
+    """Expose AI Supervisor to users; Closed Loop Engineering is Admin-only."""
     import streamlit as st
+    import qlda.presentation.streamlit.autonomy_overview as overview
     from qlda.presentation.streamlit.ai_supervisor_page import render_ai_supervisor_page
     from qlda.presentation.streamlit.closed_loop_panel import render_closed_loop_panel
     import qlda.runtime_core.ui_v7_compact as ui
@@ -64,12 +65,20 @@ def install_ai_supervisor_navigation() -> None:
                 int(project_id),
                 ui_module=ui,
             )
-            return render_closed_loop_panel(
-                st_obj,
-                db,
-                int(project_id),
-                ui_module=ui,
-            )
+
+            # Closed Loop Engineering contains project-control, approval, execution,
+            # verification and learning controls. Keep the entire panel invisible to
+            # non-Admin users rather than rendering a read-only version.
+            _identity, is_admin, _can_update = overview._app_identity(ui)
+            if is_admin:
+                return render_closed_loop_panel(
+                    st_obj,
+                    db,
+                    int(project_id),
+                    ui_module=ui,
+                )
+            return None
+
         return original_overview_renderer(st_obj, db, int(project_id), *args, **kwargs)
 
     st._qlda_ai_supervisor_original_radio = original_radio
