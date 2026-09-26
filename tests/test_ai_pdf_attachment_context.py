@@ -77,7 +77,14 @@ class _Connection:
 
 
 class PDFAttachmentContextTests(unittest.TestCase):
-    def _build(self, extraction):
+    def _build(self, extraction, ocr_result=None):
+        if ocr_result is None:
+            ocr_result = {
+                "status": "not_needed",
+                "pages": [],
+                "missed_pages": [],
+                "from_cache": True,
+            }
         with tempfile.TemporaryDirectory() as tmp:
             rel = "projects/SIGMA-SCOPE/document/BBHT/B12-MEP-002/file-b12__BBHT.pdf"
             target = Path(tmp) / rel
@@ -89,6 +96,7 @@ class PDFAttachmentContextTests(unittest.TestCase):
                 patch.dict(os.environ, {"QLDA_LOCAL_STORAGE_ROOT": tmp}, clear=False),
                 patch.object(ctx, "_table_exists", side_effect=lambda _c, table: table in existing),
                 patch.object(ctx, "_extract_pdf_pages", return_value=extraction),
+                patch.object(ctx, "_ocr_scanned_pdf", return_value=ocr_result) as ocr_mock,
             ):
                 text = ctx.build_pdf_attachment_context(
                     connection,
@@ -97,10 +105,10 @@ class PDFAttachmentContextTests(unittest.TestCase):
                     max_files=4,
                     max_chars=18000,
                 )
-            return text, connection
+            return text, connection, ocr_mock
 
     def test_latest_field_minutes_reads_actual_pdf_pages(self):
-        text, connection = self._build(
+        text, connection, ocr_mock = self._build(
             {
                 "status": "ok",
                 "page_count": 2,
@@ -109,6 +117,7 @@ class PDFAttachmentContextTests(unittest.TestCase):
                     (2, "Yêu cầu nhà thầu hoàn tất checklist và khắc phục trước ngày 27/09/2026."),
                 ],
                 "blank_pages": 0,
+                "blank_page_numbers": [],
                 "truncated": False,
             }
         )
@@ -118,19 +127,79 @@ class PDFAttachmentContextTests(unittest.TestCase):
         self.assertIn("[PDF:file-b12:P2]", text)
         self.assertIn("B12-MEP-002", text)
         self.assertNotIn("S2-MEP-001", text)
+        ocr_mock.assert_not_called()
         scoped = [params for sql, params in connection.calls if "project_id=any" in sql]
         self.assertTrue(scoped)
         self.assertTrue(all(list(params[0]) == [101] for params in scoped if params))
 
-    def test_scan_pdf_is_never_treated_as_readable_metadata(self):
-        text, _ = self._build(
+    def test_scan_pdf_uses_vision_ocr_and_no_longer_stops_at_metadata(self):
+        text, _, ocr_mock = self._build(
             {
                 "status": "no_text",
                 "page_count": 3,
                 "pages": [],
                 "blank_pages": 3,
+                "blank_page_numbers": [1, 2, 3],
                 "truncated": False,
-            }
+            },
+            {
+                "status": "ok",
+                "pages": [
+                    (1, "BIÊN BẢN HIỆN TRƯỜNG - Nhà thầu phải hoàn thiện nghiệm thu nội bộ."),
+                    (2, "Yêu cầu khắc phục trước ngày 27/09/2026 và báo cáo Ban điều hành."),
+                    (3, "Đại diện các bên xác nhận nội dung nêu trên."),
+                ],
+                "missed_pages": [],
+                "from_cache": False,
+            },
+        )
+        self.assertIn("[PDF-OCR:file-b12:P1]", text)
+        self.assertIn("hoàn thiện nghiệm thu nội bộ", text)
+        self.assertIn("[PDF-OCR:file-b12:P2]", text)
+        self.assertIn("[PDF-OCR-COMPLETE:file-b12]", text)
+        self.assertNotIn("[PDF-SCAN-NO-TEXT:file-b12]", text)
+        ocr_mock.assert_called_once()
+        self.assertEqual(ocr_mock.call_args.kwargs["workspace_scope"], 101)
+        self.assertEqual(list(ocr_mock.call_args.kwargs["page_numbers"]), [1, 2, 3])
+
+    def test_partial_text_pdf_ocr_only_fills_blank_pages(self):
+        text, _, ocr_mock = self._build(
+            {
+                "status": "ok",
+                "page_count": 2,
+                "pages": [(1, "Trang 1 có lớp text gốc.")],
+                "blank_pages": 1,
+                "blank_page_numbers": [2],
+                "truncated": False,
+            },
+            {
+                "status": "ok",
+                "pages": [(2, "Trang 2 scan đã được OCR đúng nội dung.")],
+                "missed_pages": [],
+                "from_cache": True,
+            },
+        )
+        self.assertIn("[PDF:file-b12:P1] Trang 1 có lớp text gốc.", text)
+        self.assertIn("[PDF-OCR:file-b12:P2] Trang 2 scan đã được OCR đúng nội dung.", text)
+        self.assertNotIn("PDF-PARTIAL-NO-TEXT", text)
+        self.assertEqual(list(ocr_mock.call_args.kwargs["page_numbers"]), [2])
+
+    def test_scan_pdf_still_refuses_metadata_when_ocr_unavailable(self):
+        text, _, _ = self._build(
+            {
+                "status": "no_text",
+                "page_count": 3,
+                "pages": [],
+                "blank_pages": 3,
+                "blank_page_numbers": [1, 2, 3],
+                "truncated": False,
+            },
+            {
+                "status": "unavailable",
+                "pages": [],
+                "missed_pages": [1, 2, 3],
+                "from_cache": False,
+            },
         )
         self.assertIn("[PDF-SCAN-NO-TEXT:file-b12]", text)
         self.assertIn("Không được suy nội dung từ tên file hoặc metadata", text)
@@ -139,6 +208,14 @@ class PDFAttachmentContextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"QLDA_LOCAL_STORAGE_ROOT": tmp}, clear=False):
                 self.assertIsNone(ctx._safe_path("../../etc/passwd"))
+
+    def test_ocr_cache_round_trip_uses_sha_and_private_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"QLDA_LOCAL_STORAGE_ROOT": tmp, "QLDA_AI_PDF_OCR_CACHE": "true"}, clear=False):
+                ctx._write_ocr_cache("abcdef1234567890", {1: "Trang một", 2: "Trang hai"})
+                loaded = ctx._read_ocr_cache("abcdef1234567890")
+                self.assertEqual(loaded, {1: "Trang một", 2: "Trang hai"})
+                self.assertTrue(ctx._ocr_cache_path("abcdef1234567890").exists())
 
 
 if __name__ == "__main__":
