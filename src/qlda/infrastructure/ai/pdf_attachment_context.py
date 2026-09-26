@@ -5,8 +5,9 @@ from __future__ import annotations
 QLDA stores uploads on the VPS in ``qlda_local_files``. Business rows contain
 metadata, while this module reads the actual authorized PDF bytes and exposes
 page-level content to the LLM. Text PDFs are parsed locally with pypdf. Image-only
-or partially scanned PDFs automatically fall back to the configured AI Vision
-provider, with a persistent SHA-based OCR cache to avoid repeating provider calls.
+or partially scanned PDFs are rasterized page-by-page with PyMuPDF and then sent
+to the configured native AI Vision provider. Embedded-image extraction remains a
+fallback only. Successful OCR is cached by PDF SHA.
 """
 
 import hashlib
@@ -361,7 +362,7 @@ def _write_ocr_cache(pdf_sha: str, pages: dict[int, str]) -> None:
 
 
 def _vision_ready_image(data: bytes) -> tuple[bytes, str]:
-    """Normalize arbitrary PDF image objects to a provider-safe PNG."""
+    """Normalize arbitrary page/image bytes to a provider-safe PNG."""
     try:
         from PIL import Image
 
@@ -379,7 +380,42 @@ def _vision_ready_image(data: bytes) -> tuple[bytes, str]:
         return bytes(data), "image/jpeg"
 
 
+def _render_pdf_page(path: Path, page_no: int) -> tuple[bytes, str] | None:
+    """Rasterize the complete PDF page, independent of pypdf ``page.images``.
+
+    A scanned page can be encoded as a page content stream, tiled images, masks or
+    other PDF objects that pypdf does not expose as ``page.images``. Rendering the
+    page is therefore the primary OCR input and is the key production safeguard.
+    """
+    if int(page_no or 0) <= 0:
+        return None
+    document = None
+    try:
+        import pymupdf
+
+        document = pymupdf.open(str(path))
+        index = int(page_no) - 1
+        if index < 0 or index >= int(document.page_count):
+            return None
+        dpi = _env_int("QLDA_AI_PDF_OCR_RENDER_DPI", 180, 96, 300)
+        page = document.load_page(index)
+        pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+        raw = bytes(pixmap.tobytes("png") or b"")
+        if len(raw) < 512:
+            return None
+        return _vision_ready_image(raw)
+    except Exception:
+        return None
+    finally:
+        if document is not None:
+            try:
+                document.close()
+            except Exception:
+                pass
+
+
 def _page_images(page: Any) -> list[bytes]:
+    """Legacy/fallback extraction when full-page rasterization is unavailable."""
     found: list[bytes] = []
     try:
         for image in list(page.images):
@@ -406,16 +442,23 @@ def _ocr_scanned_pdf(
     file_sha: str = "",
     max_chars: int = 15000,
 ) -> dict[str, Any]:
-    """OCR requested scan pages through the configured native AI Vision provider.
+    """OCR scan pages through full-page rasterization + native AI Vision.
 
-    Only images embedded in the authorized local PDF are sent. Successful text is
-    cached by the immutable PDF SHA so subsequent chats do not pay for OCR again.
+    The complete authorized local PDF page is rendered first. Embedded-image
+    extraction is used only when page rendering fails. Successful text is cached
+    by immutable PDF SHA so subsequent chats do not repeat provider calls.
     """
     requested = sorted({int(x) for x in page_numbers if int(x or 0) > 0})
     if not requested:
         return {"status": "not_needed", "pages": [], "missed_pages": [], "from_cache": True}
     if not _env_bool("QLDA_AI_PDF_OCR_ENABLED", True):
-        return {"status": "disabled", "pages": [], "missed_pages": requested, "from_cache": False}
+        return {
+            "status": "disabled",
+            "reason": "ocr_disabled",
+            "pages": [],
+            "missed_pages": requested,
+            "from_cache": False,
+        }
 
     max_pages = _env_int("QLDA_AI_PDF_OCR_MAX_PAGES", 40, 1, 120)
     requested = requested[:max_pages]
@@ -430,14 +473,19 @@ def _ocr_scanned_pdf(
     if not missing:
         return {
             "status": "ok",
+            "reason": "cache_hit",
             "pages": sorted(pages.items()),
             "missed_pages": [],
             "from_cache": True,
             "sha256": digest,
+            "rendered_pages": [],
+            "embedded_fallback_pages": [],
         }
 
     errors: list[str] = []
     no_image_pages: list[int] = []
+    rendered_pages: list[int] = []
+    embedded_fallback_pages: list[int] = []
     try:
         from pypdf import PdfReader
 
@@ -450,6 +498,7 @@ def _ocr_scanned_pdf(
             if not unlocked:
                 return {
                     "status": "encrypted",
+                    "reason": "encrypted_pdf",
                     "pages": sorted(pages.items()),
                     "missed_pages": missing,
                     "from_cache": bool(pages),
@@ -460,21 +509,33 @@ def _ocr_scanned_pdf(
         for page_no in missing:
             if page_no > len(reader.pages) or used >= max_chars:
                 continue
-            images = _page_images(reader.pages[page_no - 1])
-            if not images:
+
+            inputs: list[tuple[bytes, str]] = []
+            rendered = _render_pdf_page(path, page_no)
+            if rendered is not None:
+                inputs.append(rendered)
+                rendered_pages.append(page_no)
+            else:
+                for raw in _page_images(reader.pages[page_no - 1]):
+                    inputs.append(_vision_ready_image(raw))
+                if inputs:
+                    embedded_fallback_pages.append(page_no)
+
+            if not inputs:
                 no_image_pages.append(page_no)
                 continue
+
             chunks: list[str] = []
             seen: set[str] = set()
-            for image_index, raw in enumerate(images, start=1):
+            for image_index, (image_bytes, mime) in enumerate(inputs, start=1):
                 if used >= max_chars:
                     break
-                image_bytes, mime = _vision_ready_image(raw)
+                source_note = "toàn bộ trang đã raster hóa" if page_no in rendered_pages else f"ảnh nhúng {image_index}"
                 prompt = (
-                    f"OCR trang {page_no}, ảnh {image_index} của một hồ sơ quản lý dự án xây dựng. "
+                    f"OCR trang {page_no} ({source_note}) của một hồ sơ quản lý dự án xây dựng. "
                     "Hãy chép lại nguyên văn toàn bộ chữ nhìn thấy, ưu tiên tiếng Việt; giữ số liệu, ngày tháng, "
                     "mã hồ sơ, đầu mục và nội dung bảng theo thứ tự đọc. Không tóm tắt, không diễn giải, "
-                    "không suy đoán chữ không nhìn thấy. Nếu ảnh thật sự không có chữ, chỉ trả 'NO_TEXT'."
+                    "không suy đoán chữ không nhìn thấy. Nếu trang thật sự không có chữ, chỉ trả 'NO_TEXT'."
                 )
                 try:
                     text = _clean_text(
@@ -509,11 +570,25 @@ def _ocr_scanned_pdf(
     if pages:
         _write_ocr_cache(digest, pages)
     missed = [page_no for page_no in requested if page_no not in pages]
+    if not pages:
+        if no_image_pages and len(no_image_pages) >= len(missing):
+            reason = "page_render_and_embedded_image_unavailable"
+        elif errors:
+            reason = "vision_provider_error"
+        else:
+            reason = "no_visible_text"
+    elif missed:
+        reason = "partial_ocr"
+    else:
+        reason = "ok"
     return {
         "status": "ok" if pages else "unavailable",
+        "reason": reason,
         "pages": sorted(pages.items()),
         "missed_pages": missed,
         "no_image_pages": no_image_pages,
+        "rendered_pages": rendered_pages,
+        "embedded_fallback_pages": embedded_fallback_pages,
         "errors": errors,
         "from_cache": not missing or all(page_no in cached for page_no in pages),
         "sha256": digest,
@@ -668,19 +743,25 @@ def build_pdf_attachment_context(
             if int(x or 0) > 0 and int(x) not in native_pages
         ]
         if status == "no_text" and not ocr_pages:
-            reason = str(ocr_result.get("status") or "unavailable")
+            ocr_status = str(ocr_result.get("status") or "unavailable")
+            reason = str(ocr_result.get("reason") or "unknown")
             lines.append(
                 f"[PDF-SCAN-NO-TEXT:{file_id}] file={name} là PDF scan/ảnh và OCR/Vision chưa lấy được chữ "
-                f"(trạng thái={reason}). Không được suy nội dung từ tên file hoặc metadata."
+                f"(trạng thái={ocr_status}; lý_do={reason}). Không được suy nội dung từ tên file hoặc metadata."
             )
         elif missed_pages:
             shown = ",".join(str(x) for x in missed_pages[:20])
+            reason = str(ocr_result.get("reason") or "partial_ocr")
             lines.append(
-                f"[PDF-PARTIAL-NO-TEXT:{file_id}] OCR chưa đọc được trang {shown}; chỉ kết luận từ các trang PDF/PDF-OCR có nguồn."
+                f"[PDF-PARTIAL-NO-TEXT:{file_id}] OCR chưa đọc được trang {shown} (lý_do={reason}); "
+                "chỉ kết luận từ các trang PDF/PDF-OCR có nguồn."
             )
         elif blank_numbers and ocr_pages:
-            source = "cache" if bool(ocr_result.get("from_cache")) else "vision"
-            lines.append(f"[PDF-OCR-COMPLETE:{file_id}] các trang scan đã được OCR bằng {source}; không dùng metadata thay cho nội dung.")
+            source = "cache" if bool(ocr_result.get("from_cache")) else "vision-page-render"
+            lines.append(
+                f"[PDF-OCR-COMPLETE:{file_id}] các trang scan đã được OCR bằng {source}; "
+                "không dùng metadata thay cho nội dung."
+            )
 
         if bool(extracted.get("truncated")):
             lines.append(f"[PDF-TRUNCATED:{file_id}] nội dung PDF dài; context chỉ chứa phần đầu trong giới hạn an toàn.")
