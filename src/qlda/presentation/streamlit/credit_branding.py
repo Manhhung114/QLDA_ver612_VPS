@@ -9,18 +9,33 @@ def install_credit_branding_v7() -> None:
     if getattr(st, "_qlda_v7_credit_branding_installed", False):
         return
 
-    # Match the persistent byline to the normal Streamlit navigation item text
-    # size (for example the "Tổng quan" entry) by using the same 1rem scale on
-    # both desktop and mobile. Keep the byline black and bold for visibility.
+    # Use one explicit shared size for the sidebar navigation labels and the
+    # persistent byline.  This avoids differences between Streamlit rem/root
+    # scaling and the fixed-position credit on desktop/mobile.
     st.markdown(
         """
 <style>
+:root{
+  --qlda-nav-credit-font-size:16px;
+  --qlda-nav-credit-line-height:1.45;
+}
+
+/* Navigation text such as “🏠 Tổng quan”. */
+[data-testid="stSidebar"] [data-testid="stRadio"] label p,
+[data-testid="stSidebar"] [role="radiogroup"] label p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{
+  font-size:var(--qlda-nav-credit-font-size)!important;
+  line-height:var(--qlda-nav-credit-line-height)!important;
+}
+
+/* Persistent application credit: exactly the same text size as navigation. */
 .qlda-v7-credit{
   color:#000000!important;
-  font-size:1rem!important;
-  line-height:1.35!important;
-  font-weight:800!important;
-  letter-spacing:.12px!important;
+  font-family:inherit!important;
+  font-size:var(--qlda-nav-credit-font-size)!important;
+  line-height:var(--qlda-nav-credit-line-height)!important;
+  font-weight:700!important;
+  letter-spacing:0!important;
   background:rgba(255,255,255,.98)!important;
   border:1.5px solid #111111!important;
   border-radius:999px!important;
@@ -28,13 +43,13 @@ def install_credit_branding_v7() -> None:
   box-shadow:0 3px 12px rgba(0,0,0,.18)!important;
   opacity:1!important;
 }
+
 @media(max-width:760px){
   .qlda-v7-credit{
     right:8px!important;
     bottom:6px!important;
-    font-size:1rem!important;
-    line-height:1.35!important;
-    font-weight:800!important;
+    font-size:var(--qlda-nav-credit-font-size)!important;
+    line-height:var(--qlda-nav-credit-line-height)!important;
     padding:5px 10px!important;
   }
 }
