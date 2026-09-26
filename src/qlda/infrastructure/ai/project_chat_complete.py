@@ -6,6 +6,7 @@ import time
 from datetime import date
 from typing import Any, Sequence
 
+from qlda.infrastructure.ai.aggregate_context import build_authoritative_aggregate_context
 from qlda.infrastructure.ai.live_domain_context import build_live_domain_context
 from qlda.infrastructure.ai.project_chat import build_live_project_context
 from qlda.infrastructure.ai.provider_gateway import AIProviderError, NativeProviderGateway
@@ -35,6 +36,13 @@ def ask_project_chat(
     )
     workspace_ids = [int(x) for x in list(scope.get("workspace_ids") or []) if int(x or 0) > 0]
     with connect() as connection:
+        aggregate_context = build_authoritative_aggregate_context(
+            connection,
+            workspace_ids,
+            str(question or ""),
+            detail_limit=120,
+            max_chars=18000,
+        )
         detail_context = build_live_domain_context(
             connection,
             workspace_ids,
@@ -50,8 +58,12 @@ def ask_project_chat(
         f"NGÀY BÁO CÁO CHÍNH XÁC: {report_date or 'không chỉ định'}. Không được tự đổi năm/ngày.\n"
         "Dữ liệu LIVE dưới đây có độ ưu tiên cao hơn lịch sử hội thoại và mọi snapshot cũ.\n\n"
         f"{base_context}\n\n"
+        f"{aggregate_context}\n\n"
         f"{detail_context}\n\n"
         "QUY TẮC TRẢ LỜI: chỉ kết luận từ dữ liệu LIVE. "
+        "Nếu có [AGGREGATE-AUTHORITY], mọi số [EXACT-DOMAIN], [EXACT-DOC-TYPE] và [EXACT-DOC-SUMMARY] là tổng chính xác từ SQL và có quyền ưu tiên cao nhất. "
+        "Tuyệt đối không dùng số lượng dòng chi tiết [DOC], [EXACT-DOC], top-k, kết quả tìm kiếm hoặc RAG để suy ra tổng số bản ghi. "
+        "Nếu [EXACT-DOC-DETAIL-LIMIT] xuất hiện thì vẫn phải báo tổng theo [EXACT-DOC-SUMMARY], không được báo theo số dòng chi tiết đã đưa vào prompt. "
         "[LIVE-SUMMARY] và [DOMAIN-COVERAGE] là số đếm/index; các nhãn [DOC], [DRAWING], [BOQ], [PAYMENT], "
         "[IPC], [VO], [MATERIAL], [PROCUREMENT], [INVENTORY], [WORK-TASK], [CONTRACT], [APPROVAL], "
         "[DATA-HUB-ROW], [PRODUCTION-ROW] là bằng chứng chi tiết. "
@@ -62,6 +74,8 @@ def ask_project_chat(
         "Khi nêu số liệu/nội dung, giữ nhãn nguồn tương ứng để người dùng kiểm tra được."
     )
     source_refs = [f"workspace:{wid}" for wid in workspace_ids]
+    if aggregate_context:
+        source_refs.append("postgres:authoritative-aggregate")
     source_refs.append("postgres:live-domain-details")
     try:
         result = NativeProviderGateway.run(
