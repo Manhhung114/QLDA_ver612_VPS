@@ -7,17 +7,29 @@ from .loop_engine import ClosedLoopEngine, ClosedLoopRepository
 from .runtime import get_autonomy_platform, get_autonomy_repository, run_project_supervisor
 
 
+class RuntimeClosedLoopRepository(ClosedLoopRepository):
+    """Production repository guard: missing rows stay empty/fail-closed."""
+
+    def get_loop(self, *, project_id: int, loop_id: str) -> dict[str, Any]:
+        row = super().get_loop(project_id=int(project_id), loop_id=str(loop_id))
+        return row if str(row.get("loop_id") or "") else {}
+
+    def latest_loop(self, *, project_id: int, open_only: bool = False) -> dict[str, Any]:
+        row = super().latest_loop(project_id=int(project_id), open_only=bool(open_only))
+        return row if str(row.get("loop_id") or "") else {}
+
+
 _LOCK = RLock()
 _ENGINES: dict[int, ClosedLoopEngine] = {}
-_REPOSITORIES: dict[int, ClosedLoopRepository] = {}
+_REPOSITORIES: dict[int, RuntimeClosedLoopRepository] = {}
 
 
-def get_closed_loop_repository(db) -> ClosedLoopRepository:
+def get_closed_loop_repository(db) -> RuntimeClosedLoopRepository:
     key = id(db)
     with _LOCK:
         repository = _REPOSITORIES.get(key)
         if repository is None:
-            repository = ClosedLoopRepository(db.connect)
+            repository = RuntimeClosedLoopRepository(db.connect)
             repository.ensure_schema()
             _REPOSITORIES[key] = repository
         return repository
@@ -105,6 +117,7 @@ def add_closed_loop_feedback(
 
 
 __all__ = [
+    "RuntimeClosedLoopRepository",
     "add_closed_loop_feedback",
     "get_closed_loop_engine",
     "get_closed_loop_repository",
