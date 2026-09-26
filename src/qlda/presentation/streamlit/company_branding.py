@@ -3,9 +3,8 @@ from __future__ import annotations
 """Persistent company-logo branding and Admin controls.
 
 The logo is stored outside the Git checkout so it survives deploys. At runtime
-it is rendered as the first visual block in the shared Streamlit sidebar,
-therefore it appears above the Logout control and remains consistent on every
-sheet in the application.
+it is rendered at the top of the sidebar, immediately above the logout button.
+The presentation is global because every sheet shares the same sidebar shell.
 """
 
 import base64
@@ -101,30 +100,24 @@ def _sidebar_logo_css(
     height_px: int,
     gap_px: int,
 ) -> str:
-    """Build CSS that places the logo above the Logout control in the sidebar."""
+    """Build CSS that places the logo at the top of the sidebar above logout."""
     opacity_pct = max(0, min(int(opacity_pct), 100))
     height_px = max(40, min(int(height_px), 220))
-    gap_px = max(0, min(int(gap_px), 40))
+    # Negative values intentionally pull the logout button closer to logos that
+    # contain large built-in white/transparent bottom margins.
+    gap_px = max(-80, min(int(gap_px), 40))
 
-    # Always disable the former H3-based location so an old/duplicate logo can
-    # never remain below Logout after this placement change.
-    legacy_reset = """
+    if not data_uri or opacity_pct <= 0:
+        return """
+<style id="qlda-company-logo-style">
+[data-testid="stSidebarContent"]::before{
+  content:none!important;
+  display:none!important;
+}
 [data-testid="stSidebar"] h3::before{
   content:none!important;
   display:none!important;
-  background-image:none!important;
 }
-"""
-
-    if not data_uri or opacity_pct <= 0:
-        return f"""
-<style id="qlda-company-logo-style">
-{legacy_reset}
-[data-testid="stSidebarContent"]::before{{
-  content:none!important;
-  display:none!important;
-  background-image:none!important;
-}}
 </style>
 """
 
@@ -133,22 +126,21 @@ def _sidebar_logo_css(
 
     return f"""
 <style id="qlda-company-logo-style">
-{legacy_reset}
-/*
-  The company logo is the first block in Streamlit's sidebar content. This
-  guarantees the visual order:
-      LOGO -> Logout -> QLDA Xây dựng -> project tools/navigation.
-  The element is decorative and never intercepts clicks.
-*/
+/* Disable the previous logo anchor above the QLDA heading. */
+[data-testid="stSidebar"] h3::before{{
+  content:none!important;
+  display:none!important;
+}}
+
+/* Global company logo at the very top of the sidebar, above logout. */
 [data-testid="stSidebarContent"]::before{{
   content:"";
   display:block;
-  flex:0 0 auto;
   width:100%;
   height:{height_px}px;
-  margin:4px 0 {gap_px}px 0;
+  margin:0 0 {gap_px}px 0;
   padding:0;
-  box-sizing:border-box;
+  flex:0 0 auto;
   background-image:{background};
   background-repeat:no-repeat;
   background-position:center center;
@@ -157,16 +149,15 @@ def _sidebar_logo_css(
   pointer-events:none;
 }}
 
-/* Keep the sidebar's first real widget close to the logo without overlap. */
-[data-testid="stSidebarContent"] > :first-child{{
-  margin-top:0!important;
+/* Avoid extra top whitespace introduced by the sidebar container itself. */
+[data-testid="stSidebarContent"]{{
+  padding-top:8px!important;
 }}
 
 @media(max-width:760px){{
   [data-testid="stSidebarContent"]::before{{
     height:{max(48, min(height_px, 150))}px;
-    margin-top:2px;
-    margin-bottom:{min(gap_px, 18)}px;
+    margin-bottom:{max(-60, min(gap_px, 20))}px;
   }}
 }}
 </style>
@@ -188,7 +179,9 @@ def render_company_logo_watermark(st: Any) -> None:
 
     opacity_pct = int(cfg.get("company_logo_opacity_pct", 100) or 0)
     height_px = int(cfg.get("company_logo_height_px", 92) or 92)
-    gap_px = int(cfg.get("company_logo_gap_px", 10) or 0)
+    # V3 spacing uses a dedicated key so existing positive values from the old
+    # 'logo -> QLDA heading' layout do not keep the logout button far away.
+    gap_px = int(cfg.get("company_logo_logout_gap_px", -45))
 
     st.markdown(
         _sidebar_logo_css(
@@ -232,7 +225,7 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
 
     current_opacity = int(cfg.get("company_logo_opacity_pct", 100) or 0)
     current_height = int(cfg.get("company_logo_height_px", 92) or 92)
-    current_gap = int(cfg.get("company_logo_gap_px", 10) or 0)
+    current_gap = int(cfg.get("company_logo_logout_gap_px", -45))
 
     opacity_pct = st.slider(
         "Độ mờ logo (%)",
@@ -255,16 +248,17 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
     )
     gap_px = c2.slider(
         "Khoảng cách logo → Đăng xuất (px)",
-        min_value=0,
+        min_value=-80,
         max_value=40,
-        value=max(0, min(40, current_gap)),
+        value=max(-80, min(40, current_gap)),
         step=1,
         key="qlda_company_logo_gap_v3",
+        help="Giá trị âm kéo nút Đăng xuất lên gần logo hơn. Khuyến nghị -55 đến -30 px với logo có nhiều nền trắng.",
     )
 
     st.caption(
-        "Gợi ý: logo ngang dùng 80–110 px; logo vuông/cao dùng 90–140 px. "
-        "Khoảng cách tới nút Đăng xuất thường 6–12 px."
+        "Gợi ý hiện tại: chiều cao 90–110 px; khoảng cách logo → Đăng xuất khoảng -45 px. "
+        "Nếu file logo có nhiều khoảng trắng ở dưới, có thể giảm tới -60 px."
     )
 
     save_col, delete_col = st.columns(2)
@@ -280,7 +274,7 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
                 "company_logo_enabled",
                 "company_logo_opacity_pct",
                 "company_logo_height_px",
-                "company_logo_gap_px",
+                "company_logo_logout_gap_px",
             ]
             if upload is not None:
                 save_company_logo(upload.getvalue())
@@ -294,11 +288,11 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
                     "company_logo_enabled": True,
                     "company_logo_opacity_pct": int(opacity_pct),
                     "company_logo_height_px": int(height_px),
-                    "company_logo_gap_px": int(gap_px),
+                    "company_logo_logout_gap_px": int(gap_px),
                 }
             )
             ss.append_settings_audit(actor, "update_company_logo", changed)
-            st.success("Đã lưu logo. Logo sẽ nằm phía trên nút ‘Đăng xuất’ trên toàn app.")
+            st.success("Đã lưu logo. Logo nằm phía trên nút ‘Đăng xuất’ trên toàn app.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không thể lưu logo: {exc}")
@@ -317,7 +311,7 @@ def render_company_logo_settings(st: Any, actor: str = "") -> None:
                 "delete_company_logo",
                 ["company_logo_enabled", "company_logo_file"],
             )
-            st.success("Đã xóa logo. Khoảng logo phía trên Đăng xuất cũng được loại bỏ.")
+            st.success("Đã xóa logo. Khoảng logo trên sidebar cũng được loại bỏ.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không thể xóa logo: {exc}")
@@ -343,7 +337,6 @@ def install_company_branding_runtime(st: Any | None = None) -> None:
             wrapped._qlda_company_branding_wrapped = True  # type: ignore[attr-defined]
             system_settings.render_system_settings_admin = wrapped
     except Exception:
-        # Branding must never prevent the core application from starting.
         pass
 
     render_company_sidebar_logo(st)
