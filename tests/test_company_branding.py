@@ -38,7 +38,7 @@ class CompanyBrandingTests(unittest.TestCase):
         )
         self.assertIn('[data-testid="stSidebarContent"]::before', css)
         self.assertIn("height:96px", css)
-        self.assertIn("margin:4px 0 11px 0", css)
+        self.assertIn("margin:0 0 11px 0", css)
         self.assertIn("background-position:center center", css)
         self.assertIn("opacity:0.730", css)
         self.assertIn("pointer-events:none", css)
@@ -46,6 +46,16 @@ class CompanyBrandingTests(unittest.TestCase):
         self.assertIn("display:none!important", css)
         self.assertNotIn("stAppViewContainer", css)
         self.assertNotIn("position:fixed", css)
+
+    def test_negative_gap_pulls_logout_closer_to_logo(self):
+        css = branding._sidebar_logo_css(
+            "data:image/png;base64,AAAA",
+            opacity_pct=100,
+            height_px=100,
+            gap_px=-45,
+        )
+        self.assertIn("margin:0 0 -45px 0", css)
+        self.assertIn("margin-bottom:-45px", css)
 
     def test_opacity_accepts_full_zero_to_one_hundred_percent_range(self):
         hidden = branding._sidebar_logo_css(
