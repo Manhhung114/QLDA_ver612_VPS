@@ -29,18 +29,38 @@ class CompanyBrandingTests(unittest.TestCase):
             self.assertIsNone(branding.current_logo_path())
             self.assertFalse(saved.exists())
 
-    def test_watermark_is_centered_background_and_non_interactive(self):
-        css = branding._watermark_css(
+    def test_sidebar_logo_is_above_sidebar_heading_not_page_watermark(self):
+        css = branding._sidebar_logo_css(
             "data:image/png;base64,AAAA",
-            opacity=0.055,
-            width_vw=34,
+            opacity_pct=73,
+            height_px=96,
+            gap_px=11,
         )
-        self.assertIn("background-position:center 58%", css)
+        self.assertIn('[data-testid="stSidebar"] h3::before', css)
+        self.assertIn("height:96px", css)
+        self.assertIn("margin:0 0 11px 0", css)
+        self.assertIn("background-position:center center", css)
+        self.assertIn("opacity:0.730", css)
         self.assertIn("pointer-events:none", css)
-        self.assertIn("position:fixed", css)
-        self.assertIn("background-repeat:no-repeat", css)
-        self.assertNotIn("bottom:6px", css)
-        self.assertNotIn("right:8px", css)
+        self.assertNotIn("stAppViewContainer", css)
+        self.assertNotIn("position:fixed", css)
+
+    def test_opacity_accepts_full_zero_to_one_hundred_percent_range(self):
+        hidden = branding._sidebar_logo_css(
+            "data:image/png;base64,AAAA",
+            opacity_pct=0,
+            height_px=90,
+            gap_px=10,
+        )
+        self.assertIn("display:none!important", hidden)
+
+        full = branding._sidebar_logo_css(
+            "data:image/png;base64,AAAA",
+            opacity_pct=100,
+            height_px=90,
+            gap_px=10,
+        )
+        self.assertIn("opacity:1.000", full)
 
     def test_invalid_logo_type_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
