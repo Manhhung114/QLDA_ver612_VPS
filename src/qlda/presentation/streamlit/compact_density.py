@@ -47,7 +47,7 @@ _COMPACT_CSS = """
    This rule intentionally runs after the base V7 theme, so keep the requested
    size/color/weight here instead of in a separate branding stylesheet. */
 .qlda-v7-credit{
-  font-size:24px!important;
+  font-size:18px!important;
   line-height:1.15!important;
   font-weight:900!important;
   color:#000000!important;
@@ -94,7 +94,7 @@ _COMPACT_CSS = """
   [data-testid="stMetricValue"]{font-size:1.45rem!important}
   .qlda-ai-page-title{font-size:1.28rem}
   .qlda-ai-page-subtitle{margin-bottom:.45rem}
-  .qlda-v7-credit{font-size:24px!important;font-weight:900!important;color:#000000!important;opacity:1!important}
+  .qlda-v7-credit{font-size:18px!important;font-weight:900!important;color:#000000!important;opacity:1!important}
 }
 </style>
 """
