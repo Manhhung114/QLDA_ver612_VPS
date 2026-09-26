@@ -17,13 +17,13 @@ def install_credit_branding_v7() -> None:
 <style>
 .qlda-v7-credit{
   color:#000000!important;
-  font-size:14px!important;
+  font-size:17px!important;
   font-weight:800!important;
   letter-spacing:.12px!important;
   background:rgba(255,255,255,.98)!important;
   border:1.5px solid #111111!important;
   border-radius:999px!important;
-  padding:5px 10px!important;
+  padding:6px 12px!important;
   box-shadow:0 3px 12px rgba(0,0,0,.18)!important;
   opacity:1!important;
 }
@@ -31,9 +31,9 @@ def install_credit_branding_v7() -> None:
   .qlda-v7-credit{
     right:8px!important;
     bottom:6px!important;
-    font-size:12.5px!important;
+    font-size:15px!important;
     font-weight:800!important;
-    padding:4px 9px!important;
+    padding:5px 10px!important;
   }
 }
 </style>
