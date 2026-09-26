@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-PATCH_MARKER = "COMPACT DENSITY UI V2 DEFERRED"
+PATCH_MARKER = "COMPACT DENSITY UI V3 CREDIT LEGIBILITY"
 
 _COMPACT_CSS = """
 <style>
@@ -43,15 +43,22 @@ _COMPACT_CSS = """
 .qlda-v7-project{font-size:.94rem!important;margin-top:3px!important}
 .qlda-v7-contractor{font-size:.81rem!important;margin-top:2px!important}
 .qlda-v7-section-title{margin:.22rem 0 .38rem!important}
+/* Final runtime override for the persistent “by Hoàng Mạnh Hùng & AI” credit.
+   This rule intentionally runs after the base V7 theme, so keep the requested
+   size/color/weight here instead of in a separate branding stylesheet. */
 .qlda-v7-credit{
-  font-size:8px!important;
-  opacity:.42!important;
+  font-size:24px!important;
+  line-height:1.15!important;
+  font-weight:900!important;
+  color:#000000!important;
+  opacity:1!important;
   background:transparent!important;
   border:0!important;
   box-shadow:none!important;
-  padding:1px 4px!important;
-  right:8px!important;
-  bottom:4px!important;
+  padding:2px 6px!important;
+  right:10px!important;
+  bottom:6px!important;
+  text-shadow:none!important;
 }
 .qlda-ai-page-head{
   display:flex;
@@ -87,6 +94,7 @@ _COMPACT_CSS = """
   [data-testid="stMetricValue"]{font-size:1.45rem!important}
   .qlda-ai-page-title{font-size:1.28rem}
   .qlda-ai-page-subtitle{margin-bottom:.45rem}
+  .qlda-v7-credit{font-size:24px!important;font-weight:900!important;color:#000000!important;opacity:1!important}
 }
 </style>
 """
