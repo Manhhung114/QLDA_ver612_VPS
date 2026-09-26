@@ -2,18 +2,23 @@ from __future__ import annotations
 
 """Tenant-scoped PDF attachment context for native project chat.
 
-Current QLDA production stores uploads on the VPS in ``qlda_local_files``.  The
-business rows (documents/drawings/etc.) contain metadata, while this module reads
-the actual PDF bytes from the authorized workspace's local storage and exposes
-page-level text to the LLM.  Image-only/scanned PDFs are marked explicitly so the
-assistant cannot pretend metadata is the file's contents.
+QLDA stores uploads on the VPS in ``qlda_local_files``. Business rows contain
+metadata, while this module reads the actual authorized PDF bytes and exposes
+page-level content to the LLM. Text PDFs are parsed locally with pypdf. Image-only
+or partially scanned PDFs automatically fall back to the configured AI Vision
+provider, with a persistent SHA-based OCR cache to avoid repeating provider calls.
 """
 
+import hashlib
+import io
+import json
 import os
 import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Sequence
+
+from qlda.infrastructure.ai.provider_gateway import NativeProviderGateway
 
 
 _STOPWORDS = {
@@ -34,6 +39,21 @@ _DOC_TYPE_PHRASES = {
     "KDVT": ("kiem dinh vat tu", "kdvt"),
     "NKCT": ("nhat ky cong truong", "nkct"),
 }
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(os.environ.get(name, default) or default).strip())
+    except Exception:
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
 
 
 def _norm(value: Any) -> str:
@@ -161,8 +181,7 @@ def _select_business_records(connection, workspace_ids: list[int], question: str
                     (_score(row, terms, ("doc_type", "code", "subject", "description")), row)
                     for row in rows
                 ]
-                matches = [row for score, row in scored if score > 0]
-                rows = (matches or rows)[:4]
+                rows = ([row for score, row in scored if score > 0] or rows)[:4]
             for row in rows:
                 item = dict(row)
                 item["kind"] = "document"
@@ -171,7 +190,10 @@ def _select_business_records(connection, workspace_ids: list[int], question: str
                 item["record_title"] = str(row.get("subject") or "")
                 selected.append(item)
 
-    drawing_intent = any(phrase in qnorm for phrase in ("ban ve", "drawing", "shopdrawing", "shop drawing", "hoan cong", "as built"))
+    drawing_intent = any(
+        phrase in qnorm
+        for phrase in ("ban ve", "drawing", "shopdrawing", "shop drawing", "hoan cong", "as built")
+    )
     if drawing_intent and _table_exists(connection, "drawings"):
         rows = _fetch(
             connection,
@@ -213,8 +235,15 @@ def _safe_path(storage_path: str) -> Path | None:
         return None
 
 
+def _clean_text(value: Any) -> str:
+    text = str(value or "").replace("\x00", "")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _extract_pdf_pages(path: Path, *, max_pages: int = 120, max_chars: int = 15000) -> dict[str, Any]:
-    """Return page-labelled text. No OCR is attempted for image-only pages."""
+    """Return native page text and page numbers that require OCR."""
     try:
         from pypdf import PdfReader
 
@@ -225,20 +254,25 @@ def _extract_pdf_pages(path: Path, *, max_pages: int = 120, max_chars: int = 150
             except Exception:
                 unlocked = 0
             if not unlocked:
-                return {"status": "encrypted", "page_count": len(reader.pages), "pages": [], "blank_pages": 0}
+                return {
+                    "status": "encrypted",
+                    "page_count": len(reader.pages),
+                    "pages": [],
+                    "blank_pages": 0,
+                    "blank_page_numbers": [],
+                }
         page_count = len(reader.pages)
         pages: list[tuple[int, str]] = []
-        blank_pages = 0
+        blank_page_numbers: list[int] = []
         used = 0
-        for page_no, page in enumerate(reader.pages[: max(1, int(max_pages))], start=1):
+        limit = min(page_count, max(1, int(max_pages)))
+        for page_no, page in enumerate(reader.pages[:limit], start=1):
             try:
-                text = page.extract_text() or ""
+                text = _clean_text(page.extract_text() or "")
             except Exception:
                 text = ""
-            text = re.sub(r"[ \t]+", " ", text)
-            text = re.sub(r"\n{3,}", "\n\n", text).strip()
             if not text:
-                blank_pages += 1
+                blank_page_numbers.append(page_no)
                 continue
             room = max_chars - used
             if room <= 0:
@@ -251,7 +285,8 @@ def _extract_pdf_pages(path: Path, *, max_pages: int = 120, max_chars: int = 150
             "status": "ok" if pages else "no_text",
             "page_count": page_count,
             "pages": pages,
-            "blank_pages": blank_pages,
+            "blank_pages": len(blank_page_numbers),
+            "blank_page_numbers": blank_page_numbers,
             "truncated": page_count > max_pages or used >= max_chars,
         }
     except Exception as exc:
@@ -260,8 +295,229 @@ def _extract_pdf_pages(path: Path, *, max_pages: int = 120, max_chars: int = 150
             "page_count": 0,
             "pages": [],
             "blank_pages": 0,
+            "blank_page_numbers": [],
             "error": exc.__class__.__name__,
         }
+
+
+def _pdf_sha(path: Path, hinted_sha: str = "") -> str:
+    hinted = re.sub(r"[^a-fA-F0-9]", "", str(hinted_sha or ""))
+    if len(hinted) >= 32:
+        return hinted.lower()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ocr_cache_path(pdf_sha: str) -> Path:
+    digest = hashlib.sha256(("qlda-pdf-ocr-v2:" + str(pdf_sha)).encode("utf-8")).hexdigest()
+    return _storage_root() / ".qlda-ai" / "pdf_ocr" / f"{digest}.json"
+
+
+def _read_ocr_cache(pdf_sha: str) -> dict[int, str]:
+    if not _env_bool("QLDA_AI_PDF_OCR_CACHE", True):
+        return {}
+    path = _ocr_cache_path(pdf_sha)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if int(data.get("version") or 0) != 2 or str(data.get("sha256") or "") != str(pdf_sha):
+            return {}
+        pages = data.get("pages") or {}
+        return {
+            int(page_no): _clean_text(text)
+            for page_no, text in dict(pages).items()
+            if str(page_no).isdigit() and _clean_text(text)
+        }
+    except Exception:
+        return {}
+
+
+def _write_ocr_cache(pdf_sha: str, pages: dict[int, str]) -> None:
+    if not pages or not _env_bool("QLDA_AI_PDF_OCR_CACHE", True):
+        return
+    path = _ocr_cache_path(pdf_sha)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(path.parent, 0o700)
+        except Exception:
+            pass
+        payload = {
+            "version": 2,
+            "sha256": str(pdf_sha),
+            "pages": {str(int(k)): str(v) for k, v in sorted(pages.items()) if str(v).strip()},
+        }
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except Exception:
+            pass
+        tmp.replace(path)
+    except Exception:
+        return
+
+
+def _vision_ready_image(data: bytes) -> tuple[bytes, str]:
+    """Normalize arbitrary PDF image objects to a provider-safe PNG."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(bytes(data))) as image:
+            image.load()
+            if image.mode not in {"RGB", "L"}:
+                image = image.convert("RGB")
+            max_dim = _env_int("QLDA_AI_PDF_OCR_MAX_IMAGE_DIM", 3200, 1200, 5000)
+            if max(image.size or (0, 0)) > max_dim:
+                image.thumbnail((max_dim, max_dim))
+            out = io.BytesIO()
+            image.save(out, format="PNG", optimize=True)
+            return out.getvalue(), "image/png"
+    except Exception:
+        return bytes(data), "image/jpeg"
+
+
+def _page_images(page: Any) -> list[bytes]:
+    found: list[bytes] = []
+    try:
+        for image in list(page.images):
+            raw = bytes(getattr(image, "data", b"") or b"")
+            if len(raw) >= 2048:
+                found.append(raw)
+    except Exception:
+        return []
+    found.sort(key=len, reverse=True)
+    limit = _env_int("QLDA_AI_PDF_OCR_MAX_IMAGES_PER_PAGE", 3, 1, 6)
+    return found[:limit]
+
+
+def _looks_like_no_text(value: str) -> bool:
+    norm = _norm(value)
+    return not norm or norm in {"no text", "khong co chu", "khong co van ban", "blank", "empty"}
+
+
+def _ocr_scanned_pdf(
+    path: Path,
+    *,
+    workspace_scope: int,
+    page_numbers: Sequence[int],
+    file_sha: str = "",
+    max_chars: int = 15000,
+) -> dict[str, Any]:
+    """OCR requested scan pages through the configured native AI Vision provider.
+
+    Only images embedded in the authorized local PDF are sent. Successful text is
+    cached by the immutable PDF SHA so subsequent chats do not pay for OCR again.
+    """
+    requested = sorted({int(x) for x in page_numbers if int(x or 0) > 0})
+    if not requested:
+        return {"status": "not_needed", "pages": [], "missed_pages": [], "from_cache": True}
+    if not _env_bool("QLDA_AI_PDF_OCR_ENABLED", True):
+        return {"status": "disabled", "pages": [], "missed_pages": requested, "from_cache": False}
+
+    max_pages = _env_int("QLDA_AI_PDF_OCR_MAX_PAGES", 40, 1, 120)
+    requested = requested[:max_pages]
+    try:
+        digest = _pdf_sha(path, file_sha)
+    except Exception:
+        digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+
+    cached = _read_ocr_cache(digest)
+    pages: dict[int, str] = {page_no: cached[page_no] for page_no in requested if page_no in cached}
+    missing = [page_no for page_no in requested if page_no not in pages]
+    if not missing:
+        return {
+            "status": "ok",
+            "pages": sorted(pages.items()),
+            "missed_pages": [],
+            "from_cache": True,
+            "sha256": digest,
+        }
+
+    errors: list[str] = []
+    no_image_pages: list[int] = []
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        if bool(getattr(reader, "is_encrypted", False)):
+            try:
+                unlocked = reader.decrypt("")
+            except Exception:
+                unlocked = 0
+            if not unlocked:
+                return {
+                    "status": "encrypted",
+                    "pages": sorted(pages.items()),
+                    "missed_pages": missing,
+                    "from_cache": bool(pages),
+                    "sha256": digest,
+                }
+
+        used = sum(len(value) for value in pages.values())
+        for page_no in missing:
+            if page_no > len(reader.pages) or used >= max_chars:
+                continue
+            images = _page_images(reader.pages[page_no - 1])
+            if not images:
+                no_image_pages.append(page_no)
+                continue
+            chunks: list[str] = []
+            seen: set[str] = set()
+            for image_index, raw in enumerate(images, start=1):
+                if used >= max_chars:
+                    break
+                image_bytes, mime = _vision_ready_image(raw)
+                prompt = (
+                    f"OCR trang {page_no}, ảnh {image_index} của một hồ sơ quản lý dự án xây dựng. "
+                    "Hãy chép lại nguyên văn toàn bộ chữ nhìn thấy, ưu tiên tiếng Việt; giữ số liệu, ngày tháng, "
+                    "mã hồ sơ, đầu mục và nội dung bảng theo thứ tự đọc. Không tóm tắt, không diễn giải, "
+                    "không suy đoán chữ không nhìn thấy. Nếu ảnh thật sự không có chữ, chỉ trả 'NO_TEXT'."
+                )
+                try:
+                    text = _clean_text(
+                        NativeProviderGateway.vision_text(
+                            int(workspace_scope),
+                            data=image_bytes,
+                            mime_type=mime,
+                            prompt=prompt,
+                        )
+                    )
+                except Exception as exc:
+                    errors.append(f"P{page_no}:{exc.__class__.__name__}")
+                    continue
+                if _looks_like_no_text(text):
+                    continue
+                key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if key in seen:
+                    continue
+                seen.add(key)
+                room = max_chars - used
+                if room <= 0:
+                    break
+                if len(text) > room:
+                    text = text[:room].rstrip() + "…"
+                chunks.append(text)
+                used += len(text)
+            if chunks:
+                pages[page_no] = "\n".join(chunks)
+    except Exception as exc:
+        errors.append(exc.__class__.__name__)
+
+    if pages:
+        _write_ocr_cache(digest, pages)
+    missed = [page_no for page_no in requested if page_no not in pages]
+    return {
+        "status": "ok" if pages else "unavailable",
+        "pages": sorted(pages.items()),
+        "missed_pages": missed,
+        "no_image_pages": no_image_pages,
+        "errors": errors,
+        "from_cache": not missing or all(page_no in cached for page_no in pages),
+        "sha256": digest,
+    }
 
 
 def _clip_context(lines: list[str], max_chars: int) -> str:
@@ -341,8 +597,6 @@ def build_pdf_attachment_context(
                     break
 
     if not chosen:
-        # Generic PDF/file questions can still inspect authorized attachments even
-        # when there is no document/drawing row matching the wording.
         terms = _terms(question)
         scored = [
             (
@@ -352,10 +606,10 @@ def build_pdf_attachment_context(
             for file_row in files
         ]
         matched = [row for score, row in scored if score > 0]
-        fallback = matched or files
-        chosen = [(row, None) for row in fallback[:max_files]]
+        chosen = [(row, None) for row in (matched or files)[:max_files]]
 
     lines = ["## NỘI DUNG PDF ĐÍNH KÈM LIVE"]
+    per_file_chars = max(2500, max_chars // max(1, len(chosen)))
     for file_row, record in chosen:
         file_id = str(file_row.get("id") or "")
         name = str(file_row.get("name") or "attachment.pdf")
@@ -368,23 +622,17 @@ def build_pdf_attachment_context(
             )
             continue
 
-        extracted = _extract_pdf_pages(path, max_chars=max(2500, max_chars // max(1, len(chosen))))
+        extracted = _extract_pdf_pages(path, max_chars=per_file_chars)
         status = str(extracted.get("status") or "error")
-        pages = list(extracted.get("pages") or [])
+        native_pages = {int(page_no): str(text) for page_no, text in list(extracted.get("pages") or [])}
         page_count = int(extracted.get("page_count") or 0)
+        blank_numbers = [int(x) for x in list(extracted.get("blank_page_numbers") or []) if int(x or 0) > 0]
         lines.append(
             f"[PDF-FILE:{file_id}] hồ sơ={record_code} | tiêu đề={title} | file={name} | số trang={page_count}"
         )
+
         if status == "encrypted":
-            lines.append(
-                f"[PDF-ENCRYPTED:{file_id}] file={name} có mật khẩu/mã hóa; AI chưa đọc được nội dung."
-            )
-            continue
-        if status == "no_text":
-            lines.append(
-                f"[PDF-SCAN-NO-TEXT:{file_id}] file={name} không có lớp text trích xuất được; "
-                "có thể là PDF scan/ảnh. Không được suy nội dung từ tên file hoặc metadata; cần OCR/vision để đọc."
-            )
+            lines.append(f"[PDF-ENCRYPTED:{file_id}] file={name} có mật khẩu/mã hóa; AI chưa đọc được nội dung.")
             continue
         if status == "error":
             lines.append(
@@ -392,19 +640,50 @@ def build_pdf_attachment_context(
             )
             continue
 
-        for page_no, text in pages:
-            lines.append(
-                f"[PDF:{file_id}:P{int(page_no)}] hồ sơ={record_code} | file={name} | trang={int(page_no)}\n{text}"
+        ocr_pages: dict[int, str] = {}
+        ocr_result: dict[str, Any] = {}
+        pages_needing_ocr = blank_numbers
+        if status == "no_text" and not pages_needing_ocr and page_count > 0:
+            pages_needing_ocr = list(range(1, min(page_count, 120) + 1))
+        if pages_needing_ocr:
+            workspace_scope = int((record or {}).get("project_id") or ids[0])
+            ocr_result = _ocr_scanned_pdf(
+                path,
+                workspace_scope=workspace_scope,
+                page_numbers=pages_needing_ocr,
+                file_sha=str(file_row.get("sha256") or ""),
+                max_chars=per_file_chars,
             )
-        blank_pages = int(extracted.get("blank_pages") or 0)
-        if blank_pages:
+            ocr_pages = {int(page_no): str(text) for page_no, text in list(ocr_result.get("pages") or [])}
+
+        all_page_numbers = sorted(set(native_pages) | set(ocr_pages))
+        for page_no in all_page_numbers:
+            if page_no in native_pages:
+                lines.append(f"[PDF:{file_id}:P{page_no}] {native_pages[page_no]}")
+            elif page_no in ocr_pages:
+                lines.append(f"[PDF-OCR:{file_id}:P{page_no}] {ocr_pages[page_no]}")
+
+        missed_pages = [
+            int(x) for x in list(ocr_result.get("missed_pages") or [])
+            if int(x or 0) > 0 and int(x) not in native_pages
+        ]
+        if status == "no_text" and not ocr_pages:
+            reason = str(ocr_result.get("status") or "unavailable")
             lines.append(
-                f"[PDF-PARTIAL-NO-TEXT:{file_id}] có {blank_pages} trang không trích xuất được lớp text."
+                f"[PDF-SCAN-NO-TEXT:{file_id}] file={name} là PDF scan/ảnh và OCR/Vision chưa lấy được chữ "
+                f"(trạng thái={reason}). Không được suy nội dung từ tên file hoặc metadata."
             )
-        if extracted.get("truncated"):
+        elif missed_pages:
+            shown = ",".join(str(x) for x in missed_pages[:20])
             lines.append(
-                f"[PDF-TRUNCATED:{file_id}] nội dung đưa vào prompt đã giới hạn dung lượng; không đồng nghĩa file chỉ có phần trên."
+                f"[PDF-PARTIAL-NO-TEXT:{file_id}] OCR chưa đọc được trang {shown}; chỉ kết luận từ các trang PDF/PDF-OCR có nguồn."
             )
+        elif blank_numbers and ocr_pages:
+            source = "cache" if bool(ocr_result.get("from_cache")) else "vision"
+            lines.append(f"[PDF-OCR-COMPLETE:{file_id}] các trang scan đã được OCR bằng {source}; không dùng metadata thay cho nội dung.")
+
+        if bool(extracted.get("truncated")):
+            lines.append(f"[PDF-TRUNCATED:{file_id}] nội dung PDF dài; context chỉ chứa phần đầu trong giới hạn an toàn.")
 
     return _clip_context(lines, max_chars)
 
