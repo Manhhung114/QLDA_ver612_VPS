@@ -54,6 +54,7 @@ def _engine(tmp_path: Path):
     register("safe_check")
     register("writer")
     register("high_guard", RiskLevel.HIGH, ActionMode.APPROVAL_REQUIRED)
+    register("update_schedule_progress", RiskLevel.MEDIUM, ActionMode.APPROVAL_REQUIRED)
     platform = SimpleNamespace(tools=registry)
     engine = RuntimeClosedLoopEngine(
         platform=platform,
@@ -163,6 +164,53 @@ class ClosedLoopEngineTest(unittest.TestCase):
         self.assertEqual(summary["effectiveness_rate"], 100.0)
         self.assertEqual(summary["verification_outcomes"]["RESOLVED"], 1)
 
+    def test_required_inputs_are_schema_validated_then_move_to_approval(self) -> None:
+        engine, _repository, automation, calls = _engine(self.tmp_path)
+        loop = engine.capture_supervisor_result(
+            _result(2, health=65, finding="SCHEDULE_PROGRESS", tool="update_schedule_progress"),
+            actor="admin@example.com",
+            role="admin",
+        )
+        recommendation = loop["recommendations"][0]
+        self.assertEqual(recommendation["status"], "NEEDS_INPUT")
+        self.assertEqual(set(recommendation["required_inputs"]), {"task_id", "actual_progress"})
+
+        with self.assertRaises(ValueError):
+            engine.set_recommendation_inputs(
+                project_id=2,
+                loop_id=loop["loop_id"],
+                step_id=recommendation["step_id"],
+                inputs={"task_id": "12", "actual_progress": "101"},
+                actor="admin@example.com",
+                role="admin",
+            )
+
+        configured = engine.set_recommendation_inputs(
+            project_id=2,
+            loop_id=loop["loop_id"],
+            step_id=recommendation["step_id"],
+            inputs={"task_id": "12", "actual_progress": "80"},
+            actor="admin@example.com",
+            role="admin",
+        )
+        recommendation = configured["recommendations"][0]
+        self.assertEqual(recommendation["arguments"]["task_id"], 12)
+        self.assertEqual(recommendation["arguments"]["actual_progress"], 80)
+        self.assertEqual(recommendation["required_inputs"], [])
+        self.assertEqual(recommendation["status"], "PENDING_APPROVAL")
+        self.assertEqual(configured["current_stage"], "APPROVE")
+
+        pending = engine.execute_ready(
+            project_id=2,
+            loop_id=loop["loop_id"],
+            actor="admin@example.com",
+            role="admin",
+            dry_run=False,
+        )
+        self.assertEqual(pending["current_stage"], "APPROVE")
+        self.assertEqual(len(automation.pending_approvals(project_id=2)), 1)
+        self.assertEqual(calls["update_schedule_progress"], 0)
+
     def test_approval_reuses_existing_approval_repository(self) -> None:
         engine, _repository, automation, calls = _engine(self.tmp_path)
         loop = engine.capture_supervisor_result(
@@ -199,6 +247,49 @@ class ClosedLoopEngineTest(unittest.TestCase):
         )
         self.assertEqual(acted["recommendations"][0]["status"], "SUCCESS")
         self.assertEqual(calls["high_guard"], 1)
+
+    def test_rejected_recommendation_never_executes_again(self) -> None:
+        engine, _repository, automation, calls = _engine(self.tmp_path)
+        loop = engine.capture_supervisor_result(
+            _result(31, health=60, finding="HIGH_RISK", tool="high_guard"),
+            actor="admin@example.com",
+            role="admin",
+        )
+        engine.execute_ready(
+            project_id=31,
+            loop_id=loop["loop_id"],
+            actor="admin@example.com",
+            role="admin",
+            dry_run=False,
+        )
+        pending = automation.pending_approvals(project_id=31)
+        self.assertEqual(len(pending), 1)
+        step_id = str(pending[0]["step_id"])
+        automation.decide_approval(
+            project_id=31,
+            plan_id=loop["loop_id"],
+            step_id=step_id,
+            approved=False,
+            approved_by="director@example.com",
+            note="Không thực hiện",
+        )
+        rejected = engine.reject_recommendation(
+            project_id=31,
+            loop_id=loop["loop_id"],
+            step_id=step_id,
+            actor="director@example.com",
+            note="Không thực hiện",
+        )
+        self.assertEqual(rejected["recommendations"][0]["status"], "REJECTED")
+        retried = engine.execute_ready(
+            project_id=31,
+            loop_id=loop["loop_id"],
+            actor="admin@example.com",
+            role="admin",
+            dry_run=False,
+        )
+        self.assertEqual(retried["recommendations"][0]["status"], "REJECTED")
+        self.assertEqual(calls["high_guard"], 0)
 
     def test_actual_write_fails_closed_when_integrity_invalid(self) -> None:
         engine, _repository, _automation, calls = _engine(self.tmp_path)
@@ -246,7 +337,9 @@ class ClosedLoopEngineTest(unittest.TestCase):
         self.assertIn("Sense → Analyze → Recommend → Approve → Act → Verify → Learn", panel)
         self.assertIn("Dry-run trước khi thực thi", panel)
         self.assertIn("BLOCKED_DATA_INTEGRITY", panel)
-        self.assertIn("decide_approval", panel)
+        self.assertIn("set_recommendation_inputs", panel)
+        self.assertIn("Bổ sung dữ liệu bắt buộc", panel)
+        self.assertIn("reject_recommendation", panel)
         self.assertIn("Human Feedback → Learn", panel)
 
     def test_runtime_has_one_supervisor_capture_per_cycle(self) -> None:
@@ -257,6 +350,8 @@ class ClosedLoopEngineTest(unittest.TestCase):
         self.assertIn("if not loop:", closed_runtime)
         self.assertIn("Fail-soft fallback", closed_runtime)
         self.assertIn("single Sense/Analyze/Recommend capture point", closed_runtime)
+        self.assertIn("_normalize_arguments", closed_runtime)
+        self.assertIn("REJECTED", closed_runtime)
 
 
 if __name__ == "__main__":
