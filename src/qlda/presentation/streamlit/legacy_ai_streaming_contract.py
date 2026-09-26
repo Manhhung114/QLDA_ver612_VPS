@@ -58,6 +58,17 @@ def _active_scope(project_id: int) -> tuple[int, str]:
     if same_project and active_workspace > 0:
         return active_workspace, effective_role
 
+    # A workspace pinned for another master project must never bleed into the
+    # newly requested project. Contractors are blocked until the new project's
+    # RBAC selector publishes its own workspace; management callers may continue
+    # only with the requested project id and must re-resolve scope there.
+    if active_master > 0 and requested > 0 and requested not in {active_master, active_workspace}:
+        if effective_role in _CONTRACTOR_ROLES:
+            raise PermissionError(
+                "Phạm vi workspace hiện tại thuộc dự án khác. AI đã chặn truy vấn cho đến khi quyền workspace của dự án mới được xác nhận."
+            )
+        return requested, effective_role
+
     from qlda.runtime_core.contractor_access_control import current_ai_workspace_scope
 
     pinned = int(current_ai_workspace_scope() or 0)
