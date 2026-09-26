@@ -24,6 +24,16 @@ def test_compact_density_runs_after_normal_theme_renderer() -> None:
     assert ".qlda-v7-credit" in source
 
 
+def test_persistent_credit_final_override_is_large_black_and_bold() -> None:
+    source = DENSITY.read_text(encoding="utf-8")
+    assert "font-size:24px!important" in source
+    assert "font-weight:900!important" in source
+    assert "color:#000000!important" in source
+    assert "opacity:1!important" in source
+    assert "font-size:8px!important" not in source
+    assert "opacity:.42!important" not in source
+
+
 def test_automation_hides_internal_version_names_from_user_ui() -> None:
     source = AUTOMATION.read_text(encoding="utf-8")
     assert "AI Automation V9.1" not in source
