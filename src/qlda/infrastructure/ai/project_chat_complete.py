@@ -76,9 +76,13 @@ def ask_project_chat(
         "[LIVE-SUMMARY] và [DOMAIN-COVERAGE] là số đếm/index; các nhãn [DOC], [DRAWING], [BOQ], [PAYMENT], "
         "[IPC], [VO], [MATERIAL], [PROCUREMENT], [INVENTORY], [WORK-TASK], [CONTRACT], [APPROVAL], "
         "[DATA-HUB-ROW], [PRODUCTION-ROW] là bằng chứng chi tiết. "
-        "Các nhãn [PDF:<file_id>:P<trang>] là text trích trực tiếp từ file PDF đính kèm của đúng workspace và phải được ưu tiên khi người dùng hỏi nội dung file/biên bản. "
-        "Nếu có [PDF-SCAN-NO-TEXT], [PDF-ENCRYPTED], [PDF-READ-ERROR] hoặc [PDF-MISSING] thì phải nói rõ AI chưa đọc được phần nội dung file đó; tuyệt đối không suy nội dung PDF từ tên file, tiêu đề hồ sơ hoặc metadata. "
-        "Nếu [PDF-PARTIAL-NO-TEXT] xuất hiện thì chỉ được kết luận từ các trang [PDF:...] đã trích được và phải nói có trang chưa đọc được khi điều đó ảnh hưởng câu trả lời. "
+        "Các nhãn [PDF:<file_id>:P<trang>] là text trích trực tiếp từ lớp text của PDF; "
+        "các nhãn [PDF-OCR:<file_id>:P<trang>] là chữ đã đọc trực tiếp từ ảnh scan bằng AI Vision. "
+        "Cả hai đều là bằng chứng nội dung file của đúng workspace và phải được ưu tiên hơn metadata [DOC] khi người dùng hỏi nội dung file/biên bản. "
+        "Nếu có [PDF-OCR-COMPLETE] thì PDF scan đã đọc được; không được tiếp tục nói 'chưa đọc được PDF scan'. "
+        "Chỉ khi còn [PDF-SCAN-NO-TEXT], [PDF-ENCRYPTED], [PDF-READ-ERROR] hoặc [PDF-MISSING] mới được nói AI chưa đọc được phần nội dung file tương ứng; "
+        "tuyệt đối không suy nội dung PDF từ tên file, tiêu đề hồ sơ hoặc metadata. "
+        "Nếu [PDF-PARTIAL-NO-TEXT] xuất hiện thì chỉ kết luận từ các trang [PDF:...] / [PDF-OCR:...] đã đọc được và nói rõ trang còn thiếu khi điều đó ảnh hưởng câu trả lời. "
         "Nếu số đếm lớn hơn 0 và có dòng chi tiết phù hợp thì tuyệt đối không nói 'chỉ có số tổng hợp', 'không có nội dung' hoặc 'không có dữ liệu'. "
         "Với yêu cầu 'gần đây nhất/mới nhất', ưu tiên dòng phù hợp đầu tiên vì các nhóm LIVE đã được sắp xếp mới nhất trước. "
         "Nếu DATA HUB bằng 0 nhưng có [PRODUCTION-ROW] thì phải dùng dữ liệu sản lượng live đó. "
@@ -90,7 +94,7 @@ def ask_project_chat(
         source_refs.append("postgres:authoritative-aggregate")
     source_refs.append("postgres:live-domain-details")
     if pdf_context:
-        source_refs.append("vps:local-pdf-attachments")
+        source_refs.append("vps:local-pdf-attachments+vision-ocr")
     try:
         result = NativeProviderGateway.run(
             str(provider or "openai").lower(),
