@@ -26,10 +26,12 @@ def test_compact_density_runs_after_normal_theme_renderer() -> None:
 
 def test_persistent_credit_final_override_is_large_black_and_bold() -> None:
     source = DENSITY.read_text(encoding="utf-8")
-    assert "font-size:18px!important" in source
+    assert "font-size:14px!important" in source
     assert "font-weight:900!important" in source
     assert "color:#000000!important" in source
     assert "opacity:1!important" in source
+    assert "-webkit-text-stroke:.15px" in source
+    assert "text-shadow:0 1px 0 rgba(255,255,255,.95),0 1px 3px rgba(0,0,0,.30)!important" in source
     assert "font-size:8px!important" not in source
     assert "opacity:.42!important" not in source
 
