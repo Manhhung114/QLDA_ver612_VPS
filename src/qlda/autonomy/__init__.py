@@ -9,6 +9,7 @@ outside those services.
 
 from .events import DEFAULT_EVENT_TYPES, EventBus
 from .integrity import DataIntegrityGate, evidence_id, make_evidence
+from .loop_engine import LOOP_STAGES, ClosedLoopEngine, ClosedLoopRepository
 from .models import (
     ActionMode,
     DomainEvent,
@@ -39,6 +40,8 @@ __all__ = [
     "AutonomyPolicy",
     "AutomationPlatform",
     "AutomationRepository",
+    "ClosedLoopEngine",
+    "ClosedLoopRepository",
     "DEFAULT_EVENT_TYPES",
     "DailyAutomationScheduler",
     "DataIntegrityGate",
@@ -49,6 +52,7 @@ __all__ = [
     "HealthFinding",
     "HeuristicPlanner",
     "IntegrityReport",
+    "LOOP_STAGES",
     "PlanStep",
     "ProjectHealthReport",
     "ProjectSupervisor",
