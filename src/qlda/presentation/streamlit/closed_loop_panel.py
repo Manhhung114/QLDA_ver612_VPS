@@ -12,7 +12,7 @@ from qlda.autonomy.closed_loop_runtime import (
 )
 
 
-PATCH_MARKER = "CLOSED LOOP ENGINEERING PANEL V1"
+PATCH_MARKER = "CLOSED LOOP ENGINEERING PANEL V2 APPROVAL LEARN"
 _STAGE_LABELS = {
     "SENSE": "Sense",
     "ANALYZE": "Analyze",
@@ -75,7 +75,9 @@ def _recommendation_rows(loop: dict[str, Any], learning: dict[str, Any]) -> list
             "Finding": rec.get("finding") or "",
             "Tool": tool,
             "Risk": str(rec.get("risk") or "").upper(),
+            "Mode": rec.get("mode") or "",
             "Trạng thái": rec.get("status") or "",
+            "Cần duyệt": "Có" if rec.get("requires_approval") else "Không",
             "Cần nhập": ", ".join(str(x) for x in list(rec.get("required_inputs") or [])),
             "Hiệu quả lịch sử": (f"{float(rate):.0f}%" if rate is not None else "—"),
         })
@@ -103,10 +105,68 @@ def _render_learning(st, learning: dict[str, Any]) -> None:
                 )
             )
         )
+    safety_note = str(learning.get("safety_note") or "")
+    if safety_note:
+        st.info(safety_note)
+
+
+def _render_loop_approvals(st, auto_repo, tenant_id: int, loop_id: str, actor: str) -> None:
+    pending = [
+        dict(item)
+        for item in auto_repo.pending_approvals(project_id=int(tenant_id))
+        if str(item.get("plan_id") or "") == str(loop_id)
+    ]
+    if not pending:
+        return
+
+    st.markdown("#### Approve · Chờ phê duyệt")
+    st.warning(f"Có {len(pending)} hành động Closed Loop đang chờ Admin quyết định.")
+    for item in pending[:20]:
+        tool_name = str(item.get("tool_name") or "")
+        step_id = str(item.get("step_id") or "")
+        with st.expander(f"{tool_name} · {step_id}", expanded=False):
+            st.write(f"Người yêu cầu: {item.get('requested_by','')}")
+            note = st.text_input(
+                "Ý kiến phê duyệt",
+                key=f"closed_loop_approval_note_{tenant_id}_{item.get('id')}",
+            )
+            a1, a2 = st.columns(2)
+            if a1.button(
+                "✅ Phê duyệt",
+                key=f"closed_loop_approve_{tenant_id}_{item.get('id')}",
+                use_container_width=True,
+            ):
+                auto_repo.decide_approval(
+                    project_id=int(tenant_id),
+                    plan_id=str(loop_id),
+                    step_id=step_id,
+                    approved=True,
+                    approved_by=str(actor),
+                    note=note,
+                )
+                st.success("Đã phê duyệt. Bấm Act để thực thi qua Service Layer/Audit Gate.")
+                st.rerun()
+            if a2.button(
+                "❌ Từ chối",
+                key=f"closed_loop_reject_{tenant_id}_{item.get('id')}",
+                use_container_width=True,
+            ):
+                auto_repo.decide_approval(
+                    project_id=int(tenant_id),
+                    plan_id=str(loop_id),
+                    step_id=step_id,
+                    approved=False,
+                    approved_by=str(actor),
+                    note=note,
+                )
+                st.warning("Đã từ chối hành động.")
+                st.rerun()
 
 
 def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None:
     """Render contractor-isolated Closed Loop Engineering under AI Supervisor."""
+    from qlda.autonomy.runtime import get_autonomy_repository
+
     identity, is_admin, can_update = (
         overview._app_identity(ui_module) if ui_module is not None else ({}, False, False)
     )
@@ -116,10 +176,11 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
 
     st.divider()
     st.markdown("### 🔁 Closed Loop Engineering")
-    st.caption("Sense → Analyze → Recommend → Approve → Act → Verify → Learn. Mọi hành động vẫn đi qua RBAC, Approval và Audit Gate.")
+    st.caption("Sense → Analyze → Recommend → Approve → Act → Verify → Learn. Mọi hành động vẫn đi qua RBAC, Approval, Data Integrity và Audit Gate.")
 
     repository = get_closed_loop_repository(db)
     engine = get_closed_loop_engine(db)
+    auto_repo = get_autonomy_repository(db)
     loop = latest_closed_loop(db, tenant_id)
     learning = engine.learning_summary(project_id=tenant_id)
 
@@ -147,7 +208,7 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
 
         rec_rows = _recommendation_rows(loop, learning)
         if rec_rows:
-            st.markdown("#### Recommend / Approve / Act")
+            st.markdown("#### Recommend")
             st.dataframe(rec_rows, hide_index=True, use_container_width=True)
 
         actions = list(loop.get("actions") or [])
@@ -158,10 +219,10 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
     _render_learning(st, learning)
 
     if not is_admin:
-        st.info("Closed Loop đang ở chế độ chỉ xem. Chỉ Admin được chạy chu trình hoặc thực thi hành động.")
+        st.info("Closed Loop đang ở chế độ chỉ xem. Chỉ Admin được chạy chu trình, phê duyệt hoặc thực thi hành động.")
         return
 
-    st.markdown("#### Điều khiển chu trình")
+    st.markdown("#### Sense / Analyze / Act / Verify")
     dry_run = st.checkbox(
         "Dry-run trước khi thực thi (không thay đổi dữ liệu)",
         value=True,
@@ -183,7 +244,7 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
                 execute=False,
             )
             st.session_state[f"closed_loop_last_{tenant_id}"] = outcome
-            st.success("Đã cập nhật chu trình bằng dữ liệu Supervisor hiện tại.")
+            st.success("Đã cập nhật một chu kỳ từ dữ liệu Supervisor hiện tại.")
             st.rerun()
         except Exception as exc:
             st.error(f"Không chạy được Closed Loop: {exc}")
@@ -209,7 +270,14 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
                 for x in list(updated.get("recommendations") or [])
                 if str(x.get("status") or "") == "PENDING_APPROVAL"
             ]
-            if pending:
+            blocked = [
+                str(x.get("tool") or "")
+                for x in list(updated.get("recommendations") or [])
+                if str(x.get("status") or "") == "BLOCKED_DATA_INTEGRITY"
+            ]
+            if blocked:
+                st.error("Data Integrity chưa hợp lệ; đã chặn action ghi dữ liệu: " + ", ".join(blocked))
+            elif pending:
                 st.warning("Đã tạo yêu cầu phê duyệt: " + ", ".join(pending))
             elif dry_run:
                 st.success("Dry-run hoàn tất. Không có dữ liệu nghiệp vụ nào bị thay đổi.")
@@ -221,6 +289,14 @@ def render_closed_loop_panel(st, db, project_id: int, *, ui_module=None) -> None
 
     current_loop = latest_closed_loop(db, tenant_id)
     if current_loop:
+        _render_loop_approvals(
+            st,
+            auto_repo,
+            tenant_id,
+            str(current_loop.get("loop_id") or ""),
+            actor,
+        )
+
         st.markdown("#### Human Feedback → Learn")
         feedback_options = {
             "Có hiệu quả": "EFFECTIVE",
