@@ -13,6 +13,7 @@ google-auth>=2.38,<3
 psycopg[binary]>=3.2,<4
 psycopg-pool>=3.2,<4
 pypdf>=5,<7
+PyMuPDF>=1.27,<2
 cryptography>=45,<47
 streamlit-cookies-controller==0.0.4
 fastapi>=0.115,<1
