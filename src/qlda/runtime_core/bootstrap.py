@@ -74,6 +74,7 @@ def initialize_runtime() -> None:
             return
 
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
+        from qlda.presentation.streamlit.credit_branding import install_credit_branding_v7
         from qlda.presentation.streamlit.legacy_ai_streaming_contract import (
             install_legacy_ai_streaming_contract,
         )
@@ -81,6 +82,9 @@ def initialize_runtime() -> None:
         apply_streamlit_secrets_to_env()
         initialize_business_runtime()
         install_stage(RuntimeStage.UI)
+        # Apply the credit treatment after the base V7 theme so this small
+        # presentation override wins the CSS cascade on desktop and mobile.
+        install_credit_branding_v7()
         # The source-controlled Streamlit shell still calls ask_project_stream on
         # the legacy assistant classes. Restore only this presentation contract;
         # provider execution remains outside RuntimeStage composition.
