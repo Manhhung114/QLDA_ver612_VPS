@@ -64,13 +64,26 @@ def initialize_ai_runtime() -> None:
         _AI_READY = True
 
 
+def _refresh_company_branding() -> None:
+    """Refresh mutable company branding on every Streamlit rerun."""
+    try:
+        from qlda.presentation.streamlit.company_branding import install_company_branding_runtime
+
+        install_company_branding_runtime()
+    except Exception:
+        # A missing/corrupt logo must never stop the core application.
+        pass
+
+
 def initialize_runtime() -> None:
     """Initialize database/business/UI compatibility without a legacy AI stage."""
     global _UI_READY
     if _UI_READY:
+        _refresh_company_branding()
         return
     with _LOCK:
         if _UI_READY:
+            _refresh_company_branding()
             return
 
         from qlda.runtime_core.streamlit_secrets import apply_streamlit_secrets_to_env
@@ -85,6 +98,10 @@ def initialize_runtime() -> None:
         # Apply the credit treatment after the base V7 theme so this small
         # presentation override wins the CSS cascade on desktop and mobile.
         install_credit_branding_v7()
+        # Install company branding before app.py imports the system-settings
+        # renderer.  The watermark itself is refreshed on every rerun so upload,
+        # opacity/size changes and delete are visible immediately on all sheets.
+        _refresh_company_branding()
         # The source-controlled Streamlit shell still calls ask_project_stream on
         # the legacy assistant classes. Restore only this presentation contract;
         # provider execution remains outside RuntimeStage composition.
