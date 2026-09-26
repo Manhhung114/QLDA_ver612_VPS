@@ -108,6 +108,54 @@ class _TaskConnection:
         return _Result(self.rows)
 
 
+class _LegacyProductionConnection:
+    def __init__(self):
+        self.rows = [
+            {
+                "project_id": 1,
+                "source_id": "sheet-1",
+                "worksheet": "S4 (update)",
+                "work_item": "Lắp đặt ống cấp nước",
+                "zone": "Tầng 12-20",
+                "progress_percent": 62.5,
+                "source_row": 88,
+                "synced_at": "2026-09-26 06:50:00",
+                "source_name": "Theo dõi sản lượng SIGMA",
+                "spreadsheet_title": "Sản lượng MEP E3",
+            },
+            {
+                "project_id": 1,
+                "source_id": "sheet-1",
+                "worksheet": "S2 (update)",
+                "work_item": "Lắp đặt ống cấp nước",
+                "zone": "Tầng 10-18",
+                "progress_percent": 71.0,
+                "source_row": 77,
+                "synced_at": "2026-09-26 06:50:00",
+                "source_name": "Theo dõi sản lượng SIGMA",
+                "spreadsheet_title": "Sản lượng MEP E3",
+            },
+        ]
+
+    def execute(self, sql, params=()):
+        text = " ".join(str(sql).split()).lower()
+        if "from contractor_data_records" in text and "count(*) as records" in text:
+            return _Result([
+                {
+                    "records": 0,
+                    "sources": 0,
+                    "worksheets": 0,
+                    "production_points": 0,
+                    "avg_progress": None,
+                    "last_sync": None,
+                }
+            ])
+        if "from production_progress_current c" in text:
+            allowed = set(int(x) for x in (params[0] if params else []))
+            return _Result([row for row in self.rows if int(row["project_id"]) in allowed])
+        return _Result([])
+
+
 class AIProjectChatScopeTests(unittest.TestCase):
     def setUp(self):
         self.connection = _ScopeConnection()
@@ -182,6 +230,29 @@ class AIProjectChatScopeTests(unittest.TestCase):
         self.assertIn("KH=70.0%", context)
         self.assertIn("TT=55.0%", context)
         self.assertLess(context.index("[TASK:11]"), context.index("[TASK:12]"))
+
+    @patch("qlda.infrastructure.ai.project_chat._table_exists")
+    def test_empty_normalized_data_hub_falls_back_to_live_production_rows(self, table_exists):
+        table_exists.side_effect = lambda _conn, table: table in {
+            "contractor_data_records",
+            "production_progress_current",
+            "production_sheet_sources",
+        }
+        lines = project_chat._data_hub_context(
+            _LegacyProductionConnection(),
+            master=1,
+            workspace_ids=[1],
+            labels={1: "NT-01 - SIGMA"},
+            question="Đánh giá sản lượng lắp đặt tháp S4",
+        )
+        context = "\n".join(lines)
+
+        self.assertIn("[DATA-HUB-COMPAT]", context)
+        self.assertIn("records=2", context)
+        self.assertIn("worksheet=S4 (update)", context)
+        self.assertIn("tiến độ=62.5%", context)
+        self.assertIn("NT-01 - SIGMA", context)
+        self.assertLess(context.index("worksheet=S4 (update)"), context.index("worksheet=S2 (update)"))
 
 
 if __name__ == "__main__":
