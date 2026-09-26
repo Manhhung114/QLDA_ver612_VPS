@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Complete native project chat: compact summaries plus detailed live domain rows."""
 
+import re
 import time
 from datetime import date
 from typing import Any, Sequence
@@ -13,6 +14,37 @@ from qlda.infrastructure.ai.project_chat import build_live_project_context
 from qlda.infrastructure.ai.provider_gateway import AIProviderError, NativeProviderGateway
 from qlda.infrastructure.ai.telemetry import content_hash, record_ai_event
 from qlda.infrastructure.postgres import connect
+
+
+_INTERNAL_SOURCE_MARKER_RE = re.compile(
+    r"\[(?:"
+    r"(?:PDF(?:-OCR(?:-COMPLETE)?|-SCAN-NO-TEXT|-PARTIAL-NO-TEXT|-ENCRYPTED|-READ-ERROR|-MISSING)?"
+    r"|DOC|DRAWING|BOQ|PAYMENT|IPC|VO|MATERIAL|PROCUREMENT|INVENTORY|WORK-TASK|CONTRACT|APPROVAL"
+    r"|DATA-HUB(?:-[A-Z0-9-]+)?|PRODUCTION-ROW|AGGREGATE-AUTHORITY|EXACT-[A-Z0-9-]+"
+    r"|LIVE-SUMMARY|DOMAIN-COVERAGE|SCOPE-RECOVERY|NGUỒN\s+\d+)"
+    r"(?::[^\]\r\n]+)?"
+    r"|workspace:\d+|postgres:[^\]\r\n]+|vps:[^\]\r\n]+)\]",
+    re.IGNORECASE,
+)
+
+
+def sanitize_user_visible_answer(value: Any) -> str:
+    """Remove internal provenance labels from the text shown to end users.
+
+    The labels remain in prompts, telemetry and source refs so the model can use
+    deterministic provenance internally.  They are implementation details and
+    must not leak into the normal chat UX.
+    """
+    text = str(value or "")
+    if not text:
+        return ""
+    text = _INTERNAL_SOURCE_MARKER_RE.sub("", text)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def ask_project_chat(
@@ -87,7 +119,7 @@ def ask_project_chat(
         "Với yêu cầu 'gần đây nhất/mới nhất', ưu tiên dòng phù hợp đầu tiên vì các nhóm LIVE đã được sắp xếp mới nhất trước. "
         "Nếu DATA HUB bằng 0 nhưng có [PRODUCTION-ROW] thì phải dùng dữ liệu sản lượng live đó. "
         "Nếu có [SCOPE-RECOVERY], phải nói rõ dữ liệu được tìm thấy sau khi mở rộng phạm vi quản lý hợp lệ; không được nói workspace ban đầu có dữ liệu. "
-        "Khi nêu số liệu/nội dung, giữ nhãn nguồn tương ứng để người dùng kiểm tra được."
+        "Các nhãn nguồn trong ngoặc vuông chỉ dùng để kiểm chứng nội bộ. KHÔNG hiển thị bất kỳ nhãn kỹ thuật như [DOC:...], [PDF:...], [PDF-OCR:...], [DATA-HUB-ROW] hoặc [NGUỒN ...] trong câu trả lời cho người dùng."
     )
     source_refs = [f"workspace:{wid}" for wid in workspace_ids]
     if aggregate_context:
@@ -117,7 +149,7 @@ def ask_project_chat(
             "latency_ms": int((time.perf_counter() - started) * 1000),
             "success": True,
         })
-        return result
+        return sanitize_user_visible_answer(result)
     except AIProviderError:
         raise
     except Exception as exc:
@@ -135,4 +167,4 @@ def ask_project_chat(
         raise
 
 
-__all__ = ["ask_project_chat"]
+__all__ = ["ask_project_chat", "sanitize_user_visible_answer"]
