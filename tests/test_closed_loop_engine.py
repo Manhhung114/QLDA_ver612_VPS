@@ -245,7 +245,18 @@ class ClosedLoopEngineTest(unittest.TestCase):
         self.assertIn("render_closed_loop_panel", source)
         self.assertIn("Sense → Analyze → Recommend → Approve → Act → Verify → Learn", panel)
         self.assertIn("Dry-run trước khi thực thi", panel)
-        self.assertNotIn("BLOCKED_DATA_INTEGRITY", panel)
+        self.assertIn("BLOCKED_DATA_INTEGRITY", panel)
+        self.assertIn("decide_approval", panel)
+        self.assertIn("Human Feedback → Learn", panel)
+
+    def test_runtime_has_one_supervisor_capture_per_cycle(self) -> None:
+        runtime = Path("src/qlda/autonomy/runtime.py").read_text(encoding="utf-8")
+        closed_runtime = Path("src/qlda/autonomy/closed_loop_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("get_closed_loop_engine(db).capture_supervisor_result", runtime)
+        self.assertIn("loop = get_closed_loop_repository(db).latest_loop", closed_runtime)
+        self.assertIn("if not loop:", closed_runtime)
+        self.assertIn("Fail-soft fallback", closed_runtime)
+        self.assertIn("single Sense/Analyze/Recommend capture point", closed_runtime)
 
 
 if __name__ == "__main__":
