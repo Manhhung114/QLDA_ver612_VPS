@@ -59,7 +59,7 @@ def _ask_project_stream(
     status_date=None,
     use_web=None,
 ) -> Iterable[str]:
-    from qlda.infrastructure.ai.project_chat import ask_project_chat
+    from qlda.infrastructure.ai.project_chat_complete import ask_project_chat
     from qlda.runtime_core.contractor_access_control import current_ai_workspace_scope
 
     workspace_scope = current_ai_workspace_scope() or int(project_id)
