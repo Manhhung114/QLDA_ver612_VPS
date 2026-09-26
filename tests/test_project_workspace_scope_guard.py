@@ -66,6 +66,7 @@ class ProjectWorkspaceScopeGuardTests(unittest.TestCase):
         install_default_workspace_admin_guard()
 
     def setUp(self):
+        access._pin_ai_workspace_scope(None)
         self.tmp = tempfile.TemporaryDirectory()
         self.db = cloud_db.CloudDatabase(Path(self.tmp.name) / "workspace_scope.db")
         self.master = self.db.add_project(
@@ -94,7 +95,7 @@ class ProjectWorkspaceScopeGuardTests(unittest.TestCase):
         )
 
     def tearDown(self):
-        access.set_ai_workspace_scope(None)
+        access._pin_ai_workspace_scope(None)
         self.tmp.cleanup()
 
     def test_db_contractor_assignment_overrides_stale_management_gateway_role(self):
@@ -152,6 +153,28 @@ class ProjectWorkspaceScopeGuardTests(unittest.TestCase):
             self.assertEqual(resolved, int(self.sigma["workspace_project_id"]))
             self.assertEqual(role, access.CONTRACTOR)
             self.assertFalse(ai_contract._project_wide_allowed(self.master))
+
+    def test_contractor_scope_from_old_project_cannot_bleed_into_new_project(self):
+        fake = _FakeStreamlit()
+        fake.session_state.update(
+            {
+                "qlda_active_master_project_id": self.master,
+                "qlda_active_workspace_project_id": int(self.sigma["workspace_project_id"]),
+                "qlda_effective_approval_role": access.CONTRACTOR,
+            }
+        )
+        access._pin_ai_workspace_scope(int(self.sigma["workspace_project_id"]))
+        new_master = self.db.add_project(
+            "E4-SCOPE",
+            "Another project",
+            "2026-01-01",
+            "2027-12-31",
+            "PM",
+            "",
+        )
+        with patch.dict(sys.modules, {"streamlit": fake}):
+            with self.assertRaises(PermissionError):
+                ai_contract._active_scope(new_master)
 
     def test_explicit_all_assignment_can_revoke_stale_contractor_gateway_role(self):
         manager = "manager@example.com"
