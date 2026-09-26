@@ -172,11 +172,12 @@ def run_closed_loop_cycle(
     dry_run: bool = True,
     extra_indicators: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run a complete observation cycle for exactly one workspace.
+    """Run one complete observation cycle for exactly one workspace.
 
-    The supervisor performs Sense + Analyze + Recommend. The engine then Verify/Learn
-    against the previous observation. Execution is opt-in and still passes through
-    ToolRegistry RBAC/approval/audit gates. ``dry_run`` defaults to True on purpose.
+    ``run_project_supervisor`` is the single Sense/Analyze/Recommend capture point.
+    This function therefore reads that just-captured loop instead of capturing a
+    second time. Execution remains opt-in and passes RBAC/Approval/Audit/Data-
+    Integrity gates. ``dry_run`` defaults to True on purpose.
     """
     tenant_id = int(project_id)
     result = run_project_supervisor(
@@ -186,7 +187,10 @@ def run_closed_loop_cycle(
         extra_indicators=extra_indicators,
     )
     engine = get_closed_loop_engine(db)
-    loop = engine.capture_supervisor_result(result, actor=str(actor), role=str(role))
+    loop = get_closed_loop_repository(db).latest_loop(project_id=tenant_id)
+    if not loop:
+        # Fail-soft fallback for callers that supply an older Supervisor runtime.
+        loop = engine.capture_supervisor_result(result, actor=str(actor), role=str(role))
     if execute and str(loop.get("status") or "") != "CLOSED":
         loop = engine.execute_ready(
             project_id=tenant_id,
