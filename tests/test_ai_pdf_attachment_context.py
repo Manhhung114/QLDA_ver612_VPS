@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import unittest
@@ -144,6 +145,7 @@ class PDFAttachmentContextTests(unittest.TestCase):
             },
             {
                 "status": "ok",
+                "reason": "ok",
                 "pages": [
                     (1, "BIÊN BẢN HIỆN TRƯỜNG - Nhà thầu phải hoàn thiện nghiệm thu nội bộ."),
                     (2, "Yêu cầu khắc phục trước ngày 27/09/2026 và báo cáo Ban điều hành."),
@@ -174,6 +176,7 @@ class PDFAttachmentContextTests(unittest.TestCase):
             },
             {
                 "status": "ok",
+                "reason": "ok",
                 "pages": [(2, "Trang 2 scan đã được OCR đúng nội dung.")],
                 "missed_pages": [],
                 "from_cache": True,
@@ -196,13 +199,101 @@ class PDFAttachmentContextTests(unittest.TestCase):
             },
             {
                 "status": "unavailable",
+                "reason": "vision_provider_error",
                 "pages": [],
                 "missed_pages": [1, 2, 3],
                 "from_cache": False,
             },
         )
         self.assertIn("[PDF-SCAN-NO-TEXT:file-b12]", text)
+        self.assertIn("lý_do=vision_provider_error", text)
         self.assertIn("Không được suy nội dung từ tên file hoặc metadata", text)
+
+    def test_real_scan_page_is_rasterized_when_pypdf_images_are_empty(self):
+        import pymupdf
+        from PIL import Image, ImageDraw
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf_path = root / "real_scan.pdf"
+            canvas = Image.new("RGB", (1200, 1700), "white")
+            ImageDraw.Draw(canvas).text(
+                (80, 100),
+                "BIEN BAN HOP - KE HOACH CHAY MAY DIEU HOA - 25/09/2026",
+                fill="black",
+            )
+            png = io.BytesIO()
+            canvas.save(png, format="PNG")
+
+            document = pymupdf.open()
+            page = document.new_page(width=595, height=842)
+            page.insert_image(page.rect, stream=png.getvalue())
+            document.save(str(pdf_path))
+            document.close()
+
+            extracted = ctx._extract_pdf_pages(pdf_path)
+            self.assertEqual(extracted["status"], "no_text")
+            self.assertEqual(extracted["blank_page_numbers"], [1])
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "QLDA_LOCAL_STORAGE_ROOT": tmp,
+                        "QLDA_AI_PDF_OCR_CACHE": "false",
+                        "QLDA_AI_PDF_OCR_RENDER_DPI": "144",
+                    },
+                    clear=False,
+                ),
+                patch.object(ctx, "_page_images", return_value=[]) as embedded_mock,
+                patch.object(
+                    ctx.NativeProviderGateway,
+                    "vision_text",
+                    return_value="BIÊN BẢN HỌP - KẾ HOẠCH CHẠY MÁY ĐIỀU HÒA - 25/09/2026",
+                ) as vision_mock,
+            ):
+                result = ctx._ocr_scanned_pdf(
+                    pdf_path,
+                    workspace_scope=101,
+                    page_numbers=[1],
+                    max_chars=5000,
+                )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["reason"], "ok")
+            self.assertEqual(result["missed_pages"], [])
+            self.assertEqual(result["rendered_pages"], [1])
+            self.assertEqual(result["embedded_fallback_pages"], [])
+            self.assertIn("KẾ HOẠCH CHẠY MÁY", result["pages"][0][1])
+            embedded_mock.assert_not_called()
+            vision_mock.assert_called_once()
+            image_bytes = vision_mock.call_args.kwargs["data"]
+            self.assertTrue(image_bytes.startswith(b"\x89PNG"))
+            self.assertEqual(vision_mock.call_args.kwargs["mime_type"], "image/png")
+
+    def test_render_failure_still_uses_embedded_image_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_pdf = Path(tmp) / "fake.pdf"
+            fake_pdf.write_bytes(b"%PDF-dummy")
+            with (
+                patch.object(ctx, "_render_pdf_page", return_value=None),
+                patch.object(ctx, "_page_images", return_value=[b"x" * 4096]),
+                patch.object(ctx, "_vision_ready_image", return_value=(b"PNG", "image/png")),
+                patch.object(ctx.NativeProviderGateway, "vision_text", return_value="Nội dung OCR fallback"),
+                patch("pypdf.PdfReader") as reader_cls,
+                patch.dict(os.environ, {"QLDA_LOCAL_STORAGE_ROOT": tmp, "QLDA_AI_PDF_OCR_CACHE": "false"}, clear=False),
+            ):
+                reader = reader_cls.return_value
+                reader.is_encrypted = False
+                reader.pages = [object()]
+                result = ctx._ocr_scanned_pdf(
+                    fake_pdf,
+                    workspace_scope=101,
+                    page_numbers=[1],
+                    max_chars=5000,
+                )
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["embedded_fallback_pages"], [1])
 
     def test_storage_path_cannot_escape_authorized_root(self):
         with tempfile.TemporaryDirectory() as tmp:
