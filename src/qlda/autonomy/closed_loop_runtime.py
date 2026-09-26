@@ -19,8 +19,121 @@ class RuntimeClosedLoopRepository(ClosedLoopRepository):
         return row if str(row.get("loop_id") or "") else {}
 
 
+class RuntimeClosedLoopEngine(ClosedLoopEngine):
+    """Production Act gate with persistent dedupe and Data Integrity fail-close."""
+
+    _INTEGRITY_RECOVERY_TOOLS = {"check_data_integrity", "sync_google_data", "generate_report"}
+
+    def execute_ready(
+        self,
+        *,
+        project_id: int,
+        loop_id: str,
+        actor: str,
+        role: str = "admin",
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        loop = self.repository.get_loop(project_id=int(project_id), loop_id=str(loop_id))
+        if not loop:
+            raise ValueError("Không tìm thấy closed loop trong workspace hiện tại")
+        if str(loop.get("status") or "") == "CLOSED":
+            return loop
+
+        approved_steps = self.automation_repository.approved_steps(
+            project_id=int(project_id), plan_id=str(loop_id)
+        )
+        actions = list(loop.get("actions") or [])
+        already_executed = {
+            str(item.get("step_id") or "")
+            for item in actions
+            if str(item.get("status") or "") == "SUCCESS"
+        }
+        integrity = dict((loop.get("sensed") or {}).get("integrity") or {})
+        integrity_valid = bool(integrity.get("valid", False))
+        recommendations = [dict(x) for x in list(loop.get("recommendations") or [])]
+
+        for recommendation in recommendations:
+            step_id = str(recommendation.get("step_id") or "")
+            tool_name = str(recommendation.get("tool") or "")
+            status = str(recommendation.get("status") or "")
+
+            if step_id in already_executed:
+                recommendation["status"] = "ALREADY_EXECUTED"
+                continue
+            if status in {"NEEDS_INPUT", "FORBIDDEN", "UNAVAILABLE", "ALREADY_EXECUTED"}:
+                continue
+            if not dry_run and not integrity_valid and tool_name not in self._INTEGRITY_RECOVERY_TOOLS:
+                recommendation["status"] = "BLOCKED_DATA_INTEGRITY"
+                actions.append({
+                    "step_id": step_id,
+                    "tool": tool_name,
+                    "status": "BLOCKED_DATA_INTEGRITY",
+                    "dry_run": False,
+                    "approved": False,
+                    "error": "AI_DATA_VALID=FALSE; action ghi dữ liệu bị chặn.",
+                })
+                continue
+
+            requires_approval = bool(recommendation.get("requires_approval"))
+            approved = step_id in approved_steps
+            if requires_approval and not approved:
+                self.automation_repository.request_approval(
+                    project_id=int(project_id),
+                    plan_id=str(loop_id),
+                    step_id=step_id,
+                    tool_name=tool_name,
+                    requested_by=str(actor),
+                )
+                recommendation["status"] = "PENDING_APPROVAL"
+                continue
+
+            try:
+                output = self.platform.tools.execute(
+                    tool_name,
+                    project_id=int(project_id),
+                    actor=str(actor),
+                    role=str(role),
+                    arguments=dict(recommendation.get("arguments") or {}),
+                    approved=approved,
+                    dry_run=bool(dry_run),
+                )
+                run_status = "DRY_RUN" if dry_run else "SUCCESS"
+                recommendation["status"] = run_status
+                actions.append({
+                    "step_id": step_id,
+                    "tool": tool_name,
+                    "status": run_status,
+                    "dry_run": bool(dry_run),
+                    "approved": bool(approved),
+                    "output": output,
+                })
+            except Exception as exc:
+                recommendation["status"] = "FAILED"
+                actions.append({
+                    "step_id": step_id,
+                    "tool": tool_name,
+                    "status": "FAILED",
+                    "dry_run": bool(dry_run),
+                    "approved": bool(approved),
+                    "error": str(exc),
+                })
+
+        loop["recommendations"] = recommendations
+        loop["actions"] = actions[-200:]
+        statuses = {str(x.get("status") or "") for x in recommendations}
+        if "PENDING_APPROVAL" in statuses:
+            loop["current_stage"] = "APPROVE"
+        elif "BLOCKED_DATA_INTEGRITY" in statuses:
+            loop["current_stage"] = "SENSE"
+        else:
+            loop["current_stage"] = "VERIFY"
+        loop["learning"] = self.repository.learning_stats(project_id=int(project_id))
+        self.repository.save_loop(loop)
+        return self.repository.get_loop(project_id=int(project_id), loop_id=str(loop_id))
+
+
 _LOCK = RLock()
-_ENGINES: dict[int, ClosedLoopEngine] = {}
+_ENGINES: dict[int, RuntimeClosedLoopEngine] = {}
 _REPOSITORIES: dict[int, RuntimeClosedLoopRepository] = {}
 
 
@@ -35,12 +148,12 @@ def get_closed_loop_repository(db) -> RuntimeClosedLoopRepository:
         return repository
 
 
-def get_closed_loop_engine(db) -> ClosedLoopEngine:
+def get_closed_loop_engine(db) -> RuntimeClosedLoopEngine:
     key = id(db)
     with _LOCK:
         engine = _ENGINES.get(key)
         if engine is None:
-            engine = ClosedLoopEngine(
+            engine = RuntimeClosedLoopEngine(
                 platform=get_autonomy_platform(db),
                 automation_repository=get_autonomy_repository(db),
                 repository=get_closed_loop_repository(db),
@@ -117,6 +230,7 @@ def add_closed_loop_feedback(
 
 
 __all__ = [
+    "RuntimeClosedLoopEngine",
     "RuntimeClosedLoopRepository",
     "add_closed_loop_feedback",
     "get_closed_loop_engine",
