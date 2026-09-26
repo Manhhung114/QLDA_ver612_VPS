@@ -27,10 +27,15 @@ from .orchestrator import AIOrchestrator, ApprovalPolicy, HeuristicPlanner
 from .persistence import AutomationRepository
 from .platform import AutomationPlatform, build_platform
 from .policy import AutonomyDecision, AutonomyPolicy
+from .postgres_compat import install_closed_loop_postgres_compat
 from .qlda_adapters import QLDAAutomationAdapters
 from .scheduler import DailyAutomationScheduler, ScheduledJob, recommended_daily_schedule
 from .services import ToolRegistry, default_tool_specs
 from .supervisor import ProjectSupervisor
+
+# Install once at package import so every runtime path (Streamlit, API, workers,
+# tests) uses PostgreSQL-safe TEXT timestamp DML for Closed Loop persistence.
+install_closed_loop_postgres_compat()
 
 __all__ = [
     "ActionMode",
