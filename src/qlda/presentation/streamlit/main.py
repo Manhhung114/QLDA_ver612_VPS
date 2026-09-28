@@ -19,11 +19,18 @@ from __future__ import annotations
 
 from runpy import run_module
 
+import streamlit as st
+
+from qlda.presentation.streamlit.edit_sheet_ux import install_edit_sheet_ux
+
 
 APP_MODULE = "qlda.presentation.streamlit.app"
 
 
 def main() -> None:
+    # Presentation-only UX: selecting an existing row now makes the edit form
+    # obvious and auto-opens it. Persistence/workflow logic remains in app.py.
+    install_edit_sheet_ux(st)
     run_module(APP_MODULE, run_name="__main__")
 
 
