@@ -1,4 +1,11 @@
-from qlda.presentation.streamlit.edit_sheet_ux import _edit_button_label, _selection_active
+import pandas as pd
+
+from qlda.presentation.streamlit.edit_sheet_ux import (
+    _edit_button_label,
+    _grid_edit_target,
+    _selected_grid_ids,
+    _selection_active,
+)
 
 
 class _FakeStreamlit:
@@ -37,3 +44,36 @@ def test_material_procurement_inventory_and_boq_use_same_behavior():
     ]
     for state, label in samples:
         assert _selection_active(_FakeStreamlit(state), label) is True
+
+
+def test_grid_keys_route_update_to_existing_edit_forms():
+    assert _grid_edit_target("drawing_select_grid_3_ISSUED_DESIGN_1_6_123") == (
+        "drawing_select_3_ISSUED_DESIGN_pending",
+        "bản vẽ",
+    )
+    assert _grid_edit_target("doc_select_grid_4_RFI_1_8_456") == (
+        "doc_select_4_RFI_pending",
+        "hồ sơ",
+    )
+    assert _grid_edit_target("diary_grid_5_10_999_123") == (
+        "diary_select_5_pending",
+        "nhật ký",
+    )
+    assert _grid_edit_target("task_editor_1_1") is None
+
+
+def test_only_checked_row_ids_are_used_for_update_action():
+    frame = pd.DataFrame(
+        [
+            {"Chọn": False, "ID": 5, "Tên": "A"},
+            {"Chọn": True, "ID": 6, "Tên": "B"},
+        ]
+    )
+    assert _selected_grid_ids(frame) == [6]
+
+
+def test_update_action_disables_for_zero_or_multiple_rows():
+    empty = pd.DataFrame([{"Chọn": False, "ID": 1}])
+    many = pd.DataFrame([{"Chọn": True, "ID": 1}, {"Chọn": True, "ID": 2}])
+    assert _selected_grid_ids(empty) == []
+    assert _selected_grid_ids(many) == [1, 2]
