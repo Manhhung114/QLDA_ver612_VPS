@@ -58,6 +58,22 @@ def _edit_button_label(label: Any) -> Any:
     return label
 
 
+def _form_submit_label(label: Any) -> Any:
+    """Make the actual persistence action explicit in legacy edit forms.
+
+    In the production drawing/document forms, the legacy submit button labelled
+    ``Đính kèm file`` also performs the database save before opening the upload
+    panel. Presenting it only as an attachment action made users believe the
+    grid-level ``Cập nhật`` button was the save action. Rename the submit action
+    so the UI matches the existing persistence behaviour.
+    """
+    if not isinstance(label, str):
+        return label
+    if label.strip() == "📎 Đính kèm file":
+        return "💾 Lưu thay đổi & đính kèm file"
+    return label
+
+
 def _grid_edit_target(key: Any) -> tuple[str, str] | None:
     """Return (pending_session_key, human_label) for checkbox grids."""
     key_text = str(key or "")
@@ -95,14 +111,17 @@ def _selected_grid_ids(frame: Any) -> list[int]:
 
 
 def install_edit_sheet_ux(st) -> None:
-    """Improve edit discoverability for all table/sheet-style screens.
+    """Improve edit discoverability for table/sheet-style screens.
 
     Behaviour:
     - Existing ``Mở / xử lý`` buttons are presented as ``Chỉnh sửa / xử lý``.
     - Checkbox grids for drawings/documents/site diaries show an explicit
-      ``Cập nhật ... đã chọn`` button immediately below the table.
-    - Clicking that button selects the record in the existing edit form and
-      reruns the screen, so the current persistence/workflow code is reused.
+      ``Mở ... để chỉnh sửa`` button immediately below the table.
+    - Clicking that button only selects the record and loads it into the existing
+      edit form; it does NOT save data.
+    - The legacy form submit labelled ``Đính kèm file`` is presented as
+      ``Lưu thay đổi & đính kèm file`` because that existing submit path is the
+      one that calls the database save before opening the upload panel.
     - When an existing row is selected, the matching ``Thêm / sửa`` expander
       opens automatically and its title changes to ``Chỉnh sửa thông tin``.
     - Database writes, approval workflow and permission checks remain untouched.
@@ -114,6 +133,7 @@ def install_edit_sheet_ux(st) -> None:
     original_expander = st.expander
     original_button = st.button
     original_data_editor = st.data_editor
+    original_form_submit_button = st.form_submit_button
 
     def _expander(label, *args, **kwargs):
         display_label = label
@@ -129,6 +149,15 @@ def install_edit_sheet_ux(st) -> None:
             kwargs["help"] = "Chọn đúng 1 dòng trong bảng để mở form chỉnh sửa thông tin."
         return original_button(new_label, *args, **kwargs)
 
+    def _form_submit_button(label, *args, **kwargs):
+        new_label = _form_submit_label(label)
+        if new_label != label and "help" not in kwargs:
+            kwargs["help"] = (
+                "Nút này lưu các nội dung vừa sửa vào hệ thống, sau đó mở phần đính kèm file. "
+                "Nếu không cần thay file, có thể bỏ qua bước tải file sau khi lưu."
+            )
+        return original_form_submit_button(new_label, *args, **kwargs)
+
     def _data_editor(data, *args, **kwargs):
         edited = original_data_editor(data, *args, **kwargs)
         target = _grid_edit_target(kwargs.get("key"))
@@ -137,10 +166,13 @@ def install_edit_sheet_ux(st) -> None:
             selected_ids = _selected_grid_ids(edited)
             button_key = f"qlda_update_selected_{kwargs.get('key')}"
             clicked = original_button(
-                f"✏️ Cập nhật {object_label} đã chọn ({len(selected_ids)})",
+                f"✏️ Mở {object_label} đã chọn để chỉnh sửa ({len(selected_ids)})",
                 key=button_key,
                 disabled=len(selected_ids) != 1,
-                help=f"Chọn đúng 1 {object_label} trong bảng để nạp thông tin lên form chỉnh sửa phía trên.",
+                help=(
+                    f"Chọn đúng 1 {object_label} để nạp thông tin lên form phía trên. "
+                    "Sau khi sửa, phải bấm nút Lưu thay đổi trong form để ghi vào hệ thống."
+                ),
                 width="stretch",
             )
             if clicked:
@@ -151,9 +183,11 @@ def install_edit_sheet_ux(st) -> None:
     st._qlda_edit_sheet_original_expander = original_expander
     st._qlda_edit_sheet_original_button = original_button
     st._qlda_edit_sheet_original_data_editor = original_data_editor
+    st._qlda_edit_sheet_original_form_submit_button = original_form_submit_button
     st.expander = _expander
     st.button = _button
     st.data_editor = _data_editor
+    st.form_submit_button = _form_submit_button
 
     # Buttons inside st.columns are DeltaGenerator.button calls, not st.button.
     # Apply the same presentation-only label change there as well.

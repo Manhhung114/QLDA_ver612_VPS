@@ -2,6 +2,7 @@ import pandas as pd
 
 from qlda.presentation.streamlit.edit_sheet_ux import (
     _edit_button_label,
+    _form_submit_label,
     _grid_edit_target,
     _selected_grid_ids,
     _selection_active,
@@ -17,6 +18,12 @@ def test_open_process_button_is_presented_as_edit_action():
     assert _edit_button_label("📝 Mở / xử lý hồ sơ") == "✏️ Chỉnh sửa / xử lý hồ sơ"
     assert _edit_button_label("📝 Mở / xử lý Shopdrawing") == "✏️ Chỉnh sửa / xử lý Shopdrawing"
     assert _edit_button_label("Khác") == "Khác"
+
+
+def test_legacy_attachment_submit_is_presented_as_save_action():
+    assert _form_submit_label("📎 Đính kèm file") == "💾 Lưu thay đổi & đính kèm file"
+    assert _form_submit_label("💾 Lưu nhật ký") == "💾 Lưu nhật ký"
+    assert _form_submit_label("Khác") == "Khác"
 
 
 def test_drawing_edit_form_opens_when_existing_row_is_selected():
