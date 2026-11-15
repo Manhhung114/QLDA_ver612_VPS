@@ -1,0 +1,28 @@
+name: Refresh official Construction and MEPF legal catalog
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests beautifulsoup4 lxml
+      - name: Check official source updates
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m qlda.application.legal_sources \
+            --seed data/legal/official_catalog.json \
+            --online --output data/legal/official_catalog.json
+      - name: Commit only changed source metadata
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/legal/official_catalog.json
+          git diff --cached --quiet || (git commit -m 'chore(legal): refresh official construction and mepf sources' && git push)
