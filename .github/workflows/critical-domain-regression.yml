@@ -37,7 +37,8 @@ jobs:
             tests.test_vo_claim \
             tests.test_schedule_background \
             tests.test_schedule_excel_multiline \
-            tests.test_schedule_source_management
+            tests.test_schedule_source_management \
+            tests.test_schedule_unified_import_ui
       - name: Contract and autonomy regressions
         run: |
           python -m unittest -v \
