@@ -10,6 +10,7 @@ from qlda.runtime_core.excel_background import render_boq_background_panel as _v
 from qlda.runtime_core.excel_background import render_ipc_background_panel as _v624_render_ipc_background_panel
 from qlda.runtime_core.excel_background import render_vo_background_panel as _v624_render_vo_background_panel
 from qlda.runtime_core.excel_background import render_schedule_background_panel as _v624_render_schedule_background_panel
+from qlda.presentation.streamlit.schedule_excel_upload import render_schedule_excel_upload as _render_schedule_excel_upload
 
 # V6.22 ORIGINAL IMPORT UI V2
 from qlda.runtime_core.original_import_storage import (
@@ -451,6 +452,15 @@ def render_schedule(pid: int):
         status_date=status_date,
     )
 
+    _render_schedule_excel_upload(
+        st, db, pid, status_date=status_date, can_update=bool(_can_update()),
+        archive_original=lambda filename, content, mime: _v622_archive_original_upload(
+            db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
+            filename, content, mime,
+        ),
+        expanded=not bool(db.tasks(pid)),
+    )
+
     rows = db.tasks(pid)
     n = len(rows)
     delayed = sum(1 for r in rows if r["status"] == "Chậm tiến độ")
@@ -711,50 +721,6 @@ def render_schedule(pid: int):
         ex2, db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
         "⬇️ File Excel tiến độ gốc trên VPS",
     )
-    excel_in = ex2.file_uploader("Nhập công việc từ Excel", type=["xlsx", "xls"], key=f"task_excel_{pid}")
-    if excel_in is not None and ex2.button("Nhập Excel", key=f"task_excel_btn_{pid}", width="stretch", disabled=not _can_update()):
-        try:
-            xdf = pd.read_excel(excel_in)
-            aliases = {
-                "WBS": "wbs", "Công việc": "name", "Name": "name", "Bắt đầu": "start", "Start": "start",
-                "Kết thúc": "end", "Finish": "end", "KH %": "planned", "TT %": "actual", "Phụ trách": "responsible",
-                "Predecessor": "predecessor", "Ghi chú": "note",
-            }
-            normalized = {}
-            for col in xdf.columns:
-                if str(col).strip() in aliases:
-                    normalized[aliases[str(col).strip()]] = col
-            required = {"name", "start", "end"}
-            if not required.issubset(normalized):
-                st.error("Excel cần tối thiểu các cột: Công việc/Name, Bắt đầu/Start, Kết thúc/Finish.")
-            else:
-                _v622_archive_original_upload(
-                    db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
-                    excel_in.name, excel_in.getvalue(), str(getattr(excel_in, "type", "") or ""),
-                )
-                count = 0
-                for _, xr in xdf.iterrows():
-                    s = pd.to_datetime(xr[normalized["start"]], errors="coerce")
-                    e = pd.to_datetime(xr[normalized["end"]], errors="coerce")
-                    if pd.isna(s) or pd.isna(e) or not str(xr[normalized["name"]]).strip():
-                        continue
-                    ps, pe = s.date(), e.date()
-                    db.add_task(pid, {
-                        "wbs": str(xr[normalized.get("wbs", "")] if "wbs" in normalized else ""),
-                        "name": str(xr[normalized["name"]]),
-                        "responsible": str(xr[normalized.get("responsible", "")] if "responsible" in normalized else ""),
-                        "start_date": iso(ps), "end_date": iso(pe), "duration": max(1, (pe - ps).days + 1),
-                        "planned_progress": int(xr[normalized["planned"]]) if "planned" in normalized and pd.notna(xr[normalized["planned"]]) else planned_progress(iso(ps), iso(pe), status_date),
-                        "actual_progress": int(xr[normalized["actual"]]) if "actual" in normalized and pd.notna(xr[normalized["actual"]]) else 0,
-                        "predecessor": str(xr[normalized.get("predecessor", "")] if "predecessor" in normalized else ""),
-                        "note": str(xr[normalized.get("note", "")] if "note" in normalized else ""),
-                    })
-                    count += 1
-                st.success(f"Đã nhập {count} công việc.")
-                st.rerun()
-        except Exception as exc:
-            st.error(f"Không đọc được Excel: {exc}")
-
     st.markdown("#### Gantt")
     show_gantt = st.toggle("Hiển thị biểu đồ Gantt", value=False, key=f"show_gantt_{pid}", help="Tắt mặc định để trang Tiến độ mở nhanh hơn; Plotly chỉ tải khi cần.")
     if show_gantt:
