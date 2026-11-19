@@ -15,6 +15,7 @@ import pandas as pd
 
 from qlda.import_engines.schedule_background import parse_schedule_excel_path
 from qlda.import_engines.schedule_persistence import save_schedule_result_batched
+from qlda.infrastructure.schedule_snapshot import save_project_schedule
 from qlda.infrastructure.schedule_workspace import delete_schedule_scope, source_counts
 from qlda.runtime_core.mpp_cloud_reader import read_mpp
 
@@ -191,8 +192,33 @@ def render_schedule_import(
     else:
         st.caption("Ngày bắt đầu/kết thúc lấy trực tiếp từ dữ liệu Project đọc bằng MPXJ.")
 
+    existing_rows = len(db.tasks(pid, "", "Tất cả"))
+    update_mode = st.radio(
+        "Cách cập nhật bảng tiến độ",
+        ["replace_all", "same_source"],
+        format_func=lambda mode: (
+            "Thay thế toàn bộ bảng tiến độ cũ (khuyến nghị)"
+            if mode == "replace_all" else
+            "Chỉ cập nhật loại nguồn đang nhập, giữ các nguồn khác"
+        ),
+        key=f"schedule_unified_mode_{pid}",
+        disabled=not can_update,
+    )
+    if update_mode == "replace_all":
+        st.warning(
+            f"Khi xác nhận: toàn bộ {existing_rows:,} công việc đang lưu trong dự án này "
+            f"sẽ được thay thế bằng {len(tasks):,} công việc từ {kind_label}. "
+            "Nếu ghi dữ liệu lỗi, transaction sẽ rollback và giữ nguyên bảng cũ. "
+            "Không xóa hồ sơ, BOQ, IPC, VO hoặc công việc của dự án khác."
+        )
+    else:
+        st.info(
+            f"Sẽ thay thế dữ liệu {kind_label} cũ, đồng thời giữ các công việc khác "
+            f"trong bảng hiện tại ({existing_rows:,} công việc)."
+        )
     st.checkbox(
-        f"Tôi đã xem ngày và đồng ý nhập {len(tasks):,} công việc {kind_label}.",
+        f"Tôi đã kiểm tra và đồng ý cập nhật {len(tasks):,} công việc {kind_label} "
+        "theo chế độ đã chọn.",
         key=accept_key, disabled=not can_update,
     )
     if not st.button(
@@ -207,14 +233,28 @@ def render_schedule_import(
         st.session_state.pop(state_key, None)
         return
     try:
+        replace_all = update_mode == "replace_all"
         if kind == "excel":
-            stats = save_schedule_result_batched(db, pid, current["result"])
-            written = int(stats["written_rows"])
+            stats = save_schedule_result_batched(
+                db, pid, current["result"],
+                replace_all=replace_all,
+                expected_existing_rows=existing_rows if replace_all else None,
+            )
         else:
-            db.sync_mpp_tasks(pid, current["tasks"], uploaded.name, current["project_info"])
-            written = len(current["tasks"])
+            stats = save_project_schedule(
+                db, pid, current["tasks"], uploaded.name, current["project_info"],
+                replace_all=replace_all,
+                expected_existing_rows=existing_rows if replace_all else None,
+            )
+        written = int(stats["written_rows"])
+        after_count = int(stats["total_rows"])
+        if written != len(tasks) or (replace_all and after_count != len(tasks)):
+            raise RuntimeError(
+                f"Đã đọc {len(tasks):,} nhưng cơ sở dữ liệu có {after_count:,} dòng. "
+                "Vui lòng kiểm tra nhật ký."
+            )
     except Exception as exc:
-        st.error(f"Nhập tiến độ thất bại; dữ liệu khác được giữ nguyên: {exc}")
+        st.error(f"Nhập tiến độ thất bại; dữ liệu cũ được giữ nguyên nếu transaction rollback: {exc}")
         return
 
     if archive_original is not None:
@@ -232,7 +272,19 @@ def render_schedule_import(
     # On the next run the preview is absent, so the checkbox is not rendered;
     # Streamlit cleans up its widget state automatically.
     st.session_state.pop(state_key, None)
-    st.success(f"Đã nhập {written:,} công việc từ {kind_label}.")
+    # These filters are rendered later in the schedule page, so their keys can
+    # be reset here without mutating an already-instantiated Streamlit widget.
+    st.session_state[f"schedule_source_filter_{pid}"] = "all"
+    st.session_state[f"task_search_{pid}"] = ""
+    st.session_state[f"task_status_{pid}"] = "Tất cả"
+    st.session_state[f"task_table_page_{pid}_page"] = 1
+    # Old editor cell edits are keyed by row position. Drop them before the
+    # newly-imported table is rendered, avoiding accidental TT% edits.
+    st.session_state.pop(f"task_editor_{pid}_all", None)
+    st.success(
+        f"Đã nhập đủ {written:,}/{len(tasks):,} công việc từ {kind_label}. "
+        f"**Bảng tiến độ hiện có {after_count:,} công việc.**"
+    )
     st.rerun()
 
 

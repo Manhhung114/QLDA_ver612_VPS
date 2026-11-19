@@ -603,7 +603,16 @@ def render_schedule(pid: int):
         "Critical": "Có" if r["critical"] else "", "Nguồn": _schedule_source_label(r["source_type"]),
     } for r in rows])
     original_tt = dict(zip(display["DB ID"], display["TT %"]))
-    task_page, task_page_token = _paged_df(display, f"task_table_page_{pid}", default_size=100, sizes=(50, 100, 200))
+    # Streamlit data_editor virtualizes rows: show normal schedules in full.
+    # Paging at 100 rows confused a 265-row import with a truncated plan.
+    if len(display) <= 1000:
+        task_page, task_page_token = display, "all"
+        st.caption(f"Đang hiển thị đầy đủ **{len(display):,}/{len(display):,}** công việc. Cuộn trong bảng để xem các dòng tiếp theo.")
+    else:
+        task_page, task_page_token = _paged_df(
+            display, f"task_table_page_{pid}",
+            default_size=500, sizes=(200, 500, 1000),
+        )
     disabled_cols = list(task_page.columns) if not _can_update() else [c for c in task_page.columns if c != "TT %"]
     edited = st.data_editor(
         task_page, hide_index=True, width="stretch", disabled=disabled_cols,
