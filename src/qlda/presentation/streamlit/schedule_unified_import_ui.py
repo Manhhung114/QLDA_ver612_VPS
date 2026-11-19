@@ -226,8 +226,12 @@ def render_schedule_import(
             )
         except Exception as exc:
             st.warning(f"Đã nhập dữ liệu, nhưng chưa lưu được file gốc: {exc}")
+    # Clear the preview and rerun. Do NOT assign to accept_key here:
+    # Streamlit has already instantiated the confirmation checkbox in this run,
+    # and mutating its key raises StreamlitWidgetAlreadyInstantiatedError.
+    # On the next run the preview is absent, so the checkbox is not rendered;
+    # Streamlit cleans up its widget state automatically.
     st.session_state.pop(state_key, None)
-    st.session_state[accept_key] = False
     st.success(f"Đã nhập {written:,} công việc từ {kind_label}.")
     st.rerun()
 
