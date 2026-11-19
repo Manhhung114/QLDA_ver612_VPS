@@ -7,10 +7,8 @@ without first deleting it in a separate, non-transactional user action.
 """
 
 from typing import Any
-from datetime import date
-
 from qlda.import_engines.schedule_persistence import _atomic, _scalar_int
-from qlda.runtime_core.project_store import calc_progress_status
+from qlda.runtime_core.project_store import calc_progress_status, _now
 
 
 def save_project_schedule(
@@ -100,11 +98,11 @@ def save_project_schedule(
         end_date = str(info.get("end_date") or "")
         manager = str(info.get("manager") or "")
         conn.execute(
-            """UPDATE projects SET source_mpp_path=?,last_sync=CURRENT_TIMESTAMP,
+            """UPDATE projects SET source_mpp_path=?,last_sync=?,
             start_date=CASE WHEN ?<>'' THEN ? ELSE start_date END,
             end_date=CASE WHEN ?<>'' THEN ? ELSE end_date END,
             manager=CASE WHEN ?<>'' THEN ? ELSE manager END WHERE id=?""",
-            (source_name, start_date, start_date, end_date, end_date, manager, manager, pid),
+            (source_name, _now(), start_date, start_date, end_date, end_date, manager, manager, pid),
         )
         total = _scalar_int(conn.execute(
             "SELECT COUNT(*) AS row_count FROM tasks WHERE project_id=?", (pid,),
