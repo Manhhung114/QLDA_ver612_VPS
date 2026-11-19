@@ -440,8 +440,9 @@ def render_schedule_background_panel(
     pid = int(project_id)
     st.markdown("##### ⚡ Excel tiến độ lớn · xử lý nền V6.24.5")
     st.caption(
-        "Hỗ trợ .xlsx/.xlsm với các cột Công việc/Name, Bắt đầu/Start, Kết thúc/Finish. "
-        "Lần nhập mới chỉ thay thế task của Schedule Background; task thủ công và MPP được giữ nguyên."
+        "Hỗ trợ .xlsx/.xlsm, kể cả tiến độ nhiều dòng tiêu đề: Hạng mục công việc, Bắt đầu, "
+        "Số ngày, Kết thúc. Giữ nguyên các mốc ngày Excel; các nhóm chưa có ngày vẫn được lưu trống. "
+        "Chỉ thay thế dữ liệu Schedule Background; task thủ công và MPP được giữ nguyên."
     )
     c1, c2 = st.columns([2.2, 1.0])
     if can_update:
@@ -514,6 +515,8 @@ def render_schedule_background_panel(
         written = int(result.get("written_rows") or 0)
         failed = int(result.get("failed_rows") or 0)
         skipped = int(result.get("skipped_rows") or 0)
+        undated = int(result.get("undated_count") or 0)
+        conflict_count = int(result.get("summary_conflict_count") or 0)
         verification = str(result.get("verification_status") or "").strip().upper()
         verified = bool(result.get("verified_postgresql")) and verification == "HOÀN TẤT"
         if verified:
@@ -521,6 +524,8 @@ def render_schedule_background_panel(
                 "PostgreSQL **HOÀN TẤT** · "
                 f"expected **{expected:,}** · scanned **{scanned:,}** · "
                 f"written **{written:,}** · failed **{failed:,}**"
+                + (f" · **{undated:,}** hạng mục chưa có ngày được giữ trống" if undated else "")
+                + (f" · **{conflict_count:,}** mốc nhóm cần đối chiếu" if conflict_count else "")
                 + (f" · bỏ qua **{skipped:,}** dòng không hợp lệ" if skipped else "")
                 + "."
             )
