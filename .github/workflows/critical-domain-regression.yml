@@ -35,7 +35,8 @@ jobs:
             tests.test_ipc_adaptive_parser \
             tests.test_ipc_payment_semantic \
             tests.test_vo_claim \
-            tests.test_schedule_background
+            tests.test_schedule_background \
+            tests.test_schedule_excel_multiline
       - name: Contract and autonomy regressions
         run: |
           python -m unittest -v \
