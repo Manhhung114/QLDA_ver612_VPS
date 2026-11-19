@@ -226,14 +226,21 @@ def parse_schedule_excel_path(
             values = tuple(row)
             if not any(value not in (None, "") for value in values):
                 continue
-            source_rows += 1
-
             def cell(field: str, default: Any = None) -> Any:
                 index = columns.get(field)
                 return default if index is None or index >= len(values) else values[index]
 
             raw_name = str(cell("name") or "")
             name = raw_name.strip()
+            # Contractor sheets place a long multi-line "Ghi chú:" footer and
+            # signature line after the last task. They are not invalid tasks.
+            wbs_or_note = _wbs_text(cell("wbs"))
+            if not name and (
+                wbs_or_note.casefold().startswith("ghi chú:")
+                or wbs_or_note.casefold().startswith("đại diện")
+            ):
+                break
+            source_rows += 1
             if not name:
                 skipped.append({"row_no": row_no, "reason": "Dòng không có tên công việc"})
                 continue
