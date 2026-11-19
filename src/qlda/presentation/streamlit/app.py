@@ -10,7 +10,7 @@ from qlda.runtime_core.excel_background import render_boq_background_panel as _v
 from qlda.runtime_core.excel_background import render_ipc_background_panel as _v624_render_ipc_background_panel
 from qlda.runtime_core.excel_background import render_vo_background_panel as _v624_render_vo_background_panel
 from qlda.runtime_core.excel_background import render_schedule_background_panel as _v624_render_schedule_background_panel
-from qlda.presentation.streamlit.schedule_excel_upload import render_schedule_excel_upload as _render_schedule_excel_upload
+from qlda.presentation.streamlit.schedule_unified_import_ui import render_schedule_import as _render_schedule_import, render_schedule_delete_all as _render_schedule_delete_all
 from qlda.presentation.streamlit.schedule_management_ui import (render_schedule_delete_panel as _render_schedule_delete_panel, render_schedule_source_filter as _render_schedule_source_filter)
 from qlda.infrastructure.schedule_workspace import schedule_source_label as _schedule_source_label, source_counts as _schedule_source_counts
 
@@ -450,24 +450,29 @@ def render_schedule(pid: int):
     )
     csrc.info(f"Nguồn tiến độ trên bảng: {_source_message}")
 
-    _v624_render_schedule_background_panel(
-        st,
-        db,
-        pid,
-        gateway=_drive_gateway(),
-        session_token=_gateway_session_token(),
-        can_update=bool(_can_update()),
-        status_date=status_date,
-    )
-
-    _render_schedule_excel_upload(
-        st, db, pid, status_date=status_date, can_update=bool(_can_update()),
-        archive_original=lambda filename, content, mime: _v622_archive_original_upload(
-            db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
+    _render_schedule_import(
+        st, db, pid,
+        status_date=status_date, can_update=bool(_can_update()),
+        archive_original=lambda source, filename, content, mime: _v622_archive_original_upload(
+            db, pid, _gateway_session_token(), source,
+            "TASKS" if source == "SCHEDULE_EXCEL" else "SCHEDULE",
             filename, content, mime,
         ),
-        expanded=not bool(db.tasks(pid)),
     )
+    _render_schedule_delete_all(
+        st, db, pid, can_update=bool(_can_update()), is_admin=bool(_is_admin()),
+    )
+    with st.expander("⚙️ Tiến độ Excel rất lớn - tải trực tiếp lên VPS", expanded=False):
+        _v624_render_schedule_background_panel(
+            st, db, pid, gateway=_drive_gateway(),
+            session_token=_gateway_session_token(),
+            can_update=bool(_can_update()), status_date=status_date,
+        )
+    with st.expander("📥 Tải lại file Project gốc", expanded=False):
+        _v622_render_original_link(
+            st, db, pid, _gateway_session_token(), "SCHEDULE_MPP",
+            "SCHEDULE", "⬇️ File Project gốc đã lưu",
+        )
 
     rows = db.tasks(pid)
     n = len(rows)
@@ -487,40 +492,6 @@ def render_schedule(pid: int):
         rows=[dict(task) for task in db.tasks(pid, "", "Tất cả")],
         can_update=bool(_can_update()), is_admin=bool(_is_admin()),
     )
-
-    with st.expander("📂 Nhập Microsoft Project (.mpp hoặc .xml)", expanded=not bool(rows)):
-        st.write("Hỗ trợ Microsoft Project MPP hoặc Project XML bằng MPXJ, không cần cài Project trên VPS.")
-        _v622_render_original_link(
-            st, db, pid, _gateway_session_token(), "SCHEDULE_MPP", "SCHEDULE",
-            "⬇️ Tải file MPP gốc trên VPS",
-        )
-        mpp = st.file_uploader("Chọn file Microsoft Project (.mpp hoặc .xml)", type=["mpp", "xml"], key=f"mpp_{pid}")
-        if st.button("Đọc và đồng bộ Microsoft Project", type="primary", disabled=(mpp is None or not _can_update()), key=f"syncmpp_{pid}"):
-            suffix = Path(mpp.name).suffix or ".mpp"
-            temp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                    tmp.write(mpp.getvalue())
-                    temp_path = tmp.name
-                with st.spinner("Đang đọc Microsoft Project bằng MPXJ..."):
-                    info, tasks = read_mpp(temp_path, status_date=status_date)
-                    _v622_archive_original_upload(
-                        db, pid, _gateway_session_token(), "SCHEDULE_MPP", "SCHEDULE",
-                        mpp.name, mpp.getvalue(), str(getattr(mpp, "type", "") or ""),
-                    )
-                    db.sync_mpp_tasks(pid, tasks, mpp.name, info)
-                st.success(f"Đồng bộ thành công {len(tasks):,} công việc từ {mpp.name}.")
-                st.rerun()
-            except MppCloudError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.exception(exc)
-            finally:
-                if temp_path:
-                    try:
-                        Path(temp_path).unlink(missing_ok=True)
-                    except Exception:
-                        pass
 
     a1, a2 = st.columns([1, 3])
     if a1.button("Tính lại KH% theo ngày báo cáo", key=f"recalc_{pid}", width="stretch", disabled=not _can_update()):
