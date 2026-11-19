@@ -488,14 +488,14 @@ def render_schedule(pid: int):
         can_update=bool(_can_update()), is_admin=bool(_is_admin()),
     )
 
-    with st.expander("📂 Nhập / đồng bộ Microsoft Project (.mpp)", expanded=not bool(rows)):
-        st.write("Trên Cloud, file MPP được đọc trực tiếp bằng MPXJ; không cần cài Microsoft Project trên server.")
+    with st.expander("📂 Nhập Microsoft Project (.mpp hoặc .xml)", expanded=not bool(rows)):
+        st.write("Hỗ trợ Microsoft Project MPP hoặc Project XML bằng MPXJ, không cần cài Project trên VPS.")
         _v622_render_original_link(
             st, db, pid, _gateway_session_token(), "SCHEDULE_MPP", "SCHEDULE",
             "⬇️ Tải file MPP gốc trên VPS",
         )
-        mpp = st.file_uploader("Chọn file .mpp", type=["mpp"], key=f"mpp_{pid}")
-        if st.button("Đọc và đồng bộ MPP", type="primary", disabled=(mpp is None or not _can_update()), key=f"syncmpp_{pid}"):
+        mpp = st.file_uploader("Chọn file Microsoft Project (.mpp hoặc .xml)", type=["mpp", "xml"], key=f"mpp_{pid}")
+        if st.button("Đọc và đồng bộ Microsoft Project", type="primary", disabled=(mpp is None or not _can_update()), key=f"syncmpp_{pid}"):
             suffix = Path(mpp.name).suffix or ".mpp"
             temp_path = None
             try:
