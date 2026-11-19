@@ -278,6 +278,9 @@ def render_schedule_import(
     st.session_state[f"task_search_{pid}"] = ""
     st.session_state[f"task_status_{pid}"] = "Tất cả"
     st.session_state[f"task_table_page_{pid}_page"] = 1
+    # Old editor cell edits are keyed by row position. Drop them before the
+    # newly-imported table is rendered, avoiding accidental TT% edits.
+    st.session_state.pop(f"task_editor_{pid}_all", None)
     st.success(
         f"Đã nhập đủ {written:,}/{len(tasks):,} công việc từ {kind_label}. "
         f"**Bảng tiến độ hiện có {after_count:,} công việc.**"
