@@ -10,6 +10,9 @@ from qlda.runtime_core.excel_background import render_boq_background_panel as _v
 from qlda.runtime_core.excel_background import render_ipc_background_panel as _v624_render_ipc_background_panel
 from qlda.runtime_core.excel_background import render_vo_background_panel as _v624_render_vo_background_panel
 from qlda.runtime_core.excel_background import render_schedule_background_panel as _v624_render_schedule_background_panel
+from qlda.presentation.streamlit.schedule_excel_upload import render_schedule_excel_upload as _render_schedule_excel_upload
+from qlda.presentation.streamlit.schedule_management_ui import (render_schedule_delete_panel as _render_schedule_delete_panel, render_schedule_source_filter as _render_schedule_source_filter)
+from qlda.infrastructure.schedule_workspace import schedule_source_label as _schedule_source_label, source_counts as _schedule_source_counts
 
 # V6.22 ORIGINAL IMPORT UI V2
 from qlda.runtime_core.original_import_storage import (
@@ -438,8 +441,14 @@ def render_schedule(pid: int):
 
     cdate, csrc = st.columns([1, 3])
     status_date = cdate.date_input("Ngày báo cáo", value=date.today(), key=f"status_date_{pid}")
-    source = project["source_mpp_path"] or "Chưa nhập MPP"
-    csrc.info(f"Nguồn tiến độ: **{source}**" + (f" — đồng bộ {project['last_sync']}" if project["last_sync"] else ""))
+    _source_rows = [dict(task) for task in db.tasks(pid, "", "Tất cả")]
+    _source_counts = _schedule_source_counts(_source_rows)
+    _source_message = (
+        f"**Excel:** {_source_counts['excel']:,} · "
+        f"**Microsoft Project:** {_source_counts['mpp']:,} · "
+        f"**Thủ công/Excel cũ:** {_source_counts['manual']:,}"
+    )
+    csrc.info(f"Nguồn tiến độ trên bảng: {_source_message}")
 
     _v624_render_schedule_background_panel(
         st,
@@ -449,6 +458,15 @@ def render_schedule(pid: int):
         session_token=_gateway_session_token(),
         can_update=bool(_can_update()),
         status_date=status_date,
+    )
+
+    _render_schedule_excel_upload(
+        st, db, pid, status_date=status_date, can_update=bool(_can_update()),
+        archive_original=lambda filename, content, mime: _v622_archive_original_upload(
+            db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
+            filename, content, mime,
+        ),
+        expanded=not bool(db.tasks(pid)),
     )
 
     rows = db.tasks(pid)
@@ -464,14 +482,20 @@ def render_schedule(pid: int):
     k4.metric("Hoàn thành", done)
     k5.metric("Tiến độ TB", f"{avg}%")
 
-    with st.expander("📂 Nhập / đồng bộ Microsoft Project (.mpp)", expanded=not bool(rows)):
-        st.write("Trên Cloud, file MPP được đọc trực tiếp bằng MPXJ; không cần cài Microsoft Project trên server.")
+    _render_schedule_delete_panel(
+        st, db, pid, project=project,
+        rows=[dict(task) for task in db.tasks(pid, "", "Tất cả")],
+        can_update=bool(_can_update()), is_admin=bool(_is_admin()),
+    )
+
+    with st.expander("📂 Nhập Microsoft Project (.mpp hoặc .xml)", expanded=not bool(rows)):
+        st.write("Hỗ trợ Microsoft Project MPP hoặc Project XML bằng MPXJ, không cần cài Project trên VPS.")
         _v622_render_original_link(
             st, db, pid, _gateway_session_token(), "SCHEDULE_MPP", "SCHEDULE",
             "⬇️ Tải file MPP gốc trên VPS",
         )
-        mpp = st.file_uploader("Chọn file .mpp", type=["mpp"], key=f"mpp_{pid}")
-        if st.button("Đọc và đồng bộ MPP", type="primary", disabled=(mpp is None or not _can_update()), key=f"syncmpp_{pid}"):
+        mpp = st.file_uploader("Chọn file Microsoft Project (.mpp hoặc .xml)", type=["mpp", "xml"], key=f"mpp_{pid}")
+        if st.button("Đọc và đồng bộ Microsoft Project", type="primary", disabled=(mpp is None or not _can_update()), key=f"syncmpp_{pid}"):
             suffix = Path(mpp.name).suffix or ".mpp"
             temp_path = None
             try:
@@ -534,7 +558,10 @@ def render_schedule(pid: int):
     f1, f2 = st.columns([3, 1])
     keyword = f1.text_input("Tìm WBS / công việc / resource", key=f"task_search_{pid}")
     status_filter = f2.selectbox("Trạng thái", TASK_STATUSES, key=f"task_status_{pid}")
-    rows = db.tasks(pid, keyword, status_filter)
+    rows = _render_schedule_source_filter(
+        st, project_id=pid, rows=list(db.tasks(pid, keyword, status_filter)),
+        all_rows=list(db.tasks(pid, "", "Tất cả")),
+    )
 
     # V6.22: keep destructive schedule actions compact and scoped to the
     # contractor workspace currently selected in the sidebar. No contractor
@@ -589,59 +616,6 @@ def render_schedule(pid: int):
                 st.success("Đã xóa công việc khỏi bảng tiến độ của nhà thầu hiện tại.")
                 st.rerun()
 
-            if _is_admin():
-                st.divider()
-                st.markdown("**ADMIN · Xóa bảng tiến độ**")
-                _mpp_task_count = sum(
-                    1 for _r in _schedule_manage_rows
-                    if str(_r.get("source_type") or "").strip().lower() == "mpp"
-                )
-                with st.form(f"schedule_bulk_delete_form_{pid}"):
-                    _schedule_delete_mode = st.radio(
-                        "Phạm vi xóa",
-                        ["Chỉ dữ liệu Microsoft Project (.mpp)", "Toàn bộ bảng tiến độ"],
-                        key=f"schedule_bulk_delete_mode_{pid}",
-                    )
-                    _schedule_delete_count = (
-                        _mpp_task_count
-                        if _schedule_delete_mode.startswith("Chỉ dữ liệu")
-                        else len(_schedule_manage_rows)
-                    )
-                    st.warning(
-                        f"Sẽ xóa {_schedule_delete_count:,} công việc của {_schedule_owner}. "
-                        "BOQ, Claim/IPC, VO, Hồ sơ, Bản vẽ và các nhà thầu khác không bị xóa."
-                    )
-                    _schedule_confirm = st.text_input(
-                        'Nhập "XOA TIEN DO" để xác nhận',
-                        key=f"schedule_bulk_delete_confirm_{pid}",
-                    )
-                    _schedule_bulk_submit = st.form_submit_button(
-                        "🗑 Xóa vĩnh viễn",
-                        disabled=(
-                            _schedule_delete_count <= 0
-                            or str(_schedule_confirm or "").strip().upper() != "XOA TIEN DO"
-                        ),
-                    )
-                if _schedule_bulk_submit:
-                    with db.connect() as _schedule_conn:
-                        if _schedule_delete_mode.startswith("Chỉ dữ liệu"):
-                            _schedule_conn.execute(
-                                "DELETE FROM tasks WHERE project_id=? AND LOWER(TRIM(COALESCE(source_type,'')))='mpp'",
-                                (int(pid),),
-                            )
-                        else:
-                            _schedule_conn.execute(
-                                "DELETE FROM tasks WHERE project_id=?",
-                                (int(pid),),
-                            )
-                        _schedule_conn.execute(
-                            "UPDATE projects SET source_mpp_path='', last_sync='' WHERE id=?",
-                            (int(pid),),
-                        )
-                    st.success(
-                        f"Đã xóa {_schedule_delete_count:,} công việc khỏi tiến độ của {_schedule_owner}."
-                    )
-                    st.rerun()
 
     if not rows:
         st.info("Chưa có công việc phù hợp.")
@@ -655,7 +629,7 @@ def render_schedule(pid: int):
         "Ngày trễ": calculate_delay_days(r["end_date"], r["actual_progress"], r["actual_finish_date"] or "", status_date),
         "Predecessor": r["predecessor"], "Resources": r["resource_names"], "Baseline Start": r["baseline_start"],
         "Baseline Finish": r["baseline_finish"], "Slack (ngày)": round(float(r["total_slack"] or 0), 2),
-        "Critical": "Có" if r["critical"] else "", "Nguồn": r["source_type"],
+        "Critical": "Có" if r["critical"] else "", "Nguồn": _schedule_source_label(r["source_type"]),
     } for r in rows])
     original_tt = dict(zip(display["DB ID"], display["TT %"]))
     task_page, task_page_token = _paged_df(display, f"task_table_page_{pid}", default_size=100, sizes=(50, 100, 200))
@@ -711,50 +685,6 @@ def render_schedule(pid: int):
         ex2, db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
         "⬇️ File Excel tiến độ gốc trên VPS",
     )
-    excel_in = ex2.file_uploader("Nhập công việc từ Excel", type=["xlsx", "xls"], key=f"task_excel_{pid}")
-    if excel_in is not None and ex2.button("Nhập Excel", key=f"task_excel_btn_{pid}", width="stretch", disabled=not _can_update()):
-        try:
-            xdf = pd.read_excel(excel_in)
-            aliases = {
-                "WBS": "wbs", "Công việc": "name", "Name": "name", "Bắt đầu": "start", "Start": "start",
-                "Kết thúc": "end", "Finish": "end", "KH %": "planned", "TT %": "actual", "Phụ trách": "responsible",
-                "Predecessor": "predecessor", "Ghi chú": "note",
-            }
-            normalized = {}
-            for col in xdf.columns:
-                if str(col).strip() in aliases:
-                    normalized[aliases[str(col).strip()]] = col
-            required = {"name", "start", "end"}
-            if not required.issubset(normalized):
-                st.error("Excel cần tối thiểu các cột: Công việc/Name, Bắt đầu/Start, Kết thúc/Finish.")
-            else:
-                _v622_archive_original_upload(
-                    db, pid, _gateway_session_token(), "SCHEDULE_EXCEL", "TASKS",
-                    excel_in.name, excel_in.getvalue(), str(getattr(excel_in, "type", "") or ""),
-                )
-                count = 0
-                for _, xr in xdf.iterrows():
-                    s = pd.to_datetime(xr[normalized["start"]], errors="coerce")
-                    e = pd.to_datetime(xr[normalized["end"]], errors="coerce")
-                    if pd.isna(s) or pd.isna(e) or not str(xr[normalized["name"]]).strip():
-                        continue
-                    ps, pe = s.date(), e.date()
-                    db.add_task(pid, {
-                        "wbs": str(xr[normalized.get("wbs", "")] if "wbs" in normalized else ""),
-                        "name": str(xr[normalized["name"]]),
-                        "responsible": str(xr[normalized.get("responsible", "")] if "responsible" in normalized else ""),
-                        "start_date": iso(ps), "end_date": iso(pe), "duration": max(1, (pe - ps).days + 1),
-                        "planned_progress": int(xr[normalized["planned"]]) if "planned" in normalized and pd.notna(xr[normalized["planned"]]) else planned_progress(iso(ps), iso(pe), status_date),
-                        "actual_progress": int(xr[normalized["actual"]]) if "actual" in normalized and pd.notna(xr[normalized["actual"]]) else 0,
-                        "predecessor": str(xr[normalized.get("predecessor", "")] if "predecessor" in normalized else ""),
-                        "note": str(xr[normalized.get("note", "")] if "note" in normalized else ""),
-                    })
-                    count += 1
-                st.success(f"Đã nhập {count} công việc.")
-                st.rerun()
-        except Exception as exc:
-            st.error(f"Không đọc được Excel: {exc}")
-
     st.markdown("#### Gantt")
     show_gantt = st.toggle("Hiển thị biểu đồ Gantt", value=False, key=f"show_gantt_{pid}", help="Tắt mặc định để trang Tiến độ mở nhanh hơn; Plotly chỉ tải khi cần.")
     if show_gantt:

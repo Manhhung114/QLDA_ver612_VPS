@@ -285,6 +285,11 @@ class NativeExcelImportAdapter:
             "verification_status": str(stats.get("verification_status") or "CHƯA ĐỦ"),
             "verified_postgresql": bool(stats.get("verified_postgresql")),
             "source_row_count": int(stats.get("source_row_count") or 0),
+            "header_row": int(result.get("header_row") or 1),
+            "dated_count": int(result.get("dated_count") or 0),
+            "undated_count": int(result.get("undated_count") or 0),
+            "duration_inclusive_mismatch_count": int(result.get("duration_inclusive_mismatch_count") or 0),
+            "summary_conflict_count": len(result.get("summary_date_conflicts") or []),
             "skipped_rows": int(stats.get("skipped_rows") or 0), "batch_id": str(stats.get("batch_id") or ""),
             "source_sha256": str(result.get("source_sha256") or ""),
         }

@@ -17,7 +17,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          python -m qlda.application.legal_sources \
+          python -m qlda.infrastructure.legal_catalog_cli \
             --seed data/legal/official_catalog.json \
             --online --output data/legal/official_catalog.json
       - name: Commit only changed source metadata

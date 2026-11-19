@@ -12,7 +12,8 @@
 
 ## Các file
 
-- `src/qlda/application/legal_sources.py` – kiểm tra nguồn, phân nhóm, chống trùng, bộ quét số hiệu/nhóm và xuất JSON.
+- `src/qlda/application/legal_sources.py` – kiểm tra nguồn, phân nhóm, chống trùng, bộ quét số hiệu/nhóm và xuất JSON (nhận bộ tìm kiếm thông qua dependency injection).
+- `src/qlda/infrastructure/legal_catalog_cli.py` – nối adapter tìm kiếm pháp lý legacy vào CLI trực tuyến, không tạo phụ thuộc ngược của tầng application.
 - `data/legal/official_catalog.json` – danh mục nền đã kiểm tra đường dẫn chính thống, gồm cả hai nhóm.
 - `.github/workflows/refresh-official-legal.yml` – **chạy thủ công** khi cần cập nhật (Actions → Run workflow); không chạy ngầm trên VPS.
 - `tests/test_legal_official_catalog.py` – regression chống URL giả, tiêu chuẩn dự thảo, trùng số hiệu và kiểm tra cập nhật hai nhóm.
@@ -21,7 +22,7 @@
 
 ```bash
 PYTHONPATH=src python -m pytest tests/test_legal_official_catalog.py -q
-PYTHONPATH=src python -m qlda.application.legal_sources \
+PYTHONPATH=src python -m qlda.infrastructure.legal_catalog_cli \
   --seed data/legal/official_catalog.json --online \
   --output data/legal/official_catalog.json
 ```

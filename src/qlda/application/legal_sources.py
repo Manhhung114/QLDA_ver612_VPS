@@ -134,7 +134,12 @@ def collect_live(standards_search: Callable[[str], Iterable[dict[str, Any]]],
     return results
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    standards_search: Callable[[str], Iterable[dict[str, Any]]] | None = None,
+    laws_search: Callable[[str], Iterable[dict[str, Any]]] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(description="Official catalog metadata; no full-text TCVN distribution")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=Path, help="Last curated catalog to preserve")
@@ -146,9 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         initial = [(r, r.get("linhVuc", "")) for r in source.get("vanBan", [])]
     fresh = []
     if args.online:
-        from qlda.runtime_core import legal_documents as ld
-        fresh = collect_live(lambda q: ld.search_vsqi(q, limit=18),
-                             lambda q: ld.search_online_sites(q, domains=["vbpl.vn", "congbao.chinhphu.vn", "bxd.gov.vn", "moc.gov.vn"], limit=18))
+        if standards_search is None or laws_search is None:
+            parser.error(
+                "Online search requires injected search providers. "
+                "Run: python -m qlda.infrastructure.legal_catalog_cli --online ..."
+            )
+        fresh = collect_live(standards_search, laws_search)
     catalog = reconcile([*initial, *fresh], reviewed_at=(json.loads(args.seed.read_text(encoding="utf-8")).get("reviewedAt", "") if args.seed and args.seed.is_file() else ""))
     if not catalog["vanBan"]:
         raise SystemExit("Không có bản ghi nguồn chính thống, giữ nguyên bản đã lưu.")
