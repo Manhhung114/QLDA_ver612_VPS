@@ -13,7 +13,7 @@ from qlda.application.legal_sources import main as build_catalog
 
 def _standards_search(query: str) -> list[dict[str, Any]]:
     from qlda.runtime_core import legal_documents
-    return list(legal_documents.search_vsqi(query, limit=18))
+    return list(legal_documents.search_vsqi(query, limit=18) or [])
 
 
 def _laws_search(query: str) -> list[dict[str, Any]]:
@@ -23,7 +23,7 @@ def _laws_search(query: str) -> list[dict[str, Any]]:
             "vbpl.vn", "congbao.chinhphu.vn",
             "bxd.gov.vn", "moc.gov.vn",
         ], limit=18,
-    ))
+    ) or [])
 
 
 def main(argv: list[str] | None = None) -> int:
