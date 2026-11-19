@@ -51,8 +51,15 @@ def save_schedule_result_batched(
     progress: ProgressFn | None = None,
     cancelled: CancelFn | None = None,
     batch_size: int | None = None,
+    replace_all: bool = False,
+    expected_existing_rows: int | None = None,
 ) -> dict[str, Any]:
-    """Replace only prior background-Excel tasks and verify the new batch."""
+    """Atomically import Excel; optionally replace the whole active schedule.
+
+    When replace_all is requested, the old Excel, MPP, manual and legacy Excel
+    tasks are deleted inside the SAME transaction as the new Excel insert.
+    Rollback restores the old schedule if any row fails verification.
+    """
     from qlda.runtime_core.project_store import calc_progress_status
 
     pid = int(project_id)
@@ -90,10 +97,27 @@ def save_schedule_result_batched(
     with db.connect() as connection, _atomic(connection):
         if cancelled and cancelled():
             raise InterruptedError("Job tiến độ đã được yêu cầu hủy trước khi ghi database.")
-        connection.execute(
-            "DELETE FROM tasks WHERE project_id=? AND source_type LIKE ?",
-            (pid, SOURCE_PREFIX + "%"),
-        )
+        if replace_all:
+            if expected_existing_rows is None:
+                raise ValueError("Thiếu số công việc cũ đã xác nhận trước khi thay thế toàn bộ.")
+            current = _scalar_int(connection.execute(
+                "SELECT COUNT(*) AS row_count FROM tasks WHERE project_id=?", (pid,),
+            ).fetchone())
+            if current != int(expected_existing_rows):
+                raise ValueError(
+                    f"Bảng tiến độ đã thay đổi ({expected_existing_rows} → {current}). "
+                    "Hãy xem trước và xác nhận lại."
+                )
+            connection.execute("DELETE FROM tasks WHERE project_id=?", (pid,))
+            # Clear metadata for the MPP source being replaced by the Excel plan.
+            connection.execute(
+                "UPDATE projects SET source_mpp_path='',last_sync='' WHERE id=?", (pid,),
+            )
+        else:
+            connection.execute(
+                "DELETE FROM tasks WHERE project_id=? AND source_type LIKE ?",
+                (pid, SOURCE_PREFIX + "%"),
+            )
         for start_index in range(0, expected_rows, chunk_size):
             if cancelled and cancelled():
                 raise InterruptedError("Job tiến độ đã được yêu cầu hủy; transaction đã rollback.")
@@ -145,7 +169,14 @@ def save_schedule_result_batched(
             ).fetchone()
         )
         failed_rows = abs(expected_rows - written_rows)
-        complete = inserted_rows == expected_rows == written_rows and prepared_rows == scanned_rows
+        total_rows = _scalar_int(connection.execute(
+            "SELECT COUNT(*) AS row_count FROM tasks WHERE project_id=?", (pid,),
+        ).fetchone())
+        complete = (
+            inserted_rows == expected_rows == written_rows
+            and prepared_rows == scanned_rows
+            and (not replace_all or total_rows == expected_rows)
+        )
         verification_status = VERIFY_COMPLETE if complete else VERIFY_INCOMPLETE
         if progress:
             progress(
@@ -170,6 +201,8 @@ def save_schedule_result_batched(
         "prepared_rows": prepared_rows,
         "inserted_rows": inserted_rows,
         "written_rows": written_rows,
+        "total_rows": total_rows,
+        "replace_all": bool(replace_all),
         "failed_rows": failed_rows,
         "verification_status": verification_status,
         "verified_postgresql": verification_status == VERIFY_COMPLETE,
