@@ -44,6 +44,12 @@ class FakeStreamlit:
     def file_uploader(self, *args, **kwargs):
         return self.uploaded
 
+    def radio(self, label, options, *, key, **kwargs):
+        if key not in self.session_state:
+            self.session_state[key] = options[0]
+        self.session_state.instantiated.add(key)
+        return self.session_state[key]
+
     def checkbox(self, label, *, key, **kwargs):
         if key not in self.session_state:
             self.session_state[key] = False
