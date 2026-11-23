@@ -175,6 +175,25 @@ def render_schedule_import(
             f"Sheet: {info.get('sheet_name', '')} · Dòng tiêu đề: {info.get('header_row', 1)}. "
             "Giữ ngày và Số ngày gốc, không dịch lịch."
         )
+        profile = info.get("template_recognition") or {}
+        if profile:
+            with st.expander("🔎 Nhận diện mẫu Excel và vị trí cột", expanded=False):
+                st.caption(
+                    f"Kết quả: {profile.get('status', 'chưa xác định')} · "
+                    f"Sheet: {profile.get('sheet', '')} · "
+                    f"Tiêu đề: dòng {profile.get('header_row', 0)}."
+                )
+                st.dataframe(
+                    pd.DataFrame([
+                        {"Trường QLDA": field, "Cột Excel (từ 1)": int(index) + 1}
+                        for field, index in (profile.get("columns") or {}).items()
+                    ]),
+                    hide_index=True, use_container_width=True,
+                )
+                st.caption(
+                    "Bộ nhận diện không thay đổi số liệu. Kiểm tra bảng xem trước và "
+                    "xác nhận trước khi nhập vào cơ sở dữ liệu."
+                )
         for message in info.get("warnings") or []:
             st.warning(message)
         if info.get("skipped_details"):

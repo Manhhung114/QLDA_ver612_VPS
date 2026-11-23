@@ -8,6 +8,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from qlda.application.excel.template_recognition import recognize_sheet
+
 
 PATCH_VERSION = "V6.24.5 SCHEDULE EXCEL BACKGROUND PIPELINE"
 
@@ -200,14 +202,35 @@ def parse_schedule_excel_path(
         sheet = None
         columns: dict[str, int] = {}
         header_row = 0
+        template_profile: dict[str, Any] = {}
         for candidate in workbook.worksheets:
             if getattr(candidate, "sheet_state", "visible") != "visible":
                 continue
-            # Many construction schedules have 5-15 metadata/title rows.
-            for row_no, row in enumerate(candidate.iter_rows(min_row=1, max_row=min(80, candidate.max_row or 80), values_only=True), start=1):
+            # Bounded read: multi-row headers and reordered columns are detected
+            # without altering the existing schedule date/persistence rules.
+            header_sample = list(candidate.iter_rows(
+                min_row=1, max_row=min(80, candidate.max_row or 80),
+                min_col=1, max_col=min(40, candidate.max_column or 40),
+                values_only=True,
+            ))
+            profile = recognize_sheet(candidate.title, header_sample, preferred_role="SCHEDULE_EXCEL")
+            if profile["status"] == "recognized":
+                sheet = candidate
+                columns = dict(profile["columns"])
+                header_row = int(profile["header_row"])
+                template_profile = profile
+                break
+            # Preserve support for older contractor templates already in use.
+            for row_no, row in enumerate(header_sample, start=1):
                 fields = _header_columns(tuple(row))
                 if {"name", "start", "end"}.issubset(fields):
                     sheet, columns, header_row = candidate, fields, row_no
+                    template_profile = {
+                        "sheet": str(candidate.title), "role": "SCHEDULE_EXCEL",
+                        "status": "recognized", "review_required": False,
+                        "header_row": header_row, "columns": columns,
+                        "engine": "legacy-schedule-aliases",
+                    }
                     break
             if sheet is not None:
                 break
@@ -306,6 +329,7 @@ def parse_schedule_excel_path(
         "dated_count": len(tasks) - undated,
         "duration_inclusive_mismatch_count": duration_differences,
         "summary_date_conflicts": conflicts, "warnings": warnings,
+        "template_recognition": template_profile,
     }
     if progress:
         progress(72, f"Đã quét {len(tasks):,} hạng mục · {undated:,} chưa có ngày", sheet_name)

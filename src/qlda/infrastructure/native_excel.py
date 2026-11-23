@@ -11,6 +11,7 @@ persistence behavior (row verification, rollback, revisions and idempotency).
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from qlda.application.excel.template_recognition import analyze_workbook_path, recognize_sheet
 from qlda.import_engines import load_engine
 from qlda.infrastructure.database import make_database
 
@@ -105,9 +106,12 @@ class NativeExcelImportAdapter:
                 nonempty_rows = 0
                 nonempty_cells = 0
                 sample_rows: list[list[str]] = []
+                header_rows: list[tuple[Any, ...]] = []
                 for row_no, values in enumerate(sheet.iter_rows(values_only=True), start=1):
                     if cancelled and row_no % 500 == 0 and cancelled():
                         raise InterruptedError("Job đã được yêu cầu hủy.")
+                    if row_no <= 80:
+                        header_rows.append(tuple(values[:40]))
                     used = [value for value in values if value not in (None, "")]
                     if used:
                         nonempty_rows += 1
@@ -121,6 +125,8 @@ class NativeExcelImportAdapter:
                     "nonempty_rows": nonempty_rows,
                     "nonempty_cells": nonempty_cells,
                     "sample_rows": sample_rows,
+                    "template_recognition": recognize_sheet(sheet.title, header_rows)
+                    if sheet.sheet_state == "visible" else None,
                 })
                 if progress:
                     progress(10 + int(index * 80 / total), "Đang quét cấu trúc workbook", str(sheet.title))
@@ -131,6 +137,10 @@ class NativeExcelImportAdapter:
                 "file_name": source.name,
                 "file_size": int(source.stat().st_size),
                 "sheet_count": len(result_sheets),
+                "recognized_sheets": sum(
+                    1 for x in result_sheets
+                    if (x.get("template_recognition") or {}).get("status") == "recognized"
+                ),
                 "sheets": result_sheets,
             }
         finally:
@@ -307,12 +317,27 @@ class NativeExcelImportAdapter:
         filename = str(file_row.get("name") or job.get("file_name") or "").strip()
         file_size = int(file_row.get("size") or 0)
         options = dict(job.get("options") or {})
+        # Advisory preflight only. Never rewrite financial values, silently switch
+        # business pipelines, or suppress each importer's existing validations.
+        if job_type not in {"BOQ", "IPC", "VO", "SCHEDULE_EXCEL"}:
+            raise RuntimeError(f"Pipeline {job_type} chưa được bật trong V7.5.")
+        try:
+            recognition = analyze_workbook_path(path, preferred_role=job_type, cancelled=cancelled)
+        except InterruptedError:
+            raise
+        except Exception as exc:
+            recognition = {
+                "engine": "universal-excel-recognition-v1",
+                "review_required": True,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
         if job_type == "BOQ":
-            return self._process_boq(project_id, path, filename or "BOQ.xlsx", file_size, options, progress, cancelled)
-        if job_type == "IPC":
-            return self._process_ipc(project_id, path, filename or "IPC.xlsx", file_size, progress, cancelled)
-        if job_type == "VO":
-            return self._process_vo(project_id, path, filename or "VO.xlsx", file_size, progress, cancelled)
-        if job_type == "SCHEDULE_EXCEL":
-            return self._process_schedule(project_id, path, filename or "TienDo.xlsx", file_size, options, progress, cancelled)
-        raise RuntimeError(f"Pipeline {job_type} chưa được bật trong V7.5.")
+            result = self._process_boq(project_id, path, filename or "BOQ.xlsx", file_size, options, progress, cancelled)
+        elif job_type == "IPC":
+            result = self._process_ipc(project_id, path, filename or "IPC.xlsx", file_size, progress, cancelled)
+        elif job_type == "VO":
+            result = self._process_vo(project_id, path, filename or "VO.xlsx", file_size, progress, cancelled)
+        else:
+            result = self._process_schedule(project_id, path, filename or "TienDo.xlsx", file_size, options, progress, cancelled)
+        result["template_recognition"] = recognition
+        return result
