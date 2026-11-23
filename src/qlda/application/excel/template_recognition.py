@@ -23,9 +23,9 @@ ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     "BOQ": {
         "description": ("noi dung cong viec", "noi dung cong tac", "ten cong tac", "ten hang muc",
                         "hang muc", "dien giai", "mo ta cong viec", "description", "boq item",
-                        "work item", "ten vat tu", "ten thiet bi"),
+                        "work item", "ten vat tu", "ten thiet bi", "cong tac"),
         "quantity": ("khoi luong", "khoi luong hop dong", "so luong", "kl", "quantity", "qty",
-                     "kl thi cong"),
+                     "kl thi cong", "kl thuc hien", "khoi luong thuc hien"),
         "unit": ("dvt", "don vi tinh", "don vi", "unit"),
         "unit_price": ("don gia", "don gia hop dong", "gia don vi", "rate", "unit price"),
         "amount": ("thanh tien", "gia tri du toan", "thanh tien du toan", "gia tri hop dong",
@@ -154,7 +154,7 @@ def _complete(role: str, fields: set[str]) -> bool:
             bool(fields & {"variation_quantity", "increase_quantity", "decrease_quantity"})
             or {"contract_quantity", "actual_quantity"} <= fields
         ) and bool(fields & {"amount", "unit_price"})
-    return (bool(fields & {"current_amount", "cumulative_amount", "contract_amount"})
+    return (bool(fields & {"current_amount", "cumulative_amount"})
             and len(fields & {"current_amount", "cumulative_amount", "contract_amount", "amount",
                               "quantity", "description"}) >= 2)
 
@@ -227,6 +227,13 @@ def recognize_sheet(
             "confidence": 0.0, "fingerprint": "", "candidates": [],
         }
     first = scores[0]
+    # One matching label is not enough to infer a business worksheet.
+    if len(first["columns"]) < 2:
+        return {
+            "sheet": str(sheet_name), "role": None, "status": "unsupported",
+            "review_required": True, "header_row": 0, "columns": {}, "missing": [],
+            "confidence": 0.0, "fingerprint": "", "candidates": [],
+        }
     second = scores[1] if len(scores) > 1 else None
     # Without a preferred role, weak distinctions must be manually reviewed.
     ambiguous = bool(second and second["complete"] == first["complete"]
