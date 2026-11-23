@@ -47,6 +47,21 @@ class UniversalExcelRecognitionTests(unittest.TestCase):
         self.assertEqual(profile["columns"]["unit_price"], 0)
         self.assertEqual(profile["columns"]["amount"], 3)
 
+    def test_boq_changed_contract_template_aliases(self):
+        profile = recognize_sheet(
+            "Khối lượng hợp đồng",
+            [
+                ["Diễn giải", "KL thực hiện", "Giá đơn vị", "Giá trị"],
+                ["Lắp ống PVC", 100, 50_000, 5_000_000],
+            ],
+        )
+        self.assertEqual(profile["status"], "recognized")
+        self.assertEqual(profile["role"], "BOQ")
+        self.assertEqual(profile["columns"]["quantity"], 1)
+        self.assertEqual(profile["columns"]["unit_price"], 2)
+        # Generic 'Giá trị' remains unmapped until its semantics are verified.
+        self.assertNotIn("amount", profile["columns"])
+
     def test_payment_summary_can_be_recognized_without_description(self):
         profile = recognize_sheet(
             "Bảng DNTT kỳ 1",
