@@ -29,6 +29,7 @@ jobs:
       - name: BOQ, IPC, VO and schedule regressions
         run: |
           python -m unittest -v \
+            tests.test_universal_excel_recognition \
             tests.test_boq_persistence \
             tests.test_boq_multisheet \
             tests.test_ipc_claim \
